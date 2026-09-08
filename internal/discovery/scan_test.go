@@ -19,7 +19,7 @@ func TestDetectByMarkerS2_1(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "projects", "api")
 	testutil.Init(t, proj)
-	testutil.Marker(t, proj, "", "", false)
+	testutil.Marker(t, proj, "", "", "", false)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -40,7 +40,7 @@ func TestPruneHiddenAndExcludedS2_2(t *testing.T) {
 	excluded := filepath.Join(root, "api", "node_modules", "dep")
 	for _, dir := range []string{hidden, excluded} {
 		testutil.Init(t, dir)
-		testutil.Marker(t, dir, "", "", false)
+		testutil.Marker(t, dir, "", "", "", false)
 	}
 
 	projects, err := Scan(cfgRoots(root))
@@ -56,7 +56,7 @@ func TestUnlimitedDepthS2_3(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "a", "b", "c", "d", "proj")
 	testutil.Init(t, proj)
-	testutil.Marker(t, proj, "", "", false)
+	testutil.Marker(t, proj, "", "", "", false)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -73,7 +73,7 @@ func TestNestedValidS2_4(t *testing.T) {
 	sub := filepath.Join(mono, "sub")
 	for _, dir := range []string{mono, sub} {
 		testutil.Init(t, dir)
-		testutil.Marker(t, dir, "", "", false)
+		testutil.Marker(t, dir, "", "", "", false)
 	}
 
 	projects, err := Scan(cfgRoots(root))
@@ -89,12 +89,12 @@ func TestWorktreeS3_2(t *testing.T) {
 	root := t.TempDir()
 	main := filepath.Join(root, "main-repo")
 	testutil.Init(t, main)
-	testutil.Marker(t, main, "", "", false)
+	testutil.Marker(t, main, "", "", "", false)
 	testutil.CommitFiles(t, main, map[string]string{"a.txt": "a"}, "init")
 
 	wt := filepath.Join(root, "wt-proj")
 	testutil.MakeWorktree(t, main, wt, "wt-branch")
-	testutil.Marker(t, wt, "", "", false)
+	testutil.Marker(t, wt, "", "", "", false)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -123,7 +123,7 @@ func TestMarkerWithoutRepoS3_3(t *testing.T) {
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	testutil.Marker(t, proj, "", "", false)
+	testutil.Marker(t, proj, "", "", "", false)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -142,9 +142,9 @@ func TestMarkerMetadataS4(t *testing.T) {
 	for _, dir := range []string{withMeta, empty, bad} {
 		testutil.Init(t, dir)
 	}
-	testutil.Marker(t, withMeta, "api", "vsocial", false)
-	testutil.Marker(t, empty, "", "", false)
-	testutil.Marker(t, bad, "", "", true)
+	testutil.Marker(t, withMeta, "api", "vsocial", "", false)
+	testutil.Marker(t, empty, "", "", "", false)
+	testutil.Marker(t, bad, "", "", "", true)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -157,14 +157,49 @@ func TestMarkerMetadataS4(t *testing.T) {
 	for _, p := range projects {
 		byPath[p.Name] = p
 	}
-	if p := byPath["api"]; p.Group != "vsocial" {
-		t.Errorf("S4.1: name/group = %q/%q", p.Name, p.Group)
+	if p := byPath["api"]; p.PrimaryGroup != "vsocial" {
+		t.Errorf("S4.1: name/primary = %q/%q", p.Name, p.PrimaryGroup)
 	}
-	if p := byPath["emptymarker"]; p.Group != "" {
-		t.Errorf("S4.2: group = %q, want vacío", p.Group)
+	if p := byPath["emptymarker"]; p.PrimaryGroup != "" {
+		t.Errorf("S4.2: primary = %q, want vacío", p.PrimaryGroup)
 	}
 	if p := byPath["badmarker"]; p.MarkerErr == "" {
 		t.Error("S4.3: marcador malformado sin error visible")
+	}
+}
+
+// S18.1/S18.2/S18.3: primary_group/secondary_group del marcador; la clave
+// vieja group ya no agrupa; secondary sin primary se ignora.
+func TestMarkerGroupsS18(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	oldKey := filepath.Join(root, "oldkey")
+	secOnly := filepath.Join(root, "seconly")
+	for _, dir := range []string{nested, oldKey, secOnly} {
+		testutil.Init(t, dir)
+	}
+	testutil.Marker(t, nested, "api", "vsocial", "backend", false)
+	if err := os.WriteFile(filepath.Join(oldKey, ".gitdash.toml"), []byte("group = \"backend\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Marker(t, secOnly, "solo", "", "infra", false)
+
+	projects, err := Scan(cfgRoots(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]Project{}
+	for _, p := range projects {
+		byPath[p.Name] = p
+	}
+	if p := byPath["api"]; p.PrimaryGroup != "vsocial" || p.SecondaryGroup != "backend" {
+		t.Errorf("S18.1: primary/secondary = %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+	}
+	if p := byPath["oldkey"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
+		t.Errorf("S18.2: group viejo agrupó: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+	}
+	if p := byPath["solo"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
+		t.Errorf("S18.3: secondary sin primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 }
 
@@ -172,7 +207,7 @@ func TestIlegibleRootNoAborta(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "ok")
 	testutil.Init(t, proj)
-	testutil.Marker(t, proj, "", "", false)
+	testutil.Marker(t, proj, "", "", "", false)
 
 	_, err := Scan(cfgRoots(root, filepath.Join(root, "fantasma")))
 	if err == nil {

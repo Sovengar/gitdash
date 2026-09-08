@@ -4,8 +4,10 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -54,10 +56,16 @@ type actionMsg struct {
 	err                string
 }
 
-// editorDoneMsg marca la vuelta del editor (S9.4).
-type editorDoneMsg struct {
+// execDoneMsg marca la vuelta de un proceso con handoff de terminal:
+// editor (S9.4), lazygit (tecla g) o shell interactiva (tecla !, vacío).
+type execDoneMsg struct {
 	path string
 	err  error
+}
+
+// cmdResultMsg entrega la salida capturada de un comando `!`.
+type cmdResultMsg struct {
+	path, command, output, exit string
 }
 
 // notifyMsg fija una notificación transitoria en la barra.
@@ -84,6 +92,7 @@ type Model struct {
 	search       string
 	searchActive bool
 	searchInput  textinput.Model
+	collapsed    map[string]bool // 0002 R16: grupos plegados (solo sesión)
 
 	scanning  bool
 	scanNote  string
@@ -103,7 +112,24 @@ type Model struct {
 
 	detailOpen    bool
 	width, height int
+
+	// modo comando del detalle (tecla !): input de shell ejecutada en el
+	// repo con $SHELL -c; Enter con input vacío abre una shell interactiva.
+	cmdOpen  bool
+	cmdInput textinput.Model
+
+	// lastCmd guarda la salida del último comando `!` por repo (S-! :
+	// capturado, queda visible hasta el próximo comando o cierre).
+	lastCmd map[string]cmdResult
 }
+
+// cmdResult es el resultado capturado de un comando `!`.
+type cmdResult struct {
+	command, output, exit string
+}
+
+// searchPlaceholder es el hint del filter input (/).
+const searchPlaceholder = "name/group…"
 
 // New construye el modelo con la config dada y pinta el cache si existe
 // (S11.1: pintura instantánea; el rescan corre vía Init).
@@ -118,11 +144,20 @@ func New(cfg config.Config) Model {
 		fetchStates: map[string]string{},
 		running:     map[string]string{},
 		lastAction:  map[string]actionResult{},
+		lastCmd:     map[string]cmdResult{},
+		collapsed:   map[string]bool{},
 	}
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
-	in.Placeholder = "name/group…"
-	in.Prompt = "filter: "
+	in.Placeholder = searchPlaceholder
+	in.Prompt = "/" // el prompt pinta [/aquí][cursor], no "filter: " (S7.2)
+
+	ci := textinput.New()
+	// El primer rune del placeholder queda bajo el cursor (bubbles v2
+	// placeholderView): espacio inicial para que el cursor no tape una letra.
+	ci.Placeholder = " npm test · git status… (enter vacío = shell interactiva)"
+	ci.Prompt = "! "
+	m.cmdInput = ci
 	m.searchInput = in
 	m.scanning = true // el scan arranca en Init (R6: spinner visible desde ya)
 
@@ -188,7 +223,7 @@ func (m *Model) startScanCmd() tea.Cmd {
 		if ctx.Err() != nil {
 			return
 		}
-		gitstatus.StreamPool(ctx, projects, 8, func(path string, snap gitstatus.Snapshot) {
+		gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, 8, func(path string, snap gitstatus.Snapshot) {
 			sendEvent(ctx, events, statusMsg{path: path, snap: snap})
 		})
 		if ctx.Err() != nil {
@@ -250,7 +285,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 				}
 				fctx, fcancel := context.WithTimeout(ctx, timeout)
 				defer fcancel()
-				if err := gitstatus.Fetch(fctx, p); err != nil {
+				if err := gitstatus.Fetch(fctx, p, m.cfg.CmdArgs("fetch")...); err != nil {
 					mu.Lock()
 					failed++
 					mu.Unlock()
@@ -261,7 +296,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 				ok++
 				mu.Unlock()
 				sendEvent(ctx, events, fetchStateMsg{path: p, state: "ok"})
-				sendEvent(ctx, events, statusMsg{path: p, snap: gitstatus.Collect(ctx, p)})
+				sendEvent(ctx, events, statusMsg{path: p, snap: gitstatus.Collect(ctx, p, m.syncOf(p))})
 			}(path)
 		}
 		wg.Wait()
@@ -285,9 +320,9 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		var out string
 		var err error
 		if kind == "pull" {
-			out, err = gitstatus.Pull(ctx, path)
+			out, err = gitstatus.Pull(ctx, path, m.cfg.CmdArgs("pull")...)
 		} else {
-			out, err = gitstatus.Push(ctx, path)
+			out, err = gitstatus.Push(ctx, path, m.cfg.CmdArgs("push")...)
 		}
 		errStr := ""
 		if err != nil {
@@ -295,7 +330,7 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		}
 		sendEvent(appCtx, events, actionMsg{path: path, kind: kind, output: out, err: errStr})
 		if err == nil {
-			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path)})
+			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
 		}
 	}()
 	return nil
@@ -310,7 +345,7 @@ func (m *Model) recollectCmd(path string) tea.Cmd {
 	appCtx := m.ctx
 	events := m.events
 	go func() {
-		sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path)})
+		sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
 	}()
 	return nil
 }
@@ -325,7 +360,118 @@ func (m *Model) openEditorCmd(path string) tea.Cmd {
 	cmd := exec.Command(m.cfg.Editor)
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return editorDoneMsg{path: path, err: err}
+		return execDoneMsg{path: path, err: err}
+	})
+}
+
+// openLazygitCmd abre lazygit en el repo con handoff de terminal (tecla g).
+// Requiere intérprete instalado; al salir re-colecciona el estado (lazygit
+// puede hacer pull/commit/push).
+func (m *Model) openLazygitCmd(path string) tea.Cmd {
+	if _, err := exec.LookPath("lazygit"); err != nil {
+		return m.notifyCmd("lazygit not installed")
+	}
+	if prev, busy := m.running[path]; busy {
+		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	m.running[path] = "lazygit"
+	cmd := exec.Command("lazygit")
+	cmd.Dir = path
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: path, err: err}
+	})
+}
+
+// openUpdateCmd abre el binario configurado en commands.update en el
+// repo con handoff de terminal (tecla u). Al salir re-colecciona el
+// estado.
+func (m *Model) openUpdateCmd(path string) tea.Cmd {
+	bin := m.cfg.Commands["update"]
+	if bin == "" {
+		return m.notifyCmd("commands.update not configured")
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return m.notifyCmd(fmt.Sprintf("%s not installed", bin))
+	}
+	if prev, busy := m.running[path]; busy {
+		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	m.running[path] = "update"
+	cmd := exec.Command(bin)
+	cmd.Dir = path
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: path, err: err}
+	})
+}
+
+// commandTimeout es el límite de un comando `!` capturado.
+const commandTimeout = 5 * time.Minute
+
+// runShellCmd ejecuta el comando en el repo con el shell dado, capturando
+// stdout+stderr juntos; devuelve la salida y el código de salida.
+func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	var out bytes.Buffer
+	cmd := exec.Command(shell, "-c", command)
+	cmd.Dir = dir
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		code := 1
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		}
+		return out.String(), code
+	}
+	return out.String(), 0
+}
+
+// openCmdCmd lanza el comando tipeado con `!` en el directorio del repo con
+// $SHELL -c y captura la salida: queda visible en el detail hasta el
+// próximo comando (S-!: nvim-style, no handoff de terminal, así no se
+// pierde de vista). Aliases y config del shell quedan cargados; las
+// abreviaciones de fish no aplican porque no hay sesión de edición.
+func (m *Model) openCmdCmd(path, command string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	m.running[path] = "cmd"
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	appCtx := m.ctx
+	events := m.events
+	go func() {
+		out, code := runShellCmd(appCtx, path, shell, command)
+		sendEvent(appCtx, events, cmdResultMsg{
+			path: path, command: command, output: out,
+			exit: fmt.Sprintf("%d", code),
+		})
+	}()
+	return nil
+}
+
+// openShellCmd abre una shell interactiva ($SHELL) en el repo con handoff
+// de terminal: la sesión carga config.fish/.bashrc, así que abreviaciones,
+// aliases y aliases de fish funcionan (tecla ! con input vacío).
+func (m *Model) openShellCmd(path string) tea.Cmd {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	if _, err := exec.LookPath(shell); err != nil {
+		return m.notifyCmd("shell not found")
+	}
+	if prev, busy := m.running[path]; busy {
+		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	m.running[path] = "shell"
+	cmd := exec.Command(shell)
+	cmd.Dir = path
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: path, err: err}
 	})
 }
 
@@ -339,11 +485,27 @@ func (m *Model) nameOf(path string) string {
 	return path
 }
 
-// selected devuelve la fila bajo el cursor, si la hay.
+// syncOf resuelve la sync branch efectiva de un path (R14): override del
+// marcador > global. Proyectos no descubiertos → global.
+func (m *Model) syncOf(path string) string {
+	for _, p := range m.projects {
+		if p.Path == path {
+			return gitstatus.SyncFor(p, m.cfg.SyncBranch)
+		}
+	}
+	return m.cfg.SyncBranch
+}
+
+// selected devuelve la fila de repo bajo el cursor, si la hay. Los
+// headers de grupo (0002 R16) no seleccionan repo: ok=false.
 func (m *Model) selected() (row, bool) {
-	rows := m.rows()
-	if len(rows) == 0 || m.cursor >= len(rows) {
+	entries := m.entries()
+	if len(entries) == 0 || m.cursor >= len(entries) {
 		return row{}, false
 	}
-	return rows[m.cursor], true
+	e := entries[m.cursor]
+	if e.kind != kindRepo {
+		return row{}, false
+	}
+	return e.r, true
 }

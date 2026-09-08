@@ -121,7 +121,7 @@ func TestParseLog(t *testing.T) {
 
 func TestCollectCleanS5_1(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
-	st := Collect(t.Context(), dir)
+	st := Collect(t.Context(), dir, "")
 	if st.Err != "" {
 		t.Fatalf("S5.6: err = %q", st.Err)
 	}
@@ -136,7 +136,7 @@ func TestCollectDirtyS5_3(t *testing.T) {
 	testutil.WriteUncommitted(t, dir, map[string]string{"base.txt": "changed"})
 	testutil.WriteUntracked(t, dir, map[string]string{"un1.txt": "x", "un2.txt": "y"})
 
-	st := Collect(t.Context(), dir)
+	st := Collect(t.Context(), dir, "")
 	if st.Status.TrackedChanges != 1 || st.Status.Untracked != 2 {
 		t.Errorf("S5.3: tracked=%d untracked=%d", st.Status.TrackedChanges, st.Status.Untracked)
 	}
@@ -150,7 +150,7 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 	testutil.CommitFiles(t, ahead, map[string]string{"extra.txt": "x"}, "local 1")
 	testutil.CommitFiles(t, ahead, map[string]string{"extra2.txt": "x"}, "local 2")
 
-	st := Collect(t.Context(), ahead)
+	st := Collect(t.Context(), ahead, "")
 	if st.Status.Ahead != 2 || st.Status.Derive() != StateAhead {
 		t.Errorf("S5.2 ahead: %+v", snapSummary(st))
 	}
@@ -158,7 +158,7 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 	behind, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 3, "behind-")
 	testutil.FetchLocal(t, behind) // sin fetch el repo no ve el behind
-	st = Collect(t.Context(), behind)
+	st = Collect(t.Context(), behind, "")
 	if st.Status.Behind != 3 || st.Status.Derive() != StateBehind {
 		t.Errorf("S5.2 behind: %+v", snapSummary(st))
 	}
@@ -167,7 +167,7 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 	testutil.CommitFiles(t, diverged, map[string]string{"l.txt": "l"}, "local")
 	testutil.PushUpstreamCommits(t, origin2, 2, "div-")
 	testutil.FetchLocal(t, diverged)
-	st = Collect(t.Context(), diverged)
+	st = Collect(t.Context(), diverged, "")
 	if st.Status.Ahead != 1 || st.Status.Behind != 2 || st.Status.Derive() != StateDiverged {
 		t.Errorf("S5.2 diverged: %+v", snapSummary(st))
 	}
@@ -175,7 +175,7 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 
 func TestCollectNoUpstreamS5_4(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
-	st := Collect(t.Context(), dir)
+	st := Collect(t.Context(), dir, "")
 	if st.Status.HasUpstream || st.Status.Derive() != StateNoUpstream {
 		t.Errorf("S5.4: %+v", snapSummary(st))
 	}
@@ -184,7 +184,7 @@ func TestCollectNoUpstreamS5_4(t *testing.T) {
 func TestCollectDetachedS5_5(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	testutil.Detach(t, dir)
-	st := Collect(t.Context(), dir)
+	st := Collect(t.Context(), dir, "")
 	if !st.Status.Detached {
 		t.Fatalf("S5.5: %+v", st.Status)
 	}
@@ -197,7 +197,7 @@ func TestCollectCorruptS5_6(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	// .git corrupto: el binario git falla y el error viaja en el Snapshot.
 	testutil.BreakGit(t, dir)
-	st := Collect(t.Context(), dir)
+	st := Collect(t.Context(), dir, "")
 	if st.Err == "" {
 		t.Fatal("S5.6: corrupto sin error")
 	}
@@ -216,7 +216,7 @@ func TestStreamPool(t *testing.T) {
 		{Path: b, HasRepo: true},
 	}
 	got := map[string]State{}
-	StreamPool(t.Context(), projects, 2, func(path string, st Snapshot) {
+	StreamPool(t.Context(), projects, "", 2, func(path string, st Snapshot) {
 		got[path] = st.State(true)
 	})
 	if len(got) != 2 {

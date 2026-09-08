@@ -230,3 +230,40 @@ func ParseLog(out string) []Commit {
 	}
 	return commits
 }
+
+// ParseWorktrees interpreta `git worktree list --porcelain` y devuelve los
+// worktrees aparte del repo principal (mainPath) (0002 R15). Bloques
+// separados por línea en blanco; claves: worktree, HEAD, branch/bare/
+// detached. Líneas desconocidas/prunable se ignoran (tolerancia git futuro).
+func ParseWorktrees(out, mainPath string) []Worktree {
+	var out2 []Worktree
+	var cur Worktree
+	flush := func() {
+		if cur.Path != "" && strings.TrimSpace(cur.Path) != strings.TrimSpace(mainPath) {
+			out2 = append(out2, cur)
+		}
+		cur = Worktree{}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "worktree "):
+			flush() // los bloques pueden no venir separados por línea vacía
+			cur.Path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "HEAD "):
+			sha := strings.TrimPrefix(line, "HEAD ")
+			if len(sha) >= 7 {
+				sha = sha[:7] // sha corto para UI compacta
+			}
+			cur.Head = sha
+		case strings.HasPrefix(line, "branch "):
+			// refs/heads/feat → feat
+			ref := strings.TrimPrefix(line, "branch ")
+			cur.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		}
+	}
+	flush()
+	return out2
+}

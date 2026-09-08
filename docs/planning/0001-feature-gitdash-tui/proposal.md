@@ -10,7 +10,7 @@ fork: reescribimos el modelo de datos en Go + Bubbletea v2 y lo convertimos en
 TUI con estado.
 
 La innovación clave vs git-statuses: **el descubrimiento no busca `.git`,
-busca un marcador** (`.repo.toml`) — "esto es un proyecto que me importa" — y
+busca un marcador** (`.gitdash.toml`) — "esto es un proyecto que me importa" — y
 de esa carpeta se extrae el repo git. El fetch no es manual: tras cada scan se
 lanza **automáticamente en batches** (concurrencia limitada, con timeout) para
 mantener ahead/behind fresco sin esperas bloqueantes.

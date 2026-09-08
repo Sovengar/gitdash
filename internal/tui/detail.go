@@ -1,10 +1,19 @@
-// Vista de detalle de un repo (spec 0001 R10).
+// Vista de detalle de un repo (spec 0001 R10; 0002 R14/R15).
 package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// asOrDash devuelva el texto o "-" si vacío.
+func asOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
 
 // renderDetail compone el panel de detalle del repo seleccionado con datos
 // vivos del snapshot (S10.1, S10.2).
@@ -13,8 +22,8 @@ func (m *Model) renderDetail(r row) string {
 
 	p := r.project
 	title := p.Name
-	if p.Group != "" {
-		title += "  ·  " + p.Group
+	if g := groupLabel(p); g != "" {
+		title += "  ·  " + g
 	}
 	if p.IsWorktree {
 		title += "  [worktree]"
@@ -35,15 +44,53 @@ func (m *Model) renderDetail(r row) string {
 	if !r.snap.Status.HasUpstream {
 		upstream = "— (no upstream)"
 	}
-	stateText, stateStyle := m.stateCell(r)
-	upDownText, upDownStyle := m.upDownCell(r)
 	b.WriteString(key("branch  ") + branch + "\n")
 	b.WriteString(key("upstream") + " " + upstream + "\n")
-	dirtyLine := stateStyle.Render(stateText)
-	if upDownText != "" {
-		dirtyLine += " " + upDownStyle.Render(upDownText)
+	// 0004 R26/R27: working tree + deriva vs upstream. El detalle SÍ es
+	// verboso: "clean" explícito en vez de celda vacía.
+	wtText, wtStyle := m.wtCell(r)
+	if wtText == "" {
+		wtText, wtStyle = "clean", styleClean
 	}
-	b.WriteString(key("state   ") + dirtyLine + "\n")
+	stateLine := wtStyle.Render(wtText)
+	if upDownText, upDownStyle := m.upDownCell(r); upDownText != "" {
+		stateLine += " " + upDownStyle.Render(upDownText)
+	}
+	b.WriteString(key("state   ") + stateLine + "\n")
+
+	// sync branch vs HEAD (0002 R14; 0004 R23): la rama resuelta siempre
+	// visible, con su desviación o el motivo de la falta.
+	syncLine := "— (sin sync branch)"
+	switch {
+	case r.snap.SyncBranch == "":
+	case !r.snap.SyncKnown:
+		syncLine = r.snap.SyncBranch + " (ref missing)" // S23.4
+	case r.snap.SyncBehind > 0:
+		syncLine = r.snap.SyncBranch + fmt.Sprintf(" (↓%d)", r.snap.SyncBehind)
+	default:
+		syncLine = r.snap.SyncBranch + " (ok)"
+	}
+	b.WriteString(key("sync    ") + syncLine + "\n")
+
+	// worktrees del repo (0002 R15/S15.2): rama, sha y ruta (relativa al
+	// repo cuando sea posible, absoluta en caso contrario).
+	if n := len(r.snap.Worktrees); n > 0 {
+		b.WriteString("\n" + key(fmt.Sprintf("worktrees (%d)", n)) + "\n")
+		maxWTs := max(1, m.height-18)
+		for i, wt := range r.snap.Worktrees {
+			if i >= maxWTs {
+				b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-maxWTs)) + "\n")
+				break
+			}
+			rel, err := filepath.Rel(r.project.Path, wt.Path)
+			if err != nil {
+				rel = wt.Path
+			}
+			b.WriteString("  " + styleDim.Render(pad(wt.Branch, 24)) +
+				styleWarn.Render(pad(asOrDash(wt.Head), 12)) +
+				truncate(rel, max(20, m.width-16)) + "\n")
+		}
+	}
 
 	if p.MarkerErr != "" {
 		b.WriteString("\n" + styleError.Render("marker: "+p.MarkerErr) + "\n")
@@ -86,7 +133,24 @@ func (m *Model) renderDetail(r row) string {
 		}
 	}
 
-	b.WriteString("\n" + styleHint.Render("esc back"))
+	footer := "esc back · g lazygit · ! cmd"
+	if cr, ok := m.lastCmd[p.Path]; ok {
+		verdict := styleClean.Render("exit 0")
+		if cr.exit != "0" {
+			verdict = styleError.Render("exit " + cr.exit)
+		}
+		b.WriteString("\n" + key("$ "+truncate(cr.command, max(20, m.width-30))) + " " + verdict + "\n")
+		if tail := actionTail(cr.output, max(3, m.height-12)); tail != "" {
+			b.WriteString(styleHint.Render(indent(tail, "  ")) + "\n")
+		}
+	}
+
+	if m.cmdOpen {
+		b.WriteString("\n" + styleDetailKey.Render(m.cmdInput.Prompt) +
+			m.cmdInput.View() + "\n")
+		footer = "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
+	}
+	b.WriteString("\n" + styleHint.Render(footer))
 	return b.String()
 }
 

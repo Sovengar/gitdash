@@ -92,12 +92,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.withPump(m.notifyCmd(note))
 
-	case editorDoneMsg:
+	case execDoneMsg:
 		delete(m.running, msg.path)
+		// el handoff pudo cambiar el estado del repo: siempre re-colecta
+		cmd := m.recollectCmd(msg.path)
 		if msg.err != nil {
-			return m, m.notifyCmd(fmt.Sprintf("editor: %v", msg.err))
+			return m, tea.Batch(cmd, m.notifyCmd(fmt.Sprintf("command: %v", msg.err)))
 		}
-		return m, m.recollectCmd(msg.path) // S9.4: re-colecciona al salir
+		return m, cmd
+
+	case cmdResultMsg:
+		delete(m.running, msg.path)
+		verdict := "ok"
+		if msg.exit != "0" {
+			verdict = "exit " + msg.exit
+		}
+		m.lastCmd[msg.path] = cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
+		return m.withPump(m.notifyCmd(fmt.Sprintf("! %s — %s", msg.command, verdict)))
 
 	case notifyMsg:
 		m.notify = msg.text
@@ -128,15 +139,45 @@ func (m *Model) fetchingAll() bool {
 
 // clampCursor mantiene el cursor dentro de los límites visibles.
 func (m *Model) clampCursor() {
-	n := len(m.rows())
+	n := len(m.entries())
 	if m.cursor >= n {
 		m.cursor = max(0, n-1)
 	}
 }
 
-// handleKey enruta las teclas: input de búsqueda primero, luego la tabla.
+// handleKey enruta las teclas: input de búsqueda primero, luego el input
+// del modo comando (`!` en el detalle) y por último la tabla. Las teclas
+// se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	if m.cmdOpen { // modo comando del detalle: prioridad sobre todo
+		switch key {
+		case "enter":
+			cmdStr := strings.TrimSpace(m.cmdInput.Value())
+			m.cmdOpen = false
+			m.cmdInput.Blur()
+			m.cmdInput.SetValue("")
+			if r, ok := m.selected(); ok {
+				if !r.project.HasRepo {
+					return m, m.notifyCmd("no git repo — nothing to do")
+				}
+				if cmdStr == "" {
+					return m, m.openShellCmd(r.project.Path) // shell interactiva
+				}
+				return m, m.openCmdCmd(r.project.Path, cmdStr)
+			}
+			return m, nil
+		case "esc":
+			m.cmdOpen = false
+			m.cmdInput.Blur()
+			return m, nil
+		default:
+			in, cmd := m.cmdInput.Update(msg)
+			m.cmdInput = in
+			return m, cmd
+		}
+	}
 
 	if m.searchActive {
 		switch key {
@@ -163,76 +204,145 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Teclas fijas (universales, no configurables).
 	switch key {
 	case "q", "ctrl+c":
 		m.cancel()
 		return m, tea.Quit
-	case "down", "j":
-		m.cursor = min(m.cursor+1, max(0, len(m.rows())-1))
+	case "esc":
+		if m.detailOpen {
+			m.detailOpen = false // S10.1
+		}
+		return m, nil
 	case "up", "k":
 		m.cursor = max(0, m.cursor-1)
-	case "g", "home":
+		return m, nil
+	case "down", "j":
+		m.cursor = min(m.cursor+1, max(0, len(m.entries())-1))
+		return m, nil
+	case "home":
 		m.cursor = 0
-	case "G", "end":
-		m.cursor = max(0, len(m.rows())-1)
-	case "n":
+		return m, nil
+	case "end":
+		m.cursor = max(0, len(m.entries())-1)
+		return m, nil
+	}
+
+	// Resolver acción desde keybindings configurados.
+	action := m.actionForKey(key)
+
+	switch action {
+	case "dirty":
 		m.onlyDirty = !m.onlyDirty // S7.1
 		m.clampCursor()
-	case "/":
+	case "search":
 		m.searchActive = true
 		m.searchInput.SetValue(m.search)
-		m.searchInput.Focus()
-	case "r":
-		if m.scanning {
-			return m, m.notifyCmd("scan already running")
-		}
-		return m, m.startScanCmd() // S7.3
-	case "R":
-		if r, ok := m.selected(); ok {
-			return m, m.recollectCmd(r.project.Path) // S7.4
-		}
-	case "f":
+		return m, m.searchInput.Focus()
+	case "fetch":
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
 				return m, m.notifyCmd("no git repo — nothing to do") // S9.6
 			}
 			return m, m.fetchBatchCmd([]string{r.project.Path}) // S8.5
 		}
-	case "F":
+	case "fetch_all":
 		paths := m.fetchTargets()
 		if len(paths) == 0 {
 			return m, m.notifyCmd("no repositories with upstream to fetch")
 		}
 		return m, m.fetchBatchCmd(paths) // S8.5
-	case "p":
+	case "pull":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.notifyCmd("no git repo — nothing to do") // S9.6
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "pull") // S9.1
 		}
-	case "P":
+	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.notifyCmd("no git repo — nothing to do")
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "push") // S9.3
 		}
-	case "e":
+	case "editor":
 		if r, ok := m.selected(); ok {
 			if r.project.MarkerErr != "" {
-				return m, m.notifyCmd("marker error — fix .repo.toml first")
+				return m, m.notifyCmd("marker error — fix .gitdash.toml first")
 			}
 			return m, m.openEditorCmd(r.project.Path) // S9.4
 		}
-	case "enter":
+	case "lazygit":
+		// 0005: g abre lazygit en el repo bajo el cursor.
+		if r, ok := m.selected(); ok {
+			if !r.project.HasRepo {
+				return m, m.notifyCmd("no git repo — nothing to do")
+			}
+			return m, m.openLazygitCmd(r.project.Path)
+		}
+	case "update":
+		if r, ok := m.selected(); ok {
+			if !r.project.HasRepo {
+				return m, m.notifyCmd("no git repo — nothing to do")
+			}
+			return m, m.openUpdateCmd(r.project.Path)
+		}
+	case "rescan":
+		if m.scanning {
+			return m, m.notifyCmd("scan already running")
+		}
+		return m, m.startScanCmd() // S7.3
+	case "recollect":
+		if r, ok := m.selected(); ok {
+			return m, m.recollectCmd(r.project.Path) // S7.4
+		}
+	case "fold":
+		// 0002 R16/S16.2, 0003 S20.3: plegar/desplegar el contenedor bajo
+		// el cursor (secundario interno para repos, header si es header)
+		entries := m.entries()
+		if len(entries) == 0 || m.cursor >= len(entries) {
+			return m, nil
+		}
+		g := groupOfEntry(entries[m.cursor])
+		m.collapsed[g] = !m.collapsed[g]
+		m.clampCursor()
+		return m, nil
+	case "detail":
+		entries := m.entries()
+		if len(entries) > 0 && m.cursor < len(entries) {
+			switch entries[m.cursor].kind {
+			case kindPrimary, kindSecondary: // R16/R20: enter en header pliega
+				g := entries[m.cursor].group
+				m.collapsed[g] = !m.collapsed[g]
+				m.clampCursor()
+				return m, nil
+			}
+		}
 		if _, ok := m.selected(); ok {
 			m.detailOpen = true // S10.1
 		}
-	case "esc":
+	case "command":
+		// `!` abre el input de comandos del detalle ($SHELL -c capturado;
+		// enter vacío = shell interactiva).
 		if m.detailOpen {
-			m.detailOpen = false // S10.1
+			if r, ok := m.selected(); !ok || !r.project.HasRepo {
+				return m, m.notifyCmd("no git repo — nothing to do")
+			}
+			m.cmdOpen = true
+			return m, m.cmdInput.Focus()
 		}
 	}
 	return m, nil
+}
+
+// actionForKey resuelve la acción para una tecla dada usando el mapa
+// de keybindings configurado. Si no hay match, devuelve "".
+func (m Model) actionForKey(key string) string {
+	for action, k := range m.cfg.Keybindings {
+		if k == key {
+			return action
+		}
+	}
+	return ""
 }
 
 // View compone la pantalla: tabla o detalle (R6, R10). El detalle usa la
@@ -261,7 +371,18 @@ func (m Model) renderDashboard() string {
 	if m.onlyDirty {
 		flags += styleWarn.Render(" [dirty]")
 	}
-	if m.search != "" {
+	if m.searchActive {
+		// S7.2: feedback inmediato al pulsar / — [/|] con cursor sólido y
+		// placeholder estático (el typewriter animado de bubbles se queda
+		// en el primer carácter sin ticks)
+		in := m.searchInput
+		in.Placeholder = ""
+		flags += styleWarn.Render(" [") + in.View()
+		if in.Value() == "" {
+			flags += styleDim.Render(searchPlaceholder)
+		}
+		flags += styleWarn.Render("]")
+	} else if m.search != "" {
 		flags += styleWarn.Render(" [/" + m.search + "]")
 	}
 	status := ""
@@ -275,24 +396,26 @@ func (m Model) renderDashboard() string {
 		b.WriteString(styleError.Render("roots: "+m.scanNote) + "\n")
 	}
 
-	// cabecera
-	header := "  " + pad("NAME", colName) + pad("GROUP", colGroup) + pad("BRANCH", colBranch) +
-		pad("STATE", colState) + pad("↑↓", colUpDown) + pad("ACTIVITY", colActivity) + pad("FETCH", colFetch)
+	// cabecera (0004 R25: sin GROUP — los headers plegables ya lo dicen —,
+	// Work Tree en vez de STATE y ↑↓up explícito; anchos > headers →
+	// siempre hay separador, nunca "ACTIVITYFETCH")
+	header := "  " + pad("NAME", colName) + pad("BRANCH", colBranch) +
+		pad("Work Tree", colWT) + pad("↑↓up", colUpDown) + pad("SYNC", colSync) +
+		pad("ACTIVITY", colActivity) + pad("FETCH", colFetch)
 	b.WriteString(styleHint.Render(header) + "\n")
 
-	// filas con scroll
-	rows := m.rows()
+	// filas con scroll (headers de grupo incluidos, 0002 R16)
+	entries := m.entries()
 	bodyLines := max(1, m.height-5)
 	if m.scanNote != "" {
 		bodyLines--
 	}
-	m.syncOffset(len(rows), bodyLines)
-	for i := m.offset; i < min(len(rows), m.offset+bodyLines); i++ {
-		line := m.renderRow(rows[i], i == m.cursor)
-		b.WriteString(line + "\n")
+	m.syncOffset(len(entries), bodyLines)
+	for i := m.offset; i < min(len(entries), m.offset+bodyLines); i++ {
+		b.WriteString(m.renderEntry(entries[i], i == m.cursor) + "\n")
 	}
-	if len(rows) == 0 && !m.scanning {
-		hint := "no repositories — create a .repo.toml in your projects"
+	if len(entries) == 0 && !m.scanning {
+		hint := "no repositories — create a .gitdash.toml in your projects"
 		if m.search != "" || m.onlyDirty {
 			hint = "no repositories match the current filter"
 		}
@@ -339,7 +462,7 @@ func (m Model) renderBar() string {
 		b.WriteString(left + "\n")
 	}
 
-	hints := "j/k move · n dirty · / filter · f/F fetch · p pull · P push · e edit · r rescan · enter detail · q quit"
+	hints := m.cfg.HintBar()
 	b.WriteString(styleHint.Render(truncate(hints, max(40, m.width))) + "\n")
 	return b.String()
 }

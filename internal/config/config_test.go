@@ -18,7 +18,7 @@ func write(t *testing.T, content string) string {
 
 func TestDefaultsS1_1(t *testing.T) {
 	cfg := Defaults()
-	if cfg.Marker != ".repo.toml" {
+	if cfg.Marker != ".gitdash.toml" {
 		t.Errorf("marker = %q", cfg.Marker)
 	}
 	if len(cfg.Roots) != 1 || filepath.Base(cfg.Roots[0]) != "dev" {
@@ -41,7 +41,7 @@ func TestPartialOverrideS1_2(t *testing.T) {
 	if len(cfg.Roots) != 2 || filepath.Base(cfg.Roots[0]) != "code" {
 		t.Errorf("roots = %v", cfg.Roots)
 	}
-	if cfg.Marker != ".repo.toml" || !cfg.FetchAuto || cfg.FetchConcurrency != 4 {
+	if cfg.Marker != ".gitdash.toml" || !cfg.FetchAuto || cfg.FetchConcurrency != 4 {
 		t.Errorf("defaults no conservados: %+v", cfg)
 	}
 }
@@ -52,7 +52,7 @@ func TestMalformedS1_3(t *testing.T) {
 	if warn == "" {
 		t.Fatal("se esperaba warning de parseo")
 	}
-	if cfg.Marker != ".repo.toml" || !cfg.FetchAuto {
+	if cfg.Marker != ".gitdash.toml" || !cfg.FetchAuto {
 		t.Errorf("no se usaron defaults: %+v", cfg)
 	}
 }
@@ -62,7 +62,7 @@ func TestMissingFileS1_1(t *testing.T) {
 	if warn != "" {
 		t.Fatalf("warn inesperado: %q", warn)
 	}
-	if cfg.Marker != ".repo.toml" || len(cfg.Roots) != 1 {
+	if cfg.Marker != ".gitdash.toml" || len(cfg.Roots) != 1 {
 		t.Errorf("cfg = %+v", cfg)
 	}
 }

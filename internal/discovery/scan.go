@@ -1,7 +1,7 @@
 // Package discovery descubre proyectos por fichero marcador en los roots
 // configurados (spec 0001 R2-R4).
 //
-// Un directorio es proyecto si contiene el marcador (default .repo.toml).
+// Un directorio es proyecto si contiene el marcador (default .gitdash.toml).
 // El repo git se resuelve en la MISMA carpeta del marcador: .git directorio
 // = repo normal, .git fichero (gitdir:) = worktree, ausencia = proyecto sin
 // repo. El walk es ilimitado en profundidad pero poda directorios ocultos,
@@ -23,12 +23,23 @@ import (
 
 // Project es un proyecto descubierto por el marcador.
 type Project struct {
-	Path       string // ruta absoluta (carpeta del marcador)
-	Name       string // name del marcador o nombre del directorio
-	Group      string // group del marcador o ""
-	HasRepo    bool   // existe .git (directorio o fichero)
-	IsWorktree bool   // .git es un fichero gitdir: (R3.2)
-	MarkerErr  string // error de parseo del marcador (S4.3)
+	Path           string // ruta absoluta (carpeta del marcador)
+	Name           string // name del marcador o nombre del directorio
+	PrimaryGroup   string // primary_group del marcador o "" (0003 R18)
+	SecondaryGroup string // secondary_group del marcador; "" = sin segundo nivel (0003 R18)
+	SyncBranch     string // sync_branch del marcador (0002 R14); "" = usar la global
+	HasRepo        bool   // existe .git (directorio o fichero)
+	IsWorktree     bool   // .git es un fichero gitdir: (R3.2)
+	MainRepo       string // 0002 R15: repo principal si IsWorktree ("" = no aplica)
+	MarkerErr      string // error de parseo del marcador (S4.3)
+}
+
+// MainPath es el repo al que pertenece el proyecto (sí mismo salvo worktrees).
+func (p Project) MainPath() string {
+	if p.MainRepo != "" {
+		return p.MainRepo
+	}
+	return p.Path
 }
 
 // Scan recorre los roots de la config y devuelve los proyectos ordenados
@@ -110,15 +121,21 @@ func inspect(dir, marker string) Project {
 		if metadata.Name != "" {
 			p.Name = metadata.Name
 		}
-		p.Group = metadata.Group
+		p.PrimaryGroup = metadata.PrimaryGroup
+		// 0003 R18/S18.3: secondary sin primary se ignora (cae en ungrouped)
+		if metadata.PrimaryGroup != "" {
+			p.SecondaryGroup = metadata.SecondaryGroup
+		}
+		p.SyncBranch = metadata.SyncBranch
 	}
 
-	switch classifyGit(filepath.Join(dir, ".git")) {
+	switch k, main := classifyGit(filepath.Join(dir, ".git")); k {
 	case gitDir:
 		p.HasRepo = true // S3.1
 	case gitFile:
 		p.HasRepo = true
 		p.IsWorktree = true // S3.2
+		p.MainRepo = main   // 0002 R15: para plegar wt bajo su repo principal
 	default:
 		// S3.3: sin repo, queda visible con HasRepo=false
 	}
@@ -126,12 +143,16 @@ func inspect(dir, marker string) Project {
 }
 
 // markerMeta son los metadatos opcionales del marcador (R4).
+// 0003 R18: la clave `group` desaparece (cambio duro, sin fallback).
 type markerMeta struct {
-	Name  string `toml:"name"`
-	Group string `toml:"group"`
+	Name           string `toml:"name"`
+	PrimaryGroup   string `toml:"primary_group"`
+	SecondaryGroup string `toml:"secondary_group"`
+	SyncBranch     string `toml:"sync_branch"` // R14: override de la sync branch
 }
 
-// parseMarker lee name/group del marcador; campos ausentes = vacío (S4.2).
+// parseMarker lee name/primary_group/secondary_group del marcador; campos
+// ausentes = vacío (S4.2).
 func parseMarker(path string) (markerMeta, error) {
 	var meta markerMeta
 	raw, err := os.ReadFile(path)
@@ -159,23 +180,27 @@ const (
 	gitFile
 )
 
-// classifyGit distingue repo normal de worktree (R3).
-func classifyGit(gitPath string) gitKind {
+// classifyGit distingue repo normal de worktree (R3). Devuelve el path
+// del repo principal cuando .git es un fichero gitdir: (`<main>/.git/...`).
+func classifyGit(gitPath string) (gitKind, string) {
 	info, err := os.Lstat(gitPath)
 	if err != nil {
-		return gitNone
+		return gitNone, ""
 	}
 	if info.IsDir() {
-		return gitDir
+		return gitDir, ""
 	}
 	raw, err := os.ReadFile(gitPath)
 	if err != nil {
-		return gitNone
+		return gitNone, ""
 	}
-	if strings.HasPrefix(string(raw), "gitdir:") {
-		return gitFile
+	if rest, ok := strings.CutPrefix(string(raw), "gitdir:"); ok {
+		main := strings.TrimSpace(rest)
+		// worktrees registrados: <main>/.git/worktrees/<nombre>
+		main = filepath.Dir(filepath.Dir(main))
+		return gitFile, filepath.Dir(main)
 	}
-	return gitNone
+	return gitNone, ""
 }
 
 // isHidden reporta si un nombre de directorio está oculto.

@@ -8,7 +8,7 @@ Base: feature nueva (greenfield)
 ### R1: Configuración XDG
 
 El sistema SHALL leer `~/.config/gitdash/config.toml` (respetando `$XDG_CONFIG_HOME`)
-al arrancar con claves opcionales: `marker` (string, default `".repo.toml"`),
+al arrancar con claves opcionales: `marker` (string, default `".gitdash.toml"`),
 `roots` (array de strings, default `["~/dev"]`), `exclude` (array de nombres de
 directorio a podar), `editor` (string, default `$EDITOR` o `"vi"`),
 `fetch.auto` (bool, default `true`), `fetch.concurrency` (int, default `4`),
@@ -21,7 +21,7 @@ notificarse el error de parseo sin abortar el arranque.
 
 - GIVEN que `~/.config/gitdash/config.toml` no existe
 - WHEN arranca gitdash
-- THEN se usan marker `.repo.toml`, roots `["~/dev"]`, exclusiones por
+- THEN se usan marker `.gitdash.toml`, roots `["~/dev"]`, exclusiones por
   defecto (node_modules, target, vendor, dist, build, .venv, .cache, ...),
   `fetch.auto=true`, `fetch.concurrency=4`, `fetch.timeout=30s`
 
@@ -56,26 +56,26 @@ directorio salvo para subdirectorios que también contengan marcadores
 
 #### S2.1: detección por marcador
 
-- GIVEN un root con `~/dev/projects/api/.repo.toml`
+- GIVEN un root con `~/dev/projects/api/.gitdash.toml`
 - WHEN se escanea el root
 - THEN `~/dev/projects/api` aparece como proyecto descubierto
 
 #### S2.2: poda de ocultos y artefactos
 
-- GIVEN un root con `~/dev/.hidden/proj/.repo.toml` y
-  `~/dev/api/node_modules/dep/.repo.toml`
+- GIVEN un root con `~/dev/.hidden/proj/.gitdash.toml` y
+  `~/dev/api/node_modules/dep/.gitdash.toml`
 - WHEN se escanea
 - THEN ninguno de los dos aparece (ocultos y exclusiones se podan)
 
 #### S2.3: profundidad ilimitada con raíles
 
-- GIVEN `~/dev/a/b/c/d/proj/.repo.toml` (4 niveles)
+- GIVEN `~/dev/a/b/c/d/proj/.gitdash.toml` (4 niveles)
 - WHEN se escanea
 - THEN el proyecto aparece (no hay cap de profundidad; solo podas)
 
 #### S2.4: anidado válido
 
-- GIVEN `~/dev/mono/.repo.toml` y `~/dev/mono/sub/.repo.toml`
+- GIVEN `~/dev/mono/.gitdash.toml` y `~/dev/mono/sub/.gitdash.toml`
 - WHEN se escanea
 - THEN ambos aparecen como proyectos separados
 
@@ -107,7 +107,7 @@ marcador (decisión de diseño: no se busca `.git` hacia arriba).
 
 ### R4: Metadatos del marcador
 
-El marcador `.repo.toml` SHALL aceptar claves opcionales `name` (string) y
+El marcador `.gitdash.toml` SHALL aceptar claves opcionales `name` (string) y
 `group` (string). Si `name` falta, el nombre mostrado SHALL ser el nombre del
 directorio; si `group` falta, el grupo SHALL ser vacío (mostrado como `-`).
 Un marcador malformado SHALL verse con estado de error de parseo visible sin

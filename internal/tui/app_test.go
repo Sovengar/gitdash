@@ -76,7 +76,7 @@ func press(m Model, key string) (Model, tea.Cmd) {
 			"enter": tea.KeyEnter, "esc": tea.KeyEsc,
 			"up": tea.KeyUp, "down": tea.KeyDown,
 			"home": tea.KeyHome, "end": tea.KeyEnd,
-			"backspace": tea.KeyBackspace,
+			"backspace": tea.KeyBackspace, "tab": tea.KeyTab,
 		}
 		if c, ok := codes[key]; ok {
 			km = tea.KeyPressMsg{Code: c}
@@ -143,7 +143,7 @@ func TestFilterOnlyDirtyS7_1(t *testing.T) {
 		t.Fatalf("sin filtro rows = %d", len(m.rows()))
 	}
 
-	m, _ = press(m, "n")
+	m, _ = press(m, "d")
 	rows := m.rows()
 	if len(rows) != 3 { // dirty-api, ahead-lib, behind-web
 		t.Fatalf("S7.1: rows = %d, want 3", len(rows))
@@ -154,7 +154,7 @@ func TestFilterOnlyDirtyS7_1(t *testing.T) {
 		}
 	}
 
-	m, _ = press(m, "n")
+	m, _ = press(m, "d")
 	if len(m.rows()) != 6 {
 		t.Errorf("toggle off: rows = %d, want 6", len(m.rows()))
 	}
@@ -192,17 +192,48 @@ func TestSearchS7_2(t *testing.T) {
 	}
 }
 
+// S7.2: feedback visual inmediato — al pulsar / el título pinta [/|] con el
+// el cursor del input (o su placeholder) ANTES de teclear nada.
+func TestSearchImmediateFeedback(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+
+	m, _ = press(m, "/")
+	top := stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
+	if !strings.Contains(top, "[/") {
+		t.Errorf("S7.2: falta [/…] al entrar en filter mode: %q", top)
+	}
+	// placeholder visible con input vacío (nombre/grupo…)
+	if !strings.Contains(top, "name/group") {
+		t.Errorf("S7.2: placeholder no visible al abrir: %q", top)
+	}
+
+	// al confirmar el flag persiste con el texto confirmado
+	m, _ = press(m, "a")
+	m, _ = press(m, "enter")
+	top = stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
+	if !strings.Contains(top, "[/a]") {
+		t.Errorf("S7.2: tras confirmar falta [/a]: %q", top)
+	}
+}
+
 func TestSearchMatchesGroup(t *testing.T) {
 	projects := []discovery.Project{
-		{Path: "/x", Name: "api", Group: "vsocial", HasRepo: true},
-		{Path: "/y", Name: "cli", Group: "otros", HasRepo: true},
+		{Path: "/x", Name: "api", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
+		{Path: "/y", Name: "cli", PrimaryGroup: "otros", HasRepo: true},
 	}
 	states := map[string]gitstatus.Snapshot{"/x": snapClean(), "/y": snapClean()}
 	m := newTestModel(t, projects, states)
 	m.search = "vsocial"
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].project.Name != "api" {
-		t.Errorf("búsqueda por grupo falló: %v", rowNames(rows))
+		t.Errorf("S18.5: búsqueda por primario falló: %v", rowNames(rows))
+	}
+	m2 := newTestModel(t, projects, states)
+	m2.search = "backend"
+	rows = m2.rows()
+	if len(rows) != 1 || rows[0].project.Name != "api" {
+		t.Errorf("S18.5: búsqueda por secundario falló: %v", rowNames(rows))
 	}
 }
 

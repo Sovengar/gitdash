@@ -1,7 +1,7 @@
 # gitdash
 
 Panel de estados git en TUI, estilo GitHub Desktop: todos tus repos marcados
-con `.repo.toml` en un dashboard, con branch, cambios pendientes
+con `.gitdash.toml` en un dashboard, con branch, cambios pendientes
 (dirty) y **↑ahead / ↓behind** (qué hay que subir y bajar de un vistazo),
 más acciones rápidas.
 
@@ -27,11 +27,13 @@ gitdash            # TUI
 gitdash --print    # tabla one-shot en stdout (útil para scripts/debug)
 ```
 
-Marcador `.repo.toml` en la raíz de cada proyecto (campos todos opcionales):
+Marcador `.gitdash.toml` en la raíz de cada proyecto (campos todos opcionales):
 
 ```toml
-name = "api"        # nombre mostrado (default: nombre del directorio)
-group = "vsocial"   # agrupación visual (default: "-")
+name = "api"                # nombre mostrado (default: nombre del directorio)
+primary_group = "vsocial"   # grupo primario (nivel 1 plegable)
+secondary_group = "backend" # grupo secundario (nivel 2 plegable, dentro del primario)
+sync_branch = "main"        # rama de referencia de la columna SYNC (override del global)
 ```
 
 ### Config
@@ -39,17 +41,45 @@ group = "vsocial"   # agrupación visual (default: "-")
 `~/.config/gitdash/config.toml` (todo opcional, con estos defaults):
 
 ```toml
-marker  = ".repo.toml"
-roots   = ["~/dev"]
-exclude = ["node_modules", "target", "vendor", "dist", "build", "out",
-           "coverage", ".venv", "__pycache__", ".gradle", ".terraform"]
-editor  = "vi"        # $EDITOR si está definida
+marker      = ".gitdash.toml"
+roots       = ["~/dev"]
+exclude     = ["node_modules", "target", "vendor", "dist", "build", "out",
+               "coverage", ".venv", "__pycache__", ".gradle", ".terraform"]
+editor      = "vi"        # $EDITOR si está definida
+sync_branch = "main"     # rama de referencia para la columna SYNC
 
 [fetch]
 auto        = true    # fetch automático tras cada scan/rescan
 concurrency = 4       # fetches en paralelo (batches)
 timeout     = "30s"   # timeout por fetch
 ```
+
+## Columnas de la tabla
+
+La tabla es *quieta* (0004): las celdas quedan vacías cuando no hay nada que
+comunicar y solo se pinta lo que pide atención (el orden sigue siendo
+attention-first).
+
+- **BRANCH** rama actual; en detached `<sha> (detached)` (única mención del
+  estado en la fila).
+- **Work Tree** solo el working tree: `N ?M` = N ficheros trackeados
+  cambiados + M sin trackear; `∅` sin repo; `⚠` error git. Sin bola ni
+  flechas: los estados de commits viven en ↑↓up.
+- **↑↓up** deriva de commits contra el *upstream* de la rama actual (qué hay
+  que subir/bajar): `↑N↓N` diverged, `↑N`/`↓N`, `no-up` = rama sin upstream
+  trackeado ("sin cuerda al remoto": no hay contra qué comparar).
+- **SYNC** desviación respecto a la *sync branch* (`sync_branch` global,
+  overridable por repo en el marcador): `<rama> ↓N` = hay N commits en la
+  sync branch que tu rama no tiene — la pregunta CI-first "¿mi `feat/x`
+  tiene los últimos cambios de `main`?"; `<rama>` a secas = al día;
+  `<rama> —` = la ref no existe; `—` = sin rama resuelta. La rama elegida
+  es siempre visible. La frescura depende de que la ref local de la sync
+  branch esté actualizada; el fetch automático solo refresca remote-tracking
+  refs.
+- **ACTIVITY** último commit en tiempo relativo.
+- **FETCH** solo transitorio: `⟳ fetch` corriendo, `✗ fetch` fallo
+  (persistente hasta el próximo fetch de ese repo); el éxito no ocupa celda
+  (lo señala la notificación de la barra).
 
 ## Teclas
 
@@ -58,14 +88,31 @@ timeout     = "30s"   # timeout por fetch
 | `j/k`, `↑↓` | mover cursor (`g`/`G` extremos) |
 | `n` | alternar solo repos con cambios pendientes |
 | `/` | filtrar por nombre/grupo (en vivo; `enter` confirma, `esc` limpia) |
+| `tab` | plegar/desplegar el grupo bajo el cursor |
 | `r` | rescan completo (discovery + estados + fetch auto) |
 | `R` | re-coleccionar el repo del cursor |
 | `f` / `F` | fetch del repo / fetch de todos |
 | `p` | pull (`--ff-only`; si divergió, falla visible con hint) |
 | `P` | push |
 | `e` | abrir `$EDITOR` en el directorio del repo |
-| `enter` | detalle: ficheros cambiados, commits, última acción |
+| `enter` | detalle: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
 | `q` | salir |
+
+## Worktrees y grupos
+
+- Los **worktrees** no ocupan filas: el repo principal los aglomera con un
+  indicador `(N wt)` (cuenta TODOS los de `git worktree list`, incluso los
+  sin marcador); el detalle lista cada uno con rama y ruta. Queda visible
+  como fila solo un worktree cuyo repo principal no está descubierto.
+- Si algún marcador define `primary_group`, la tabla se **agrupa en dos
+  niveles** (patrón vroom): el bloque de cada grupo desde la posición de su
+  primer miembro con header `▾ nombre (n)`; dentro de un primario, cada
+  `secondary_group` forma un sub-bloque con header indentado. Ambos niveles
+   son plegables (plegar el primario oculta sus secundarios). Los repos sin
+   primario van a la sección `(ungrouped)` al final; un `secondary_group`
+   sin `primary_group` se ignora. La TUI no repite el grupo en una columna
+   (los headers plegables ya lo dicen); `--print` —tabla plana, sin
+   headers— sí muestra la columna GROUP. Sin grupos la tabla es plana.
 
 ## Cómo descubre repos
 
@@ -92,8 +139,8 @@ marcador), `internal/gitstatus` (subprocess git + parsing `porcelain=v2`),
 
 ## Roadmap
 
-- Agrupaciones colapsables (vsocial-backend, vsocial-frontend, ...)
-- Integración profunda de worktrees (listar/mutar)
+- Fetch de la sync branch (frescura de la columna SYNC sin pull manual)
+- Acciones grupales (fetch/pull de todo un grupo)
 - Acciones extra: git update, stash, PRs
 - Fetch programado en background
 

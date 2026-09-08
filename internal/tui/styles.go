@@ -6,15 +6,16 @@ import "charm.land/lipgloss/v2"
 // lipglossStyle alias corto para las firmas de las celdas.
 type lipglossStyle = lipgloss.Style
 
-// anchos de columna de la tabla (R6).
+// anchos de columna de la tabla (R6; 0004 R25: todo ancho > longitud de
+// su header para que pad() garantice separador entre columnas).
 const (
 	colName     = 26
-	colGroup    = 10
 	colBranch   = 24
-	colState    = 12
-	colUpDown   = 9
-	colActivity = 8
-	colFetch    = 9
+	colWT       = 11 // "Work Tree" (9) + separador
+	colUpDown   = 9  // "↑↓up"
+	colSync     = 12 // "SYNC" + "<rama> ↓NN"
+	colActivity = 10 // "ACTIVITY" (8) + separador
+	colFetch    = 9  // "FETCH"
 )
 
 var (
@@ -31,12 +32,16 @@ var (
 	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // rojo
 	styleWarn     = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // naranja
 	styleFetchRun = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	styleFetchOk  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	styleFetchBad = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
 	styleBar  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	styleHint = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	styleSel  = lipgloss.NewStyle().Bold(true)
+
+	// 0002 R16: header de grupo (vroom R24)
+	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
+	// 0003 R20: header secundario (nivel 2, menos protagonista)
+	styleSecondaryHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
 	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	styleDetailTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))

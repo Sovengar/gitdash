@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,9 +22,21 @@ import (
 type Snapshot struct {
 	Status     Status
 	Files      []FileEntry
-	Commits    []Commit // últimos 5 (S10.1)
-	LastCommit int64    // epoch del último commit (0 si sin commits)
-	Err        string   // "" = recolección ok (S5.6)
+	Commits    []Commit   // últimos 5 (S10.1)
+	LastCommit int64      // epoch del último commit (0 si sin commits)
+	Worktrees  []Worktree // worktrees del repo (0002 R15), sin el principal
+	SyncBranch string     // sync branch usada en la comparación (0002 R14)
+	SyncBehind int        // commits de sync ausentes en HEAD (0002 R14)
+	SyncKnown  bool       // comparación vs sync calculable
+	Err        string     // "" = recolección ok (S5.6)
+}
+
+// Worktree es un worktree registrado del repo, listo para el detalle
+// (0002 R15).
+type Worktree struct {
+	Path   string // ruta absoluta del worktree
+	Branch string // refs/heads/x o "" si detached/bare
+	Head   string // sha corto de HEAD ("" si vacío/prunable)
 }
 
 // State deriva el estado visible considerando errores y proyectos sin repo.
@@ -37,9 +50,10 @@ func (s Snapshot) State(hasRepo bool) State {
 	return s.Status.Derive()
 }
 
-// Collect recolecta el estado del repo en dir. Nunca falla duro: el error
+// Collect recolecta el estado del repo en dir, con la desviación vs la
+// sync branch dada (R14, "" = sin comparación). Nunca falla duro: el error
 // (si lo hay) viaja dentro del Snapshot para verse en la UI (S5.6).
-func Collect(ctx context.Context, dir string) Snapshot {
+func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	var snap Snapshot
 
 	out, err := runGit(ctx, dir, "status", "--porcelain=v2", "--branch")
@@ -51,6 +65,17 @@ func Collect(ctx context.Context, dir string) Snapshot {
 	st.Branch = normalizeBranch(st)
 	snap.Status, snap.Files = st, files
 
+	if syncBranch != "" {
+		// 0004 R23: la rama resuelta se rellena siempre (visible en UI
+		// aunque la comparación falle → "<rama> —").
+		snap.SyncBranch = syncBranch
+		if n, ok := syncBehind(ctx, dir, syncBranch); ok {
+			snap.SyncBehind = n // R14: commits de sync ausentes en HEAD
+			snap.SyncKnown = true
+		}
+		// sync ref inexistente o error: SyncKnown=false → "<rama> —" en UI (0004 S23.4)
+	}
+
 	logOut, err := runGit(ctx, dir, "log", "-5", "--format=%h%x00%ct%x00%s")
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
@@ -59,7 +84,28 @@ func Collect(ctx context.Context, dir string) Snapshot {
 		}
 	}
 	// Un repo sin commits es legítimo: el error de log se ignora.
+
+	// 0002 R15: inventario de worktrees (sin el repo principal).
+	if wtOut, err := runGit(ctx, dir, "worktree", "list", "--porcelain"); err == nil {
+		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
+	}
 	return snap
+}
+
+// syncBehind cuenta los commits de sync ausentes en HEAD con
+// `git rev-list --count HEAD..<sync>` (R14): valen para ramas y detached,
+// y respectan el merge-base (no es un diff de tips). Cualquier error
+// (ref inexistente, repo roto) devuelve known=false.
+func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
+	out, err := runGit(ctx, dir, "rev-list", "--count", "HEAD.."+sync)
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // normalizeBranch completa la rama para detached con el sha corto.
@@ -71,9 +117,10 @@ func normalizeBranch(st Status) string {
 }
 
 // StreamPool recolecta los snapshots de todos los proyectos en paralelo
-// (máximo concurrency a la vez) invocando emit por cada uno. Bloquea hasta
-// terminar o cancelarse por contexto.
-func StreamPool(ctx context.Context, projects []discovery.Project, concurrency int, emit func(path string, snap Snapshot)) {
+// (máximo concurrency a la vez) invocando emit por cada uno. defaultSync es
+// la sync branch global (R14): cada proyecto puede overriddenla desde el
+// marcador. Bloquea hasta terminar o cancelarse por contexto.
+func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, concurrency int, emit func(path string, snap Snapshot)) {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -85,7 +132,7 @@ func StreamPool(ctx context.Context, projects []discovery.Project, concurrency i
 	sem := make(chan struct{}, concurrency)
 	for _, p := range projects {
 		wg.Add(1)
-		go func(path string, hasRepo bool) {
+		go func(p discovery.Project) {
 			defer wg.Done()
 			select {
 			case sem <- struct{}{}:
@@ -93,32 +140,51 @@ func StreamPool(ctx context.Context, projects []discovery.Project, concurrency i
 			case <-ctx.Done():
 				return
 			}
-			if !hasRepo {
-				emit(path, Snapshot{}) // S3.3: estado no-repo inmediato
+			if !p.HasRepo {
+				emit(p.Path, Snapshot{}) // S3.3: estado no-repo inmediato
 				return
 			}
-			emit(path, Collect(ctx, path))
-		}(p.Path, p.HasRepo)
+			emit(p.Path, Collect(ctx, p.Path, SyncFor(p, defaultSync)))
+		}(p)
 	}
 	wg.Wait()
 }
 
-// Fetch ejecuta `git fetch --prune` en dir. El caller aplica el timeout
-// vía contexto (R8).
-func Fetch(ctx context.Context, dir string) error {
-	_, err := runGit(ctx, dir, "fetch", "--prune")
+// SyncFor resuelve la sync branch efectiva de un proyecto (R14):
+// override del marcador > global.
+func SyncFor(p discovery.Project, defaultSync string) string {
+	if p.SyncBranch != "" {
+		return p.SyncBranch
+	}
+	return defaultSync
+}
+
+// Fetch ejecuta `git fetch` en dir con los args dados (default: --prune).
+// El caller aplica el timeout vía contexto (R8).
+func Fetch(ctx context.Context, dir string, args ...string) error {
+	if len(args) == 0 {
+		args = []string{"fetch", "--prune"}
+	}
+	_, err := runGit(ctx, dir, args...)
 	return err
 }
 
-// Pull ejecuta `git pull --ff-only` (safe default, R9) y devuelve la
-// salida combinada para el detalle.
-func Pull(ctx context.Context, dir string) (string, error) {
-	return runGitCombined(ctx, dir, "pull", "--ff-only")
+// Pull ejecuta `git pull` con los args dados (default: --ff-only) y
+// devuelve la salida combinada para el detalle (R9).
+func Pull(ctx context.Context, dir string, args ...string) (string, error) {
+	if len(args) == 0 {
+		args = []string{"pull", "--ff-only"}
+	}
+	return runGitCombined(ctx, dir, args...)
 }
 
-// Push ejecuta `git push` y devuelve la salida combinada (R9).
-func Push(ctx context.Context, dir string) (string, error) {
-	return runGitCombined(ctx, dir, "push")
+// Push ejecuta `git push` con los args dados y devuelve la salida
+// combinada (R9).
+func Push(ctx context.Context, dir string, args ...string) (string, error) {
+	if len(args) == 0 {
+		args = []string{"push"}
+	}
+	return runGitCombined(ctx, dir, args...)
 }
 
 // runGit ejecuta git en dir y devuelve stdout.

@@ -1,6 +1,6 @@
 // gitdash — panel de estados git en TUI (inspirado en bircni/git-statuses).
 //
-// Descubre proyectos por fichero marcador (.repo.toml) en los roots
+// Descubre proyectos por fichero marcador (.gitdash.toml) en los roots
 // configurados, recolecta el estado git de cada uno (branch, dirty,
 // ahead/behind) vía subprocess git, y lo muestra en un dashboard Bubbletea
 // con fetch automático en batches y acciones pull/push/editor.

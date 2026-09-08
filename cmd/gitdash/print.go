@@ -18,8 +18,8 @@ import (
 
 // printRow es la fila de la tabla de salida.
 type printRow struct {
-	name, group, branch, state, upDown, activity, path string
-	score, lastCommit                                  int
+	name, group, branch, state, upDown, sync, wt, activity, path string
+	score, lastCommit                                            int
 }
 
 // runPrint ejecuta discovery + recolección (sin fetch) e imprime la tabla
@@ -39,7 +39,7 @@ func runPrint(cfg config.Config) {
 
 	var mu sync.Mutex
 	states := map[string]gitstatus.Snapshot{}
-	gitstatus.StreamPool(ctx, projects, 8, func(path string, snap gitstatus.Snapshot) {
+	gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, 8, func(path string, snap gitstatus.Snapshot) {
 		mu.Lock()
 		states[path] = snap
 		mu.Unlock()
@@ -47,10 +47,15 @@ func runPrint(cfg config.Config) {
 
 	rows := make([]printRow, 0, len(projects))
 	for _, p := range projects {
+		// 0002 R15: worktree plegado bajo su repo principal descubierto
+		if p.IsWorktree && p.MainRepo != "" && hasProject(projects, p.MainRepo) {
+			continue
+		}
 		snap := states[p.Path]
 		st := snap.State(p.HasRepo)
 		name := p.Name
 		if p.IsWorktree {
+			// restos visibles solo si su repo principal no está descubierto
 			name += " [wt]"
 		}
 		branch := snap.Status.Branch
@@ -60,14 +65,20 @@ func runPrint(cfg config.Config) {
 		if branch == "" {
 			branch = "-"
 		}
+		wt := ""
+		if n := len(snap.Worktrees); n > 0 {
+			wt = fmt.Sprintf("%d", n)
+		}
 		rows = append(rows, printRow{
 			name:       name,
-			group:      orDashPrint(p.Group),
+			group:      orDashPrint(groupLabelPrint(p)),
 			branch:     branch,
 			state:      printState(st, snap),
 			upDown:     printUpDown(st, snap),
+			sync:       printSync(snap),
 			activity:   relativeTimePrint(snap.LastCommit),
 			path:       p.Path,
+			wt:         wt,
 			score:      st.Score(),
 			lastCommit: int(snap.LastCommit),
 		})
@@ -84,37 +95,78 @@ func runPrint(cfg config.Config) {
 		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
 	})
 
+	// 0004 R25/R29: GROUP se conserva en print (tabla plana, sin headers de
+	// grupo); WT = working tree; WTS = contador de worktrees (renombrado
+	// desde WT para liberar la sigla, ver Revisiones); ↑↓up explícito.
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tSTATE\t↑↓\tACTIVITY\tPATH")
+	fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tWT\t↑↓up\tSYNC\tWTS\tACTIVITY\tPATH")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.name, r.group, r.branch, r.state, r.upDown, r.activity, r.path)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.name, r.group, r.branch, r.state, r.upDown, r.sync, r.wt, r.activity, r.path)
 	}
 	w.Flush()
 }
 
-func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
-	switch st {
-	case gitstatus.StateDirty:
-		s := snap.Status
-		out := fmt.Sprintf("dirty (%d", s.TrackedChanges)
-		if s.Untracked > 0 {
-			out += fmt.Sprintf(" ?%d", s.Untracked)
+// hasProject reporta si algún proyecto descubierto tiene esa ruta.
+func hasProject(projects []discovery.Project, path string) bool {
+	for _, p := range projects {
+		if p.Path == path {
+			return true
 		}
-		return out + ")"
-	case gitstatus.StateDiverged:
-		return "diverged"
-	case gitstatus.StateClean:
-		return "clean"
-	default:
-		return st.String()
 	}
+	return false
 }
 
+// printSync formatea la desviación vs sync branch con la rama visible
+// (0002 R14; 0004 R23/S29.1): `<rama> ↓N`, `<rama>`, `<rama> —`, `—`.
+func printSync(snap gitstatus.Snapshot) string {
+	if snap.SyncBranch == "" {
+		return "—"
+	}
+	if !snap.SyncKnown {
+		return snap.SyncBranch + " —" // S23.4: ref inexistente
+	}
+	if snap.SyncBehind == 0 {
+		return snap.SyncBranch // S23.3: rama visible sin tick
+	}
+	return fmt.Sprintf("%s ↓%d", snap.SyncBranch, snap.SyncBehind)
+}
+
+// printState compone la columna WT del modo print (0004 R26/S29.1): solo
+// working tree — counts o vacío (tabla quieta, R28). Los estados de ciclo
+// de vida viven en otras columnas: detached en BRANCH, no-up en ↑↓up.
+func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
+	switch st {
+	case gitstatus.StateError:
+		return "error"
+	case gitstatus.StateNoRepo:
+		return "no repo"
+	}
+	s := snap.Status
+	if s.Dirty() == 0 {
+		return ""
+	}
+	// mismo formato que dirtyTail de la TUI (R29): el 0 de tracked se
+	// omite → solo untracked es "?1", no "0 ?1".
+	var b strings.Builder
+	if s.TrackedChanges > 0 {
+		b.WriteString(fmt.Sprintf("%d", s.TrackedChanges))
+	}
+	if s.Untracked > 0 {
+		b.WriteString(fmt.Sprintf(" ?%d", s.Untracked))
+	}
+	return b.String()
+}
+
+// printUpDown compone ↑↓up para print (0004 R27): `no-up` sin upstream
+// trackeado, vacío en sync; errores y no-repo vacíos.
 func printUpDown(st gitstatus.State, snap gitstatus.Snapshot) string {
+	if st == gitstatus.StateNoRepo || snap.Err != "" {
+		return ""
+	}
 	s := snap.Status
 	if !s.HasUpstream {
-		return "—"
+		return "no-up"
 	}
 	switch {
 	case s.Ahead > 0 && s.Behind > 0:
@@ -150,4 +202,17 @@ func orDashPrint(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// groupLabelPrint compone `primary/secondary` para la columna GROUP
+// (0003 R21/S21.1): solo primario si no hay secundario, "-" si ninguno.
+func groupLabelPrint(p discovery.Project) string {
+	switch {
+	case p.PrimaryGroup != "" && p.SecondaryGroup != "":
+		return p.PrimaryGroup + "/" + p.SecondaryGroup
+	case p.PrimaryGroup != "":
+		return p.PrimaryGroup
+	default:
+		return ""
+	}
 }

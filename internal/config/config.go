@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -21,7 +22,7 @@ const FileName = "config.toml"
 const DirName = "gitdash"
 
 // DefaultMarker es el marcador por defecto que identifica un proyecto.
-const DefaultMarker = ".repo.toml"
+const DefaultMarker = ".gitdash.toml"
 
 // DefaultExclude son los nombres de directorio podados durante el walk
 // cuando la config no define exclusiones propias.
@@ -30,15 +31,28 @@ var DefaultExclude = []string{
 	".venv", "__pycache__", ".gradle", ".terraform",
 }
 
+// Keybindings mapea nombre de acción → tecla (una sola rune o nombre
+// especial como "enter", "esc", "tab", "home", "end", "ctrl+c").
+type Keybindings map[string]string
+
+// Commands mapea nombre de acción → comando git tal cual se pasa a
+// exec.Command (p. ej. "pull --rebase --autostash").
+type Commands map[string]string
+
 // Config es la configuración resuelta de gitdash.
 type Config struct {
-	Marker           string
-	Roots            []string
-	Exclude          []string
-	Editor           string
+	Marker  string
+	Roots   []string
+	Exclude []string
+	Editor  string
+	// SyncBranch es la rama de referencia global para la columna SYNC
+	// (spec 0002 R14): los marcadores pueden overridden por repo.
+	SyncBranch       string
 	FetchAuto        bool
 	FetchConcurrency int
 	FetchTimeout     time.Duration
+	Keybindings      Keybindings
+	Commands         Commands
 }
 
 // fetchConfig refleja la sección [fetch] del TOML, con punteros para
@@ -51,11 +65,14 @@ type fetchConfig struct {
 
 // fileConfig refleja el TOML crudo del disco.
 type fileConfig struct {
-	Marker  *string      `toml:"marker"`
-	Roots   []string     `toml:"roots"`
-	Exclude []string     `toml:"exclude"`
-	Editor  *string      `toml:"editor"`
-	Fetch   *fetchConfig `toml:"fetch"`
+	Marker     *string             `toml:"marker"`
+	Roots      []string            `toml:"roots"`
+	Exclude    []string            `toml:"exclude"`
+	Editor     *string             `toml:"editor"`
+	SyncBranch *string             `toml:"sync_branch"`
+	Fetch      *fetchConfig        `toml:"fetch"`
+	Keybindings map[string]string  `toml:"keybindings"`
+	Commands    map[string]string   `toml:"commands"`
 }
 
 // Load lee la config del path estándar XDG. Devuelve la config resuelta y
@@ -98,6 +115,9 @@ func LoadFrom(path string) (Config, string) {
 	if fc.Editor != nil && *fc.Editor != "" {
 		cfg.Editor = *fc.Editor
 	}
+	if fc.SyncBranch != nil && *fc.SyncBranch != "" {
+		cfg.SyncBranch = *fc.SyncBranch // R14: override global
+	}
 	if fc.Fetch != nil {
 		if fc.Fetch.Auto != nil {
 			cfg.FetchAuto = *fc.Fetch.Auto
@@ -113,6 +133,18 @@ func LoadFrom(path string) (Config, string) {
 			}
 		}
 	}
+	// Keybindings: merge sobre defaults (el usuario solo sobreescribe lo que cambia).
+	for k, v := range fc.Keybindings {
+		if v != "" {
+			cfg.Keybindings[k] = v
+		}
+	}
+	// Commands: merge sobre defaults.
+	for k, v := range fc.Commands {
+		if v != "" {
+			cfg.Commands[k] = v
+		}
+	}
 	return cfg, ""
 }
 
@@ -123,6 +155,38 @@ func Path() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, DirName, FileName), nil
+}
+
+// DefaultKeybindings devuelve el mapa de teclas por defecto.
+// Las teclas de navegación (arrows, home, end) y especiales (enter, esc,
+// tab, ctrl+c) son universales y no se configuran aquí.
+func DefaultKeybindings() Keybindings {
+	return Keybindings{
+		"quit":      "q",
+		"dirty":     "d",
+		"search":    "/",
+		"fetch":     "f",
+		"fetch_all": "F",
+		"pull":      "p",
+		"push":      "P",
+		"editor":    "e",
+		"lazygit":   "g",
+		"rescan":    "r",
+		"recollect": "R",
+		"fold":      "tab",
+		"detail":    "enter",
+		"command":   "!",
+		"update":    "u",
+	}
+}
+
+// DefaultCommands devuelve los comandos git por defecto.
+func DefaultCommands() Commands {
+	return Commands{
+		"pull":  "pull --ff-only",
+		"push":  "push",
+		"fetch": "fetch --prune",
+	}
 }
 
 // Defaults construye la config por defecto (R1).
@@ -136,9 +200,12 @@ func Defaults() Config {
 		Roots:            expandAll([]string{"~/dev"}),
 		Exclude:          append([]string(nil), DefaultExclude...),
 		Editor:           editor,
+		SyncBranch:       "main", // R14: default global de la sync branch
 		FetchAuto:        true,
 		FetchConcurrency: 4,
 		FetchTimeout:     30 * time.Second,
+		Keybindings:      DefaultKeybindings(),
+		Commands:         DefaultCommands(),
 	}
 }
 
@@ -156,4 +223,80 @@ func expandAll(in []string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+// KeyFor devuelve la tecla configurada para una acción, o el default si
+// no está en el mapa.
+func (c Config) KeyFor(action string) string {
+	if k, ok := c.Keybindings[action]; ok {
+		return k
+	}
+	return DefaultKeybindings()[action]
+}
+
+// CmdArgs devuelve los argumentos del comando git para una acción,
+// separados por espacios. Ej: "pull --rebase --autostash" →
+// ["pull", "--rebase", "--autostash"].
+func (c Config) CmdArgs(action string) []string {
+	raw, ok := c.Commands[action]
+	if !ok {
+		raw = DefaultCommands()[action]
+	}
+	return strings.Fields(raw)
+}
+
+// KeyByAction devuelve un mapa invertido tecla → acción para el
+// procesamiento de input en la TUI.
+func (c Config) KeyByAction() map[string]string {
+	inv := make(map[string]string, len(c.Keybindings))
+	for action, key := range c.Keybindings {
+		inv[key] = action
+	}
+	return inv
+}
+
+// HintLabel devuelve la etiqueta corta para la barra de hints.
+// Acciones internas como "quit" no aparecen (ya están hardcodeadas
+// en la UI o son universales).
+var hintLabels = map[string]string{
+	"up":        "↑/k",
+	"down":      "↓/j",
+	"dirty":     "d dirty",
+	"search":    "/ filter",
+	"fetch":     "f fetch",
+	"fetch_all": "F fetch all",
+	"pull":      "p pull",
+	"push":      "P push",
+	"lazygit":   "g lazygit",
+	"editor":    "e edit",
+	"rescan":    "r rescan",
+	"recollect": "R recollect",
+	"fold":      "tab fold",
+	"detail":    "enter detail",
+	"command":   "! cmd",
+	"update":    "u update",
+}
+
+// HintBar devuelve la línea de hints derivada de los keybindings
+// configurados, en orden canónico.
+func (c Config) HintBar() string {
+	order := []string{
+		"dirty", "search", "fetch", "fetch_all",
+		"pull", "push", "lazygit", "update", "editor", "rescan", "recollect",
+		"fold", "detail", "command", "quit",
+	}
+	var parts []string
+	parts = append(parts, "j/k move")
+	for _, action := range order {
+		key, ok := c.Keybindings[action]
+		if !ok {
+			continue
+		}
+		label, ok := hintLabels[action]
+		if !ok {
+			label = key
+		}
+		parts = append(parts, key+" "+strings.TrimPrefix(label, key+" "))
+	}
+	return strings.Join(parts, " · ")
 }

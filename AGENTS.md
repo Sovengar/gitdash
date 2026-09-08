@@ -5,7 +5,7 @@ Guía para agentes sin contexto previo sobre este proyecto.
 ## Qué es
 
 TUI (Go + Bubbletea v2) que muestra el estado de todos los repos git del
-usuario descubiertos por **fichero marcador** `.repo.toml`: branch, cambios
+usuario descubiertos por **fichero marcador** `.gitdash.toml`: branch, cambios
 pendientes (dirty) y **↑ahead/↓behind**, con fetch automático en batches y
 acciones rápidas (pull/push/editor). Inspirado en
 [bircni/git-statuses](https://github.com/bircni/git-statuses) — no es un
@@ -24,12 +24,21 @@ fork: solo comparte la idea.
 ```bash
 go build ./... && go vet ./... && go test ./...   # build + lint + tests
 go build -o bin/gitdash ./cmd/gitdash              # binario
+go build -o ~/.local/bin/gitdash ./cmd/gitdash     # binario instalado en PATH
 go mod tidy                                        # tras añadir deps
+```
+
+```bash
 ./scripts/gen-fixtures.sh                          # regenera testdata/playground
 bin/gitdash --print                                # modo tabla one-shot
 # smoke test de la TUI (ver Gotcha 3):
 tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux capture-pane -t gd -p
 ```
+
+**REGLA**: al terminar cualquier cambio de código, RECOMPILAR el binario
+instalado (`go build -o ~/.local/bin/gitdash ./cmd/gitdash`). El usuario
+ejecuta el de `~/.local/bin`: un bin stale con cambios ya hechos causa
+síntomas falsos (ej. "no encuentra repos" por el rename del marcador).
 
 ## Arquitectura (flujo de datos)
 
@@ -41,11 +50,12 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 | Package | Rol |
 |---|---|
 | `internal/config` | TOML XDG. `Load()` nunca falla: defaults + warning string |
-| `internal/discovery` | `Project{Path,Name,Group,HasRepo,IsWorktree,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude` |
-| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, Derive, Score) + `status.go` (Collect, StreamPool, Fetch, Pull, Push). El `Snapshot` lleva `Err` embebido: nunca falla duro |
+| `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude`. `MainRepo` enlaza worktree→repo principal |
+| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Fetch, Pull, Push). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro |
 | `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
-| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas), `detail.go`, `styles.go` |
-| `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees) |
+| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `styles.go` |
+| `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom R24, 0003): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
+| `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees, ramas) |
 | `cmd/gitdash` | `main.go` (TUI) + `print.go` (modo `--print`, tabwriter, mismo orden) |
 
 ## Convenciones
@@ -87,7 +97,9 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 ```bash
 # config real del usuario (roots default: ~/dev)
 bin/gitdash
+```
 
+```bash
 # aislada contra los fixtures
 XDG_CONFIG_HOME=$(mktemp -d) bin/gitdash --print
 # con config: crea <tmp>/gitdash/config.toml con roots=["<repo>/testdata/playground"]

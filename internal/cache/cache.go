@@ -18,15 +18,20 @@ const FileName = "repos.json"
 const DirName = "gitdash"
 
 // version del formato; un fichero de otra versión se ignora.
-const version = 1
+// v2 añade sync_branch y main_repo (spec 0002).
+// v3 reemplaza group por primary_group/secondary_group (spec 0003 R22).
+const version = 3
 
 // Entry es un repo persistido.
 type Entry struct {
-	Path       string `json:"path"`
-	Name       string `json:"name"`
-	Group      string `json:"group"`
-	HasRepo    bool   `json:"has_repo"`
-	IsWorktree bool   `json:"is_worktree"`
+	Path           string `json:"path"`
+	Name           string `json:"name"`
+	PrimaryGroup   string `json:"primary_group,omitempty"`
+	SecondaryGroup string `json:"secondary_group,omitempty"`
+	SyncBranch     string `json:"sync_branch,omitempty"`
+	HasRepo        bool   `json:"has_repo"`
+	IsWorktree     bool   `json:"is_worktree"`
+	MainRepo       string `json:"main_repo,omitempty"`
 }
 
 // File es el documento JSON completo.
@@ -65,11 +70,14 @@ func Load(path, marker string) []discovery.Project {
 			continue // S11.2: directorio/marcador borrado → descartar
 		}
 		projects = append(projects, discovery.Project{
-			Path:       e.Path,
-			Name:       e.Name,
-			Group:      e.Group,
-			HasRepo:    e.HasRepo,
-			IsWorktree: e.IsWorktree,
+			Path:           e.Path,
+			Name:           e.Name,
+			PrimaryGroup:   e.PrimaryGroup,
+			SecondaryGroup: e.SecondaryGroup,
+			SyncBranch:     e.SyncBranch,
+			HasRepo:        e.HasRepo,
+			IsWorktree:     e.IsWorktree,
+			MainRepo:       e.MainRepo,
 		})
 	}
 	return projects
@@ -81,11 +89,14 @@ func Save(path string, projects []discovery.Project) error {
 	f := File{Version: version, Repos: make([]Entry, 0, len(projects))}
 	for _, p := range projects {
 		f.Repos = append(f.Repos, Entry{
-			Path:       p.Path,
-			Name:       p.Name,
-			Group:      p.Group,
-			HasRepo:    p.HasRepo,
-			IsWorktree: p.IsWorktree,
+			Path:           p.Path,
+			Name:           p.Name,
+			PrimaryGroup:   p.PrimaryGroup,
+			SecondaryGroup: p.SecondaryGroup,
+			SyncBranch:     p.SyncBranch,
+			HasRepo:        p.HasRepo,
+			IsWorktree:     p.IsWorktree,
+			MainRepo:       p.MainRepo,
 		})
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

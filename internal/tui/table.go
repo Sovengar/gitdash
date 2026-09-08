@@ -1,4 +1,5 @@
-// Filas de la tabla: filtrado, orden y render de celdas (spec 0001 R6-R7).
+// Filas de la tabla: filtrado, orden, agrupación y render de celdas
+// (spec 0001 R6-R7; 0002 R15-R16).
 package tui
 
 import (
@@ -9,6 +10,7 @@ import (
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/group"
 )
 
 // row agrupa un proyecto con su snapshot vivo para render.
@@ -16,6 +18,44 @@ type row struct {
 	project discovery.Project
 	snap    gitstatus.Snapshot
 	state   gitstatus.State
+}
+
+// entryKind distingue fila de grupo (header plegable) y fila de repo.
+type entryKind int
+
+const (
+	kindRepo entryKind = iota
+	kindPrimary
+	kindSecondary
+)
+
+// tableEntry es una fila navegable de la tabla: header primario, header
+// secundario o repo (patrón buildTree de vroom R24, extendido 0003 R20).
+// group lleva la clave de plegado: nombre del primario o
+// `primario/secundario` para los headers de nivel 2.
+type tableEntry struct {
+	kind  entryKind
+	group string // válido en kindPrimary/kindSecondary
+	r     row    // válido en kindRepo
+}
+
+// groupKey compone la clave de plegado de un secundario (S20.5: evita
+// colisión de nombres entre primarios distintos).
+func groupKey(primary, secondary string) string {
+	return primary + "/" + secondary
+}
+
+// groupLabel compone el texto compuesto `primary/secondary` de un proyecto
+// (R21): solo primario si no hay secundario, "" si ninguno.
+func groupLabel(p discovery.Project) string {
+	switch {
+	case p.PrimaryGroup != "" && p.SecondaryGroup != "":
+		return groupKey(p.PrimaryGroup, p.SecondaryGroup)
+	case p.PrimaryGroup != "":
+		return p.PrimaryGroup
+	default:
+		return ""
+	}
 }
 
 // pendingStates son los estados que el filtro `n` considera no-limpios:
@@ -42,6 +82,9 @@ func (m *Model) rows() []row {
 		if m.search != "" && !matchSearch(p, m.search) {
 			continue
 		}
+		if m.worktreeHidden(p) { // 0002 R15: wt plegados bajo su repo principal
+			continue
+		}
 		out = append(out, row{project: p, snap: snap, state: st})
 	}
 
@@ -49,11 +92,98 @@ func (m *Model) rows() []row {
 	return out
 }
 
-// matchSearch compara nombre y grupo, case-insensitive (S7.2).
+// entries compone las filas navegables de la tabla (0002 R16, 0003 R19/R20):
+// las filas base (filtro+sort) se agrupan con group.Arrange y los bloques
+// colapsados omiten sus miembros: plegar un primario oculta también sus
+// headers secundarios; plegar un secundario solo sus repos.
+func (m *Model) entries() []tableEntry {
+	base := m.rows()
+	arranged := group.Arrange(toEntries(base))
+
+	out := make([]tableEntry, 0, len(arranged)+2)
+	skipPrim, skipSec := "", "" // bloques colapsados cuyas filas se omiten
+	for i, e := range arranged {
+		if group.IsPrimaryHeader(arranged, i) {
+			out = append(out, tableEntry{kind: kindPrimary, group: e.Primary})
+			if m.collapsed[e.Primary] {
+				skipPrim, skipSec = e.Primary, ""
+				continue
+			}
+			skipPrim = ""
+		}
+		if skipPrim == "" && group.IsSecondaryHeader(arranged, i) {
+			key := groupKey(e.Primary, e.Secondary)
+			out = append(out, tableEntry{kind: kindSecondary, group: key})
+			if m.collapsed[key] {
+				skipSec = key
+				continue
+			}
+			skipSec = ""
+		}
+		if skipPrim != "" || skipSec != "" {
+			continue
+		}
+		out = append(out, tableEntry{kind: kindRepo, r: row{project: e.Proj, snap: e.Snap, state: e.State}})
+	}
+	return out
+}
+
+// groupOfEntry devuelve la clave de plegado de la entrada: el contenedor más
+// interno para repos (secundario si tiene, si no primario: S20.3) o la clave
+// del propio header.
+func groupOfEntry(e tableEntry) string {
+	switch e.kind {
+	case kindPrimary, kindSecondary:
+		return e.group
+	default:
+		p := e.r.project
+		if p.PrimaryGroup == "" {
+			return group.Ungrouped // sección final plegable
+		}
+		if p.SecondaryGroup != "" {
+			return groupKey(p.PrimaryGroup, p.SecondaryGroup)
+		}
+		return p.PrimaryGroup
+	}
+}
+
+// toEntries adapta las filas base a las Entry del package group.
+func toEntries(rs []row) []group.Entry {
+	out := make([]group.Entry, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, group.Entry{
+			Primary:   r.project.PrimaryGroup,
+			Secondary: r.project.SecondaryGroup,
+			Proj:      r.project,
+			Snap:      r.snap,
+			State:     r.state,
+		})
+	}
+	return out
+}
+
+// worktreeHidden reporta si un worktree descubierto debe plegarse bajo su
+// repo principal (0002 R15/S15.1). El fallback de huérfanos (S15.3):
+// si el repo principal no está entre los descubiertos, sigue visible.
+func (m *Model) worktreeHidden(p discovery.Project) bool {
+	if !p.IsWorktree || p.MainRepo == "" {
+		return false
+	}
+	for _, q := range m.projects {
+		if q.Path == p.MainRepo {
+			return true
+		}
+	}
+	return false
+}
+
+// matchSearch compara nombre, primary y secondary, case-insensitive (S7.2,
+// 0003 S18.5).
 func matchSearch(p discovery.Project, q string) bool {
 	q = strings.ToLower(q)
 	return strings.Contains(strings.ToLower(p.Name), q) ||
-		strings.Contains(strings.ToLower(p.Group), q)
+		strings.Contains(strings.ToLower(p.PrimaryGroup), q) ||
+		strings.Contains(strings.ToLower(p.SecondaryGroup), q)
 }
 
 // sortRows ordena in-place: score desc, último commit desc, nombre asc (R6).
@@ -78,8 +208,12 @@ func rowLess(a, b row) bool {
 }
 
 // summary cuenta los estados de todos los proyectos para la barra (R6).
+// Los worktree plegados no cuentan como repos (0002 R15).
 func (m *Model) summary() (total, dirty, ahead, behind int) {
 	for _, p := range m.projects {
+		if m.worktreeHidden(p) {
+			continue
+		}
 		snap := m.states[p.Path]
 		total++
 		switch snap.State(p.HasRepo) {
@@ -100,13 +234,85 @@ func (m *Model) summary() (total, dirty, ahead, behind int) {
 // el render final hace pad(texto) y luego aplica el estilo, así la
 // alineación nunca se rompe por códigos ANSI.
 
+// renderEntry compone una línea navegable: header primario, header
+// secundario (indentado) o fila de repo (0003 R20). El cursor sigue la
+// misma convención que las filas de repo.
+func (m *Model) renderEntry(e tableEntry, selected bool) string {
+	switch e.kind {
+	case kindPrimary:
+		line := m.primaryHeaderLine(e.group)
+		if selected {
+			return styleCursor.Render("▸ ") + line
+		}
+		return "  " + line
+	case kindSecondary:
+		line := m.secondaryHeaderLine(e.group)
+		if selected {
+			return styleCursor.Render("▸ ") + indentHeader + line
+		}
+		return "  " + indentHeader + line
+	default:
+		return m.renderRow(e.r, selected)
+	}
+}
+
+// indentHeader es el sangrado de los headers secundarios dentro de su
+// primario (0003 R20).
+const indentHeader = "  "
+
+// primaryHeaderLine dibuja `▾/▸ primario (n)`: expandido/colapsado con el
+// número de repos del primario incluidos sus secundarios (S20.4).
+func (m *Model) primaryHeaderLine(g string) string {
+	glyph := "▾"
+	if m.collapsed[g] {
+		glyph = "▸"
+	}
+	return styleGroupHeader.Render(glyph + " " + fmt.Sprintf("%s (%d)", g, m.countPrimary(g)))
+}
+
+// secondaryHeaderLine dibuja `▾/▸ secundario (n)` (sin el primario: ya está
+// en su header padre).
+func (m *Model) secondaryHeaderLine(key string) string {
+	glyph := "▾"
+	if m.collapsed[key] {
+		glyph = "▸"
+	}
+	_, sec, _ := strings.Cut(key, "/")
+	return styleSecondaryHeader.Render(glyph + " " + fmt.Sprintf("%s (%d)", sec, m.countSecondary(key)))
+}
+
+// countPrimary cuenta los repos visibles del primario (después de filtros,
+// antes de plegado), incluidos los de sus secundarios.
+func (m *Model) countPrimary(g string) int {
+	n := 0
+	for _, e := range group.Arrange(toEntries(m.rows())) {
+		if e.Primary == g {
+			n++
+		}
+	}
+	return n
+}
+
+// countSecondary cuenta los repos visibles del secundario `prim/sec`.
+func (m *Model) countSecondary(key string) int {
+	n := 0
+	for _, e := range group.Arrange(toEntries(m.rows())) {
+		if e.Primary != "" && groupKey(e.Primary, e.Secondary) == key {
+			n++
+		}
+	}
+	return n
+}
+
 // renderRow compone una línea de la tabla con cursor opcional (R6).
+// 0004 R25: sin columna GROUP (los headers plegables ya identifican el
+// grupo); Work Tree sustituye a STATE (R26).
 func (m *Model) renderRow(r row, selected bool) string {
 	name, nameStyle := m.nameCell(r)
-	group, groupStyle := m.groupCell(r)
 	branch, branchStyle := m.branchCell(r)
-	state, stateStyle := m.stateCell(r)
+	wt, wtStyle := m.wtCell(r)
 	upDown, upDownStyle := m.upDownCell(r)
+	sync, syncStyle := m.syncCell(r)
 	activity, activityStyle := activityCell(r)
 	fetch, fetchStyle := m.fetchCell(r.project.Path)
 
@@ -116,10 +322,10 @@ func (m *Model) renderRow(r row, selected bool) string {
 		width int
 	}{
 		{name, nameStyle, colName},
-		{group, groupStyle, colGroup},
 		{branch, branchStyle, colBranch},
-		{state, stateStyle, colState},
+		{wt, wtStyle, colWT},
 		{upDown, upDownStyle, colUpDown},
+		{sync, syncStyle, colSync},
 		{activity, activityStyle, colActivity},
 		{fetch, fetchStyle, colFetch},
 	}
@@ -137,7 +343,11 @@ func (m *Model) renderRow(r row, selected bool) string {
 func (m *Model) nameCell(r row) (string, lipglossStyle) {
 	name := r.project.Name
 	if r.project.IsWorktree {
-		name += " [wt]" // S3.2: tag de worktree
+		name += " [wt]" // S3.2: tag de worktree (huérfanos y modo print)
+	}
+	// 0002 R15/S15.4: indicador de worktrees del repo principal.
+	if n := len(r.snap.Worktrees); n > 0 {
+		name += fmt.Sprintf(" (%d wt)", n)
 	}
 	if r.project.MarkerErr != "" {
 		return name, styleWarn // S4.3: marcador malformado visible
@@ -145,8 +355,21 @@ func (m *Model) nameCell(r row) (string, lipglossStyle) {
 	return name, styleSel
 }
 
-func (m *Model) groupCell(r row) (string, lipglossStyle) {
-	return orDash(r.project.Group), styleDim
+// wtCell compone la columna Work Tree: SOLO working tree (0004 R26).
+// `N ?M` (tracked/untracked), vacío si limpio (tabla quieta, R28), `∅`
+// no-repo y `⚠` error. Sin `●`, `⇅`, `detached` ni `no-upstream`: detached
+// vive solo en BRANCH y no-up solo en ↑↓up.
+func (m *Model) wtCell(r row) (string, lipglossStyle) {
+	switch r.state {
+	case gitstatus.StateError:
+		return "⚠", styleError // S4.3: el detalle muestra el error completo
+	case gitstatus.StateNoRepo:
+		return "∅", styleDim // S3.3
+	}
+	if r.snap.Status.Dirty() > 0 {
+		return dirtyTail(r), m.styleFor(r)
+	}
+	return "", styleClean
 }
 
 func (m *Model) branchCell(r row) (string, lipglossStyle) {
@@ -160,25 +383,17 @@ func (m *Model) branchCell(r row) (string, lipglossStyle) {
 	}
 }
 
-// stateCell compone la columna de estado (dirty/untracked/errores).
-func (m *Model) stateCell(r row) (string, lipglossStyle) {
-	switch r.state {
-	case gitstatus.StateError:
-		return "⚠ error", styleError
-	case gitstatus.StateNoRepo:
-		return "∅ no repo", styleDim
-	case gitstatus.StateNoUpstream:
-		return "no-upstream", styleWarn
-	case gitstatus.StateDetached:
-		return "detached", styleWarn
-	case gitstatus.StateClean:
-		return "✓", styleClean
-	case gitstatus.StateDiverged:
-		return "⇅ " + dirtyTail(r), styleDiverged
-	case gitstatus.StateDirty:
-		return "● " + dirtyTail(r), styleDirty
-	default: // ahead/behind
-		return "·", styleClean
+// fetchCell compone el estado TRANSITORIO del fetch (0004 R24): solo ⟳ y ✗.
+// En éxito queda vacía (el éxito lo señala la notificación de la barra,
+// S8.2); el fallo persiste hasta el próximo fetch de ese repo.
+func (m *Model) fetchCell(path string) (string, lipglossStyle) {
+	switch m.fetchStates[path] {
+	case "fetching":
+		return "⟳ fetch", styleFetchRun
+	case "failed":
+		return "✗ fetch", styleFetchBad
+	default:
+		return "", styleClean
 	}
 }
 
@@ -195,14 +410,16 @@ func dirtyTail(r row) string {
 	return strings.TrimSpace(out)
 }
 
-// upDownCell compone ↑ahead/↓behind (S5.2) o — sin upstream.
+// upDownCell compone ↑↓ vs upstream (0004 R27): `↑N↓N`/`↑N`/`↓N` — diverged
+// vive aquí, sin `⇅` en Work Tree —, `no-up` sin upstream trackeado y vacío
+// en sync (tabla quieta, sin `·`). Errores y no-repo quedan vacíos.
 func (m *Model) upDownCell(r row) (string, lipglossStyle) {
 	s := r.snap.Status
-	if r.state == gitstatus.StateNoRepo {
+	if r.state == gitstatus.StateNoRepo || r.snap.Err != "" {
 		return "", styleClean
 	}
 	if !s.HasUpstream {
-		return "—", styleDim
+		return "no-up", styleWarn // S5.4: rama sin cuerda al remoto
 	}
 	switch {
 	case s.Ahead > 0 && s.Behind > 0:
@@ -216,23 +433,25 @@ func (m *Model) upDownCell(r row) (string, lipglossStyle) {
 	}
 }
 
+// syncCell compone la desviación vs sync branch con la rama visible (0004
+// R23): `<rama> ↓N` behind (warn), `<rama>` a secas en sync (dim, sin tick),
+// `<rama> —` con ref inexistente y `—` sin rama resuelta.
+func (m *Model) syncCell(r row) (string, lipglossStyle) {
+	if r.state == gitstatus.StateNoRepo || r.snap.SyncBranch == "" {
+		return "—", styleDim
+	}
+	if !r.snap.SyncKnown {
+		return r.snap.SyncBranch + " —", styleDim // S23.4: ref inexistente
+	}
+	if r.snap.SyncBehind == 0 {
+		return r.snap.SyncBranch, styleDim // S23.3: tabla quieta
+	}
+	return fmt.Sprintf("%s ↓%d", r.snap.SyncBranch, r.snap.SyncBehind), styleWarn
+}
+
 // activityCell devuelve la fecha relativa del último commit (R6).
 func activityCell(r row) (string, lipglossStyle) {
 	return relativeTime(r.snap.LastCommit), styleDim
-}
-
-// fetchCell compone el estado del fetch de la fila (S6.3).
-func (m *Model) fetchCell(path string) (string, lipglossStyle) {
-	switch m.fetchStates[path] {
-	case "fetching":
-		return "⟳ fetch", styleFetchRun
-	case "ok":
-		return "✓", styleFetchOk
-	case "failed":
-		return "✗ fetch", styleFetchBad
-	default:
-		return "", styleClean
-	}
 }
 
 // styleFor elige el estilo según el estado derivado.

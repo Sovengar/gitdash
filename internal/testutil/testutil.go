@@ -46,9 +46,10 @@ func CommitFiles(t *testing.T, dir string, files map[string]string, msg string) 
 	git(t, dir, "commit", "-m", msg)
 }
 
-// Marker escribe el marcador .repo.toml con los metadatos dados
+// Marker escribe el marcador .gitdash.toml con los metadatos dados
 // ("" como valor = clave omitida). Con malformed=true escribe TOML inválido.
-func Marker(t *testing.T, dir, name, group string, malformed bool) {
+// 0003 R18: primary_group/secondary_group (la clave group ya no existe).
+func Marker(t *testing.T, dir, name, primary, secondary string, malformed bool) {
 	t.Helper()
 	var content string
 	if malformed {
@@ -57,11 +58,14 @@ func Marker(t *testing.T, dir, name, group string, malformed bool) {
 		if name != "" {
 			content += "name = \"" + name + "\"\n"
 		}
-		if group != "" {
-			content += "group = \"" + group + "\"\n"
+		if primary != "" {
+			content += "primary_group = \"" + primary + "\"\n"
+		}
+		if secondary != "" {
+			content += "secondary_group = \"" + secondary + "\"\n"
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".repo.toml"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -155,4 +159,14 @@ func BreakGit(t *testing.T, dir string) {
 func FetchLocal(t *testing.T, dir string) {
 	t.Helper()
 	git(t, dir, "fetch", "--quiet", "origin")
+}
+
+// Checkout cambia a una rama (existente) del repo.
+func Checkout(t *testing.T, dir, branch string) {
+	git(t, dir, "checkout", "--quiet", branch)
+}
+
+// NewBranch crea (o recrea) una rama en HEAD y se cambia a ella.
+func NewBranch(t *testing.T, dir, branch string) {
+	git(t, dir, "checkout", "-qB", branch)
 }
