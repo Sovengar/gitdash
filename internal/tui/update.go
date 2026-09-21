@@ -258,6 +258,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "pull") // S9.1
 		}
+	case "sync":
+		if r, ok := m.selected(); ok && !r.project.HasRepo {
+			return m, m.notifyCmd("no git repo — nothing to do")
+		} else if ok {
+			return m, m.startActionCmd(r.project.Path, "sync")
+		}
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.notifyCmd("no git repo — nothing to do")
@@ -305,6 +311,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		g := groupOfEntry(entries[m.cursor])
 		m.collapsed[g] = !m.collapsed[g]
 		m.clampCursor()
+		m.saveCollapsed()
 		return m, nil
 	case "detail":
 		entries := m.entries()
@@ -314,6 +321,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				g := entries[m.cursor].group
 				m.collapsed[g] = !m.collapsed[g]
 				m.clampCursor()
+				m.saveCollapsed()
 				return m, nil
 			}
 		}
@@ -406,7 +414,18 @@ func (m Model) renderDashboard() string {
 
 	// filas con scroll (headers de grupo incluidos, 0002 R16)
 	entries := m.entries()
-	bodyLines := max(1, m.height-5)
+	// altura del bar: 1 separador + 1 notify/status + 3 hints lines
+	barLines := 4 // separator + 3 hint rows
+	if m.notify != "" || m.scanning || m.fetchingAll() {
+		barLines++
+	}
+	for _, kind := range m.running {
+		if kind == "pull" || kind == "push" || kind == "sync" {
+			barLines++
+			break
+		}
+	}
+	bodyLines := max(1, m.height-1-barLines)
 	if m.scanNote != "" {
 		bodyLines--
 	}
@@ -441,9 +460,12 @@ func (m *Model) syncOffset(total, window int) {
 	}
 }
 
-// renderBar pinta notificación o run-states y la línea de hints.
+// renderBar pinta notificación o run-states y las líneas de hints.
 func (m Model) renderBar() string {
 	var b strings.Builder
+
+	// separador visual entre contenido y barra
+	b.WriteString(styleSeparator.Render(strings.Repeat("─", m.width)) + "\n")
 
 	left := ""
 	if m.notify != "" {
@@ -453,7 +475,7 @@ func (m Model) renderBar() string {
 			left = m.spinner.View() + " working  "
 		}
 		for path, kind := range m.running {
-			if kind == "pull" || kind == "push" {
+			if kind == "pull" || kind == "push" || kind == "sync" {
 				left += styleFetchRun.Render(fmt.Sprintf("%s %s…  ", kind, m.nameOf(path)))
 			}
 		}
@@ -462,7 +484,8 @@ func (m Model) renderBar() string {
 		b.WriteString(left + "\n")
 	}
 
-	hints := m.cfg.HintBar()
-	b.WriteString(styleHint.Render(truncate(hints, max(40, m.width))) + "\n")
+	for _, line := range m.cfg.HintBarLines() {
+		b.WriteString(styleHint.Render(truncate(line, max(40, m.width))) + "\n")
+	}
 	return b.String()
 }

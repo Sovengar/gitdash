@@ -187,6 +187,15 @@ func Push(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, args...)
 }
 
+// Sync ejecuta `git sync` (default: pull --rebase --autostash) con los
+// args dados y devuelve la salida combinada (R9).
+func Sync(ctx context.Context, dir string, args ...string) (string, error) {
+	if len(args) == 0 {
+		args = []string{"pull", "--rebase", "--autostash"}
+	}
+	return runGitCombined(ctx, dir, args...)
+}
+
 // runGit ejecuta git en dir y devuelve stdout.
 func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)

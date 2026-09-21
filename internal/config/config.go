@@ -167,6 +167,7 @@ func DefaultKeybindings() Keybindings {
 		"search":    "/",
 		"fetch":     "f",
 		"fetch_all": "F",
+		"sync":      "s",
 		"pull":      "p",
 		"push":      "P",
 		"editor":    "e",
@@ -185,6 +186,7 @@ func DefaultCommands() Commands {
 	return Commands{
 		"pull":  "pull --ff-only",
 		"push":  "push",
+		"sync":  "pull --rebase --autostash",
 		"fetch": "fetch --prune",
 	}
 }
@@ -265,6 +267,7 @@ var hintLabels = map[string]string{
 	"search":    "/ filter",
 	"fetch":     "f fetch",
 	"fetch_all": "F fetch all",
+	"sync":      "s sync",
 	"pull":      "p pull",
 	"push":      "P push",
 	"lazygit":   "g lazygit",
@@ -275,19 +278,22 @@ var hintLabels = map[string]string{
 	"detail":    "enter detail",
 	"command":   "! cmd",
 	"update":    "u update",
+	"quit":      "q quit",
 }
 
-// HintBar devuelve la línea de hints derivada de los keybindings
-// configurados, en orden canónico.
-func (c Config) HintBar() string {
-	order := []string{
-		"dirty", "search", "fetch", "fetch_all",
+// HintBarLines devuelve las líneas de hints agrupadas por categoría,
+// derivada de los keybindings configurados. Cada línea es un string
+// con los hints separados por " · ".
+func (c Config) HintBarLines() []string {
+	row1 := []string{"j/k move"} // navegación + vista
+	row2 := []string{}           // acciones git
+	row3 := []string{}           // tools
+
+	for _, action := range []string{
+		"dirty", "search", "fetch", "fetch_all", "sync",
 		"pull", "push", "lazygit", "update", "editor", "rescan", "recollect",
 		"fold", "detail", "command", "quit",
-	}
-	var parts []string
-	parts = append(parts, "j/k move")
-	for _, action := range order {
+	} {
 		key, ok := c.Keybindings[action]
 		if !ok {
 			continue
@@ -296,7 +302,21 @@ func (c Config) HintBar() string {
 		if !ok {
 			label = key
 		}
-		parts = append(parts, key+" "+strings.TrimPrefix(label, key+" "))
+		hint := key + " " + strings.TrimPrefix(label, key+" ")
+
+		switch action {
+		case "dirty", "search", "fold", "detail", "command":
+			row1 = append(row1, hint)
+		case "fetch", "fetch_all", "sync", "pull", "push":
+			row2 = append(row2, hint)
+		default:
+			row3 = append(row3, hint)
+		}
 	}
-	return strings.Join(parts, " · ")
+
+	return []string{
+		strings.Join(row1, " · "),
+		strings.Join(row2, " · "),
+		strings.Join(row3, " · "),
+	}
 }

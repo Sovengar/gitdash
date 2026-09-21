@@ -20,6 +20,7 @@ import (
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/state"
 )
 
 // event es el mensaje unificado del canal de trabajo en background.
@@ -85,14 +86,15 @@ type Model struct {
 	projects []discovery.Project
 	states   map[string]gitstatus.Snapshot
 
-	cursor int
-	offset int // scroll de la tabla
+	store     *state.Store
+	cursor    int
+	offset    int // scroll de la tabla
+	onlyDirty bool
+	search    string
 
-	onlyDirty    bool
-	search       string
 	searchActive bool
 	searchInput  textinput.Model
-	collapsed    map[string]bool // 0002 R16: grupos plegados (solo sesión)
+	collapsed    map[string]bool // 0002 R16: grupos plegados
 
 	scanning  bool
 	scanNote  string
@@ -135,8 +137,10 @@ const searchPlaceholder = "name/group…"
 // (S11.1: pintura instantánea; el rescan corre vía Init).
 func New(cfg config.Config) Model {
 	ctx, cancel := context.WithCancel(context.Background())
+	store, _ := state.NewStore()
 	m := Model{
 		cfg:         cfg,
+		store:       store,
 		states:      map[string]gitstatus.Snapshot{},
 		events:      make(chan event, 256),
 		ctx:         ctx,
@@ -163,6 +167,14 @@ func New(cfg config.Config) Model {
 
 	if path, err := cache.Path(); err == nil {
 		m.projects = cache.Load(path, cfg.Marker) // S11.1
+	}
+	// Restaurar el estado de plegado persistido (S20.5).
+	if store != nil {
+		if persisted := store.LoadCollapsed(); persisted != nil {
+			for k, v := range persisted {
+				m.collapsed[k] = v
+			}
+		}
 	}
 	return m
 }
@@ -321,6 +333,8 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		var err error
 		if kind == "pull" {
 			out, err = gitstatus.Pull(ctx, path, m.cfg.CmdArgs("pull")...)
+		} else if kind == "sync" {
+			out, err = gitstatus.Sync(ctx, path, m.cfg.CmdArgs("sync")...)
 		} else {
 			out, err = gitstatus.Push(ctx, path, m.cfg.CmdArgs("push")...)
 		}
@@ -494,6 +508,15 @@ func (m *Model) syncOf(path string) string {
 		}
 	}
 	return m.cfg.SyncBranch
+}
+
+// saveCollapsed persiste el estado de plegado a disco (best-effort:
+// no bloquear la UI). Se llama tras cada toggle de plegado.
+func (m *Model) saveCollapsed() {
+	if m.store == nil {
+		return
+	}
+	_ = m.store.SaveCollapsed(m.collapsed)
 }
 
 // selected devuelve la fila de repo bajo el cursor, si la hay. Los

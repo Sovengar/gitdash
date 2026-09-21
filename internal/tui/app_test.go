@@ -12,6 +12,7 @@ import (
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/state"
 )
 
 // newTestModel construye un modelo con proyectos y snapshots dados.
@@ -22,6 +23,9 @@ func newTestModel(t *testing.T, projects []discovery.Project, states map[string]
 	m.projects = projects
 	m.states = states
 	m.scanning = false
+	// Usar directorio temporal para tests (aislar del estado real)
+	m.store = state.NewStoreAt(t.TempDir())
+	m.collapsed = map[string]bool{}
 	return m
 }
 

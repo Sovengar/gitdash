@@ -34,9 +34,10 @@ var (
 	styleFetchRun = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	styleFetchBad = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	styleBar  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleHint = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	styleSel  = lipgloss.NewStyle().Bold(true)
+	styleBar        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleHint       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	styleSel        = lipgloss.NewStyle().Bold(true)
 
 	// 0002 R16: header de grupo (vroom R24)
 	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
