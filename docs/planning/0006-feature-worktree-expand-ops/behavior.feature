@@ -120,10 +120,12 @@ Feature: Worktrees expandibles y operables desde el menú principal
     Then la tabla hace scroll para mantener la sub-fila visible
 
   @R32
-  Scenario: S32.3 — plegar con el cursor en la sub-fila
-    Given el cursor está sobre una sub-fila del repo expandido
-    When se pliega el repo con `space`
+  Scenario: S32.3 — al desaparecer las sub-filas, el cursor queda en rango
+    Given el cursor está sobre una sub-fila de un repo expandido
+    When una acción de vista hace desaparecer esas sub-filas (p.ej. activar
+      el filtro `d` que excluye al padre)
     Then el cursor queda dentro del rango de filas visibles (sin quedar colgado)
+    And al revertir la acción, el repo sigue expandido
 
   # R33: Sobre una sub-fila de worktree, TODAS las operaciones a nivel de repo
   # SHALL ejecutarse contra el path del worktree concreto, con los mismos guards
@@ -336,3 +338,22 @@ Feature: Worktrees expandibles y operables desde el menú principal
     Given un repo plegado cuya búsqueda activa matchea uno de sus worktrees
     When se limpia la búsqueda
     Then el repo vuelve a su estado de expansión persistido (plegado)
+
+  # Revisiones (0006, post-review)
+  #
+  # R33.6 — detalle de un worktree descubierto con marcador:
+  #   El texto literal del escenario dice "no muestra estado git derivado
+  #   (dirty/ahead/behind/sync) para ese worktree". Esa restricción aplica al
+  #   worktree SIN snapshot propio (panel mínimo: path/rama/head). Cuando el
+  #   worktree fue descubierto con marcador y dispone de snapshot vivo, el
+  #   usuario confirmó que el detalle DEBE mostrar ese snapshot vivo (mismo
+  #   panel que una fila de repo), en lugar del panel mínimo. Sin snapshot
+  #   vivo, se mantiene el panel mínimo sin inventar estado.
+  #   -> Decisión del usuario, no una desviación accidental.
+  #
+  # S32.3 — coherencia del cursor:
+  #   El texto original ("plegar con `space` con el cursor sobre la sub-fila")
+  #   contradecía R30.6/S30.6 (`space` sobre una sub-fila es no-op, no pliega
+  #   el padre). Se reformula para usar un camino de usuario real que hace
+  #   desaparecer las sub-filas bajo el cursor (p.ej. el filtro `d`), donde la
+  #   garantía de `clampCursor` sí es observable.
