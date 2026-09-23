@@ -303,13 +303,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "fold":
 		// 0002 R16/S16.2, 0003 S20.3: plegar/desplegar el contenedor bajo
-		// el cursor (secundario interno para repos, header si es header)
+		// el cursor (secundario interno para repos, header si es header).
+		// 0006 R39: sobre una sub-fila de worktree es no-op (no debe plegar
+		// la sección (ungrouped) por accidente).
 		entries := m.entries()
 		if len(entries) == 0 || m.cursor >= len(entries) {
 			return m, nil
 		}
+		if entries[m.cursor].kind == kindWorktree {
+			return m, nil
+		}
 		g := groupOfEntry(entries[m.cursor])
 		m.collapsed[g] = !m.collapsed[g]
+		m.clampCursor()
+		m.saveCollapsed()
+		return m, nil
+	case "expand":
+		// 0006 R30: `space` alterna las sub-filas de worktree del repo bajo
+		// el cursor. No-op sobre headers de grupo (selected() false), sobre
+		// sub-filas de worktree y sobre repos sin worktrees / no-repo.
+		r, ok := m.selected()
+		if !ok || !m.expandable(r) {
+			return m, nil
+		}
+		m.expanded[r.project.Path] = !m.expanded[r.project.Path]
 		m.clampCursor()
 		m.saveCollapsed()
 		return m, nil
@@ -358,7 +375,10 @@ func (m Model) actionForKey(key string) string {
 func (m Model) View() tea.View {
 	content := m.renderDashboard()
 	if m.detailOpen {
-		if r, ok := m.selected(); ok {
+		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
+			// 0006 R33.6: detalle dedicado del worktree (sin inventar estado).
+			content = m.renderWorktreeDetail(e)
+		} else if r, ok := m.selected(); ok {
 			content = m.renderDetail(r)
 		}
 	}

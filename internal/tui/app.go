@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +98,11 @@ type Model struct {
 	searchInput  textinput.Model
 	collapsed    map[string]bool // 0002 R16: grupos plegados
 
+	// 0006 R35: expansión de worktrees por path canónico del repo principal.
+	// Ausente = plegado (R35.2). Persiste en collapsed.json bajo namespace
+	// propio (polaridad inversa a las claves de grupo).
+	expanded map[string]bool
+
 	scanning  bool
 	scanNote  string
 	fetchNote string
@@ -150,6 +157,7 @@ func New(cfg config.Config) Model {
 		lastAction:  map[string]actionResult{},
 		lastCmd:     map[string]cmdResult{},
 		collapsed:   map[string]bool{},
+		expanded:    map[string]bool{},
 	}
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
@@ -168,15 +176,29 @@ func New(cfg config.Config) Model {
 	if path, err := cache.Path(); err == nil {
 		m.projects = cache.Load(path, cfg.Marker) // S11.1
 	}
-	// Restaurar el estado de plegado persistido (S20.5).
+	// Restaurar el estado de plegado persistido (S20.5) y la expansión de
+	// worktrees (0006 R35). La carga separa ambos espacios por prefijo: las
+	// claves con WorktreePrefix van a `expanded` (true = expandido), el
+	// resto a `collapsed` (true = plegado).
 	if store != nil {
 		if persisted := store.LoadCollapsed(); persisted != nil {
-			for k, v := range persisted {
-				m.collapsed[k] = v
-			}
+			m.loadPersisted(persisted)
 		}
 	}
 	return m
+}
+
+// loadPersisted vuelca el mapa plano de collapsed.json en los dos espacios
+// de nombres del modelo (0006 R35): expansión de worktrees vs. plegado de
+// grupos. Fichero corrupto o ausente ya llega como nil (S35.4).
+func (m *Model) loadPersisted(persisted map[string]bool) {
+	for k, v := range persisted {
+		if path, ok := strings.CutPrefix(k, state.WorktreePrefix); ok {
+			m.expanded[path] = v
+			continue
+		}
+		m.collapsed[k] = v
+	}
 }
 
 // Init lanza el primer scan, la bomba de eventos y el tick.
@@ -489,14 +511,23 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 	})
 }
 
-// nameOf devuelve el nombre visible de un path.
+// nameOf devuelve el nombre visible de un path (0006 R33.7): el nombre del
+// proyecto descubierto, el basename para un worktree (aunque tenga marcador
+// propio, la notificación usa el directorio) y el path absoluto en último
+// término si no es resoluble.
 func (m *Model) nameOf(path string) string {
 	for _, p := range m.projects {
 		if p.Path == path {
+			if p.IsWorktree {
+				return filepath.Base(path)
+			}
 			return p.Name
 		}
 	}
-	return path
+	if path == "" {
+		return path
+	}
+	return filepath.Base(path)
 }
 
 // syncOf resuelve la sync branch efectiva de un path (R14): override del
@@ -510,25 +541,69 @@ func (m *Model) syncOf(path string) string {
 	return m.cfg.SyncBranch
 }
 
-// saveCollapsed persiste el estado de plegado a disco (best-effort:
-// no bloquear la UI). Se llama tras cada toggle de plegado.
+// saveCollapsed persiste el estado de plegado y de expansión a disco
+// (best-effort: no bloquear la UI). Se llama tras cada toggle. Compone los
+// dos espacios de nombres (0006 S35.3): claves de grupo tal cual y la
+// expansión de worktrees bajo WorktreePrefix.
 func (m *Model) saveCollapsed() {
 	if m.store == nil {
 		return
 	}
-	_ = m.store.SaveCollapsed(m.collapsed)
+	combined := make(map[string]bool, len(m.collapsed)+len(m.expanded))
+	for k, v := range m.collapsed {
+		combined[k] = v
+	}
+	for path, v := range m.expanded {
+		combined[state.WorktreePrefix+path] = v
+	}
+	_ = m.store.SaveCollapsed(combined)
 }
 
-// selected devuelve la fila de repo bajo el cursor, si la hay. Los
-// headers de grupo (0002 R16) no seleccionan repo: ok=false.
-func (m *Model) selected() (row, bool) {
+// selectedEntry devuelve la entrada navegable bajo el cursor, si la hay.
+func (m *Model) selectedEntry() (tableEntry, bool) {
 	entries := m.entries()
 	if len(entries) == 0 || m.cursor >= len(entries) {
+		return tableEntry{}, false
+	}
+	return entries[m.cursor], true
+}
+
+// selected devuelve la fila (con path resoluble) bajo el cursor, si la hay.
+// Los headers de grupo (0002 R16) no seleccionan repo: ok=false. Una
+// sub-fila de worktree (0006 R32/R33) se resuelve a una fila sintética con
+// el path del worktree y HasRepo=true, de forma que TODAS las operaciones
+// (que leen r.project.Path/HasRepo/MarkerErr) operan sobre el worktree.
+func (m *Model) selected() (row, bool) {
+	e, ok := m.selectedEntry()
+	if !ok {
 		return row{}, false
 	}
-	e := entries[m.cursor]
-	if e.kind != kindRepo {
+	switch e.kind {
+	case kindRepo:
+		return e.r, true
+	case kindWorktree:
+		return m.worktreeRow(e.wt), true
+	default:
 		return row{}, false
 	}
-	return e.r, true
+}
+
+// worktreeRow sintetiza la fila operable de un worktree (0006 R33). Si el
+// worktree fue descubierto con marcador (dedupe R31.3), reutiliza su
+// proyecto y su snapshot vivo; si no, un proyecto mínimo con HasRepo=true y
+// MarkerErr vacío para satisfacer los guards de las operaciones.
+func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
+	clean := filepath.Clean(wt.Path)
+	for _, p := range m.projects {
+		if filepath.Clean(p.Path) == clean {
+			snap := m.states[p.Path]
+			return row{project: p, snap: snap, state: snap.State(p.HasRepo)}
+		}
+	}
+	return row{project: discovery.Project{
+		Path:       wt.Path,
+		Name:       filepath.Base(wt.Path),
+		HasRepo:    true,
+		IsWorktree: true,
+	}}
 }

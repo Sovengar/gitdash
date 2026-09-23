@@ -44,6 +44,9 @@ var (
 	// 0003 R20: header secundario (nivel 2, menos protagonista)
 	styleSecondaryHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
+	// 0006 R34: sub-fila de worktree (indentada, distinta de repo/header)
+	styleWorktree = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
 	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	styleDetailTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
 )

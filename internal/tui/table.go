@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -27,16 +28,23 @@ const (
 	kindRepo entryKind = iota
 	kindPrimary
 	kindSecondary
+	kindWorktree // 0006 R30: sub-fila de worktree bajo su repo principal
 )
 
 // tableEntry es una fila navegable de la tabla: header primario, header
-// secundario o repo (patrón buildTree de vroom R24, extendido 0003 R20).
-// group lleva la clave de plegado: nombre del primario o
-// `primario/secundario` para los headers de nivel 2.
+// secundario, repo o sub-fila de worktree (patrón buildTree de vroom R24,
+// extendido 0003 R20 y 0006 R30). group lleva la clave de plegado: nombre
+// del primario o `primario/secundario` para los headers de nivel 2.
 type tableEntry struct {
 	kind  entryKind
 	group string // válido en kindPrimary/kindSecondary
 	r     row    // válido en kindRepo
+
+	// 0006 R31/R33: datos de la sub-fila de worktree (path/rama/head) y el
+	// path del repo principal para el detalle. No reutiliza `r` porque un
+	// worktree no tiene Snapshot/State propios.
+	wt     gitstatus.Worktree
+	parent string
 }
 
 // groupKey compone la clave de plegado de un secundario (S20.5: evita
@@ -79,7 +87,7 @@ func (m *Model) rows() []row {
 		if m.onlyDirty && !pendingStates(st) {
 			continue
 		}
-		if m.search != "" && !matchSearch(p, m.search) {
+		if m.search != "" && !matchRepo(p, snap, m.search) {
 			continue
 		}
 		if m.worktreeHidden(p) { // 0002 R15: wt plegados bajo su repo principal
@@ -123,9 +131,59 @@ func (m *Model) entries() []tableEntry {
 		if skipPrim != "" || skipSec != "" {
 			continue
 		}
-		out = append(out, tableEntry{kind: kindRepo, r: row{project: e.Proj, snap: e.Snap, state: e.State}})
+		r := row{project: e.Proj, snap: e.Snap, state: e.State}
+		out = append(out, tableEntry{kind: kindRepo, r: r})
+		// 0006 R30/R31: sub-filas de worktree justo bajo su padre visible,
+		// solo si el repo está expandido (persistido o inducido por R40).
+		// Se inyectan DESPUÉS de group.Arrange, así no alteran headers,
+		// orden, contadores ni resumen (0003 R19/R20 intactos). El guard de
+		// plegado (skipPrim/skipSec) ya garantiza R36.2.
+		out = append(out, m.worktreeEntries(r)...)
 	}
 	return out
+}
+
+// worktreeEntries compone las sub-filas de worktree de un repo (0006 R30).
+// Vacío si el repo no es expandible o no está expandido. Con búsqueda activa
+// (R40) solo se muestran los worktrees que matchean; la coincidencia por
+// worktree induce la expansión de forma transitoria (S40.5), sin tocar
+// m.expanded.
+func (m *Model) worktreeEntries(r row) []tableEntry {
+	if !m.expandable(r) || !m.repoExpanded(r) {
+		return nil
+	}
+	var out []tableEntry
+	for _, wt := range r.snap.Worktrees {
+		if m.search != "" && !worktreeMatches(wt, m.search) {
+			continue
+		}
+		out = append(out, tableEntry{kind: kindWorktree, wt: wt, parent: r.project.Path})
+	}
+	return out
+}
+
+// expandable reporta si un repo puede expandir worktrees (0006 R30/R31):
+// solo repos no-worktree con worktrees inventariados. El principal ya viene
+// excluido del snapshot (S31.2) y un worktree huérfano no expande (S31.4/R39).
+func (m *Model) expandable(r row) bool {
+	return !r.project.IsWorktree && len(r.snap.Worktrees) > 0
+}
+
+// repoExpanded reporta la expansión efectiva (0006 R40): la persistida, o
+// la inducida transitoriamente por una búsqueda que matchea algún worktree.
+func (m *Model) repoExpanded(r row) bool {
+	if m.expanded[r.project.Path] {
+		return true
+	}
+	if m.search == "" {
+		return false
+	}
+	for _, wt := range r.snap.Worktrees {
+		if worktreeMatches(wt, m.search) {
+			return true
+		}
+	}
+	return false
 }
 
 // groupOfEntry devuelve la clave de plegado de la entrada: el contenedor más
@@ -184,6 +242,29 @@ func matchSearch(p discovery.Project, q string) bool {
 	return strings.Contains(strings.ToLower(p.Name), q) ||
 		strings.Contains(strings.ToLower(p.PrimaryGroup), q) ||
 		strings.Contains(strings.ToLower(p.SecondaryGroup), q)
+}
+
+// matchRepo amplía matchSearch con los worktrees del repo (0006 R40): un
+// repo es visible si él mismo matchea o si matchea algún worktree suyo
+// (rama o basename del directorio), aunque el repo no matchee por sí mismo.
+func matchRepo(p discovery.Project, snap gitstatus.Snapshot, q string) bool {
+	if matchSearch(p, q) {
+		return true
+	}
+	for _, wt := range snap.Worktrees {
+		if worktreeMatches(wt, q) {
+			return true
+		}
+	}
+	return false
+}
+
+// worktreeMatches compara la rama y el basename del directorio del worktree
+// contra la búsqueda (0006 R40.1/R40.2), case-insensitive.
+func worktreeMatches(wt gitstatus.Worktree, q string) bool {
+	q = strings.ToLower(q)
+	return strings.Contains(strings.ToLower(wt.Branch), q) ||
+		strings.Contains(strings.ToLower(filepath.Base(wt.Path)), q)
 }
 
 // sortRows ordena in-place: score desc, último commit desc, nombre asc (R6).
@@ -251,6 +332,10 @@ func (m *Model) renderEntry(e tableEntry, selected bool) string {
 			return styleCursor.Render("▸ ") + indentHeader + line
 		}
 		return "  " + indentHeader + line
+	case kindWorktree:
+		// 0006 R34: render DEDICADO. NO usar renderRow: un Snapshot vacío se
+		// leería como no-up/clean (falsa información de estado).
+		return m.renderWorktreeRow(e.wt, selected)
 	default:
 		return m.renderRow(e.r, selected)
 	}
@@ -259,6 +344,45 @@ func (m *Model) renderEntry(e tableEntry, selected bool) string {
 // indentHeader es el sangrado de los headers secundarios dentro de su
 // primario (0003 R20).
 const indentHeader = "  "
+
+// renderWorktreeRow compone una sub-fila de worktree (0006 R34): indentada
+// con glyph propio `↳`, distinta de una fila de repo y de un header de grupo.
+// Muestra el basename del worktree y su rama (o `(detached)` con el head
+// corto). Las celdas que dependen de estado git por-worktree (Work Tree,
+// ↑↓up, SYNC, ACTIVITY, FETCH) quedan vacías/dim: la UI NO promete
+// dirty/ahead/behind/sync por worktree (R34.4). Respeta el contrato de celda
+// `(texto, estilo)` con pad() ANTES del estilo.
+func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
+	// R34.3: en detached no hay rama; el head corto es el dato disponible.
+	branch := wt.Branch
+	if branch == "" {
+		branch = "(detached)"
+		if wt.Head != "" {
+			branch += " " + wt.Head
+		}
+	}
+	cells := []struct {
+		text  string
+		style lipglossStyle
+		width int
+	}{
+		{"  ↳ " + filepath.Base(wt.Path), styleWorktree, colName},
+		{branch, styleWorktree, colBranch},
+		{"", styleDim, colWT},
+		{"", styleDim, colUpDown},
+		{"—", styleDim, colSync},
+		{"", styleDim, colActivity},
+		{"", styleDim, colFetch},
+	}
+	line := ""
+	for _, c := range cells {
+		line += c.style.Render(pad(truncate(c.text, c.width), c.width))
+	}
+	if selected {
+		return styleCursor.Render("▸ ") + line
+	}
+	return "  " + line
+}
 
 // primaryHeaderLine dibuja `▾/▸ primario (n)`: expandido/colapsado con el
 // número de repos del primario incluidos sus secundarios (S20.4).
@@ -345,9 +469,14 @@ func (m *Model) nameCell(r row) (string, lipglossStyle) {
 	if r.project.IsWorktree {
 		name += " [wt]" // S3.2: tag de worktree (huérfanos y modo print)
 	}
-	// 0002 R15/S15.4: indicador de worktrees del repo principal.
+	// 0002 R15/S15.4: indicador de worktrees del repo principal; 0006 R34.5:
+	// glyph de expansión `▸/▾` junto al contador.
 	if n := len(r.snap.Worktrees); n > 0 {
-		name += fmt.Sprintf(" (%d wt)", n)
+		glyph := "▸"
+		if m.repoExpanded(r) {
+			glyph = "▾"
+		}
+		name += fmt.Sprintf(" %s (%d wt)", glyph, n)
 	}
 	if r.project.MarkerErr != "" {
 		return name, styleWarn // S4.3: marcador malformado visible

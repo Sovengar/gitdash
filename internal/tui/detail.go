@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"gitdash/internal/gitstatus"
 )
 
 // asOrDash devuelva el texto o "-" si vacío.
@@ -151,6 +153,48 @@ func (m *Model) renderDetail(r row) string {
 		footer = "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
 	}
 	b.WriteString("\n" + styleHint.Render(footer))
+	return b.String()
+}
+
+// renderWorktreeDetail compone el detalle de una sub-fila de worktree
+// (0006 R33.6). Si el worktree fue descubierto con marcador y tiene snapshot
+// vivo, se delega al detalle completo; si no, panel mínimo con los datos que
+// trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
+func (m *Model) renderWorktreeDetail(e tableEntry) string {
+	clean := filepath.Clean(e.wt.Path)
+	for _, p := range m.projects {
+		if filepath.Clean(p.Path) != clean {
+			continue
+		}
+		if snap, ok := m.states[p.Path]; ok {
+			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)})
+		}
+	}
+	return m.renderWorktreeMinimal(e.wt, e.parent)
+}
+
+// renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
+// snapshot propio (0006 R33.6): path, rama (o `(detached)`), head. No muestra
+// dirty/ahead/behind/sync.
+func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string) string {
+	var b strings.Builder
+
+	title := filepath.Base(wt.Path) + "  [worktree]"
+	b.WriteString(styleDetailTitle.Render(title) + "\n")
+	b.WriteString(styleHint.Render(truncate(wt.Path, max(20, m.width-4))) + "\n\n")
+
+	key := styleDetailKey.Render
+	branch := wt.Branch
+	if branch == "" {
+		branch = "(detached)"
+	}
+	b.WriteString(key("branch  ") + branch + "\n")
+	b.WriteString(key("head    ") + asOrDash(wt.Head) + "\n")
+	if parent != "" {
+		b.WriteString(key("repo    ") + filepath.Base(parent) + "\n")
+	}
+
+	b.WriteString("\n" + styleHint.Render("esc back · g lazygit · ! cmd"))
 	return b.String()
 }
 
