@@ -178,6 +178,7 @@ func DefaultKeybindings() Keybindings {
 		"detail":    "enter",
 		"command":   "!",
 		"update":    "u",
+		"expand":    "space", // 0006 R37.1: toggle de expansión de worktrees
 	}
 }
 
@@ -278,6 +279,7 @@ var hintLabels = map[string]string{
 	"detail":    "enter detail",
 	"command":   "! cmd",
 	"update":    "u update",
+	"expand":    "expand",
 	"quit":      "q quit",
 }
 
@@ -292,7 +294,7 @@ func (c Config) HintBarLines() []string {
 	for _, action := range []string{
 		"dirty", "search", "fetch", "fetch_all", "sync",
 		"pull", "push", "lazygit", "update", "editor", "rescan", "recollect",
-		"fold", "detail", "command", "quit",
+		"fold", "expand", "detail", "command", "quit",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {
@@ -305,7 +307,7 @@ func (c Config) HintBarLines() []string {
 		hint := key + " " + strings.TrimPrefix(label, key+" ")
 
 		switch action {
-		case "dirty", "search", "fold", "detail", "command":
+		case "dirty", "search", "fold", "expand", "detail", "command":
 			row1 = append(row1, hint)
 		case "fetch", "fetch_all", "sync", "pull", "push":
 			row2 = append(row2, hint)
