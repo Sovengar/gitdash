@@ -223,12 +223,14 @@ func toEntries(rs []row) []group.Entry {
 // worktreeHidden reporta si un worktree descubierto debe plegarse bajo su
 // repo principal (0002 R15/S15.1). El fallback de huérfanos (S15.3):
 // si el repo principal no está entre los descubiertos, sigue visible.
+// Los paths se normalizan (0006 S31.3): symlink o barra final no duplican.
 func (m *Model) worktreeHidden(p discovery.Project) bool {
 	if !p.IsWorktree || p.MainRepo == "" {
 		return false
 	}
+	main := filepath.Clean(p.MainRepo)
 	for _, q := range m.projects {
-		if q.Path == p.MainRepo {
+		if filepath.Clean(q.Path) == main {
 			return true
 		}
 	}
@@ -470,13 +472,16 @@ func (m *Model) nameCell(r row) (string, lipglossStyle) {
 		name += " [wt]" // S3.2: tag de worktree (huérfanos y modo print)
 	}
 	// 0002 R15/S15.4: indicador de worktrees del repo principal; 0006 R34.5:
-	// glyph de expansión `▸/▾` junto al contador.
-	if n := len(r.snap.Worktrees); n > 0 {
+	// glyph de expansión `▸/▾` junto al contador. Misma guarda que
+	// `expandable` (0006 HIGH-1): un worktree huérfano (kindRepo +
+	// IsWorktree) no es expandible, así que no debe mostrar glyph ni
+	// contador (dead affordance).
+	if m.expandable(r) {
 		glyph := "▸"
 		if m.repoExpanded(r) {
 			glyph = "▾"
 		}
-		name += fmt.Sprintf(" %s (%d wt)", glyph, n)
+		name += fmt.Sprintf(" %s (%d wt)", glyph, len(r.snap.Worktrees))
 	}
 	if r.project.MarkerErr != "" {
 		return name, styleWarn // S4.3: marcador malformado visible

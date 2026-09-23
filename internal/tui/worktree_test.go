@@ -285,18 +285,71 @@ func TestWorktreeCoverageAndDedupeS31(t *testing.T) {
 	}
 }
 
-// S31.4: huérfano sigue visible con [wt] y no es expandible.
+// MEDIUM-2: el dedupe normaliza paths (symlink/barra final/`.`): un worktree
+// descubierto con MainRepo no idéntico al principal sigue oculto y su detalle
+// reutiliza el snapshot vivo.
+func TestWorktreeDedupeNormalizedPathsMEDIUM_2(t *testing.T) {
+	main := proj("multi", "/tmp/multi", true)
+	// Descubierto con marcador; path con barra final y MainRepo con `/./`.
+	disc := discovery.Project{
+		Path: "/tmp/multi/wt-feat/", Name: "wt-feat", HasRepo: true,
+		IsWorktree: true, MainRepo: "/tmp/multi/.",
+	}
+	mainSnap := snapClean()
+	// El snapshot del principal reporta el path sin barra final.
+	mainSnap.Worktrees = []gitstatus.Worktree{wt("/tmp/multi/wt-feat", "feat")}
+	discSnap := snapDirty(3, 0)
+	m := newTestModel(t, []discovery.Project{main, disc},
+		map[string]gitstatus.Snapshot{"/tmp/multi": mainSnap, "/tmp/multi/wt-feat/": discSnap})
+
+	// El descubierto queda oculto pese a los paths no idénticos.
+	for _, r := range m.rows() {
+		if filepath.Clean(r.project.Path) == "/tmp/multi/wt-feat" {
+			t.Errorf("MEDIUM-2: worktree descubierto visible como top-level: %q", r.project.Path)
+		}
+	}
+	m, _ = press(m, " ")
+	got := worktreeNames(m.entries())
+	if len(got) != 1 || got[0] != "wt-feat" {
+		t.Fatalf("MEDIUM-2: sub-filas = %v, want [wt-feat]", got)
+	}
+	// El dedupe materializa el snapshot vivo del descubierto (paths limpiados).
+	var wtEntry tableEntry
+	for _, e := range m.entries() {
+		if e.kind == kindWorktree {
+			wtEntry = e
+		}
+	}
+	r := m.worktreeRow(wtEntry.wt)
+	if r.project.Name != "wt-feat" || r.snap.Status.TrackedChanges != 3 {
+		t.Errorf("MEDIUM-2: el detalle no reutiliza el snapshot del descubierto: name=%q tracked=%d",
+			r.project.Name, r.snap.Status.TrackedChanges)
+	}
+}
+
+// S31.4: huérfano sigue visible con [wt] y no es expandible. Aunque su
+// snapshot tenga worktrees (caso realista: `git worktree list` desde el
+// propio worktree incluye el principal), NO debe mostrar glyph ni contador
+// (dead affordance, HIGH-1).
 func TestWorktreeOrphanS31_4(t *testing.T) {
 	orphan := discovery.Project{
 		Path: "/tmp/orphan", Name: "orphan", HasRepo: true,
 		IsWorktree: true, MainRepo: "/no-descubierto",
 	}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{
+		wt("/tmp/orphan", "topic"),
+		wt("/no-descubierto", "main"),
+	}
 	m := newTestModel(t, []discovery.Project{orphan},
-		map[string]gitstatus.Snapshot{"/tmp/orphan": snapClean()})
+		map[string]gitstatus.Snapshot{"/tmp/orphan": s})
 
 	text, _ := m.nameCell(m.rows()[0])
 	if !strings.Contains(text, "[wt]") {
 		t.Errorf("S31.4: huérfano sin tag [wt]: %q", text)
+	}
+	if strings.Contains(text, "wt)") || strings.Contains(text, "▸") || strings.Contains(text, "▾") {
+		t.Errorf("S31.4/HIGH-1: huérfano con glyph/contador (dead affordance): %q", text)
 	}
 	m, _ = press(m, " ")
 	if len(m.expanded) != 0 {
@@ -363,9 +416,11 @@ func TestWorktreeScrollS32_2(t *testing.T) {
 	}
 }
 
-// S32.3: al desaparecer sub-filas bajo el cursor, el cursor se reubica
-// dentro de rango (clampCursor). R30.6 hace `space` no-op sobre la sub-fila,
-// así que la coherencia se garantiza al recalcular las filas visibles.
+// S32.3 (revisado, ver "Revisiones"): una acción de vista real que hace
+// desaparecer las sub-filas bajo el cursor reclampa el cursor. Se usa el
+// filtro `d` (el repo es limpio, así deja de pasar el filtro) porque R30.6
+// hace `space` no-op sobre una sub-fila, así que no hay un camino de usuario
+// que pliegue el padre desde ella.
 func TestWorktreeFoldKeepsCursorS32_3(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -375,15 +430,20 @@ func TestWorktreeFoldKeepsCursorS32_3(t *testing.T) {
 	if m.cursor != 2 {
 		t.Fatalf("precondición: cursor = %d, want 2", m.cursor)
 	}
-	// El repo se pliega (desde su fila) y las sub-filas desaparecen:
-	// clampCursor mantiene el cursor dentro del rango visible.
-	m.expanded[p.Path] = false
-	m.clampCursor()
-	if m.cursor < 0 || m.cursor >= len(m.entries()) {
-		t.Errorf("S32.3: cursor fuera de rango: %d (entries=%d)", m.cursor, len(m.entries()))
+
+	m, _ = press(m, "d") // filtro dirty: el repo limpio desaparece con sus sub-filas
+	entries := m.entries()
+	if len(entries) == 0 {
+		if m.cursor != 0 {
+			t.Errorf("S32.3: cursor = %d con tabla vacía, want 0", m.cursor)
+		}
+	} else if m.cursor < 0 || m.cursor >= len(entries) {
+		t.Errorf("S32.3: cursor fuera de rango: %d (entries=%d)", m.cursor, len(entries))
 	}
-	if got := worktreeNames(m.entries()); len(got) != 0 {
-		t.Errorf("S32.3: sub-filas tras plegar: %v", got)
+
+	m, _ = press(m, "d") // revertir el filtro
+	if got := worktreeNames(m.entries()); len(got) != 2 {
+		t.Errorf("S32.3: el repo no siguió expandido al revertir: %v", got)
 	}
 }
 
@@ -403,7 +463,8 @@ func TestWorktreeActionsPathS33_2_4(t *testing.T) {
 	}
 }
 
-// S33.1: fetch selecciona el path del worktree bajo el cursor.
+// S33.1: fetch corre sobre el path del worktree bajo el cursor. Se observa
+// el canal de eventos: el batch publica fetchStateMsg con el path objetivo.
 func TestWorktreeFetchPathS33_1(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -413,7 +474,23 @@ func TestWorktreeFetchPathS33_1(t *testing.T) {
 	if !ok || r.project.Path != "/tmp/wt-a" || !r.project.HasRepo {
 		t.Fatalf("S33.1: fetch operaría sobre %+v, want worktree", r.project)
 	}
-	m, _ = press(m, "f") // no debe entrar en pánico; lanza el batch por path
+
+	m, _ = press(m, "f")
+	// El batch corre en goroutine: esperamos el evento con el path del worktree.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-m.events:
+			if fs, ok := ev.(fetchStateMsg); ok && filepath.Clean(fs.path) == "/tmp/wt-a" {
+				if fs.state != "fetching" {
+					t.Errorf("S33.1: primer estado = %q, want fetching", fs.state)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("S33.1: no se observó fetchStateMsg para el path del worktree")
+		}
+	}
 }
 
 // S33.3: lazygit/update/editor resuelven el path del worktree.
@@ -499,8 +576,9 @@ func TestWorktreeDetailS33_6(t *testing.T) {
 	}
 }
 
-// S33.6 (complemento): si el worktree fue descubierto y tiene snapshot vivo,
-// se muestra el detalle completo.
+// S33.6 (revisado, ver "Revisiones" en behavior.feature): si el worktree fue
+// descubierto con marcador y tiene snapshot vivo, el detalle muestra ESE
+// snapshot (intención confirmada por el usuario), no un panel mínimo.
 func TestWorktreeDetailDiscoveredS33_6(t *testing.T) {
 	main, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-marcado", "feat"))
 	disc := discovery.Project{
@@ -515,8 +593,17 @@ func TestWorktreeDetailDiscoveredS33_6(t *testing.T) {
 
 	e, _ := m.selectedEntry()
 	out := stripANSI(m.renderWorktreeDetail(e))
+	// El snapshot vivo del worktree descubierto se muestra (estado derivado
+	// real: "2 ?1" dirty), no el panel mínimo path/rama/head.
 	if !strings.Contains(out, "wt-marcado") || !strings.Contains(out, "state") {
 		t.Errorf("S33.6: detalle de worktree descubierto incompleto:\n%s", out)
+	}
+	if !strings.Contains(out, "2 ?1") {
+		t.Errorf("S33.6: el detalle no refleja el snapshot vivo:\n%s", out)
+	}
+	// No es el panel mínimo (que no tiene línea "state").
+	if strings.Contains(out, "head    ") {
+		t.Errorf("S33.6: se usó el panel mínimo en vez del snapshot vivo:\n%s", out)
 	}
 }
 
@@ -528,23 +615,56 @@ func TestWorktreeNotificationBasenameS33_7(t *testing.T) {
 	}
 }
 
-// S34.1/S34.2/S34.4: sub-fila distinguible, rama visible, celdas de estado
-// vacías/dim (no se inventa estado por worktree).
+// S34.1/S34.2/S34.4: la sub-fila se renderiza por el camino dedicado (no
+// `renderRow`), es estrictamente distinta de una fila de repo y de un header
+// de grupo, muestra la rama y no inventa estado por-worktree (LOW-c/LOW-d).
 func TestWorktreeRowRenderS34_1_2_4(t *testing.T) {
-	w := gitstatus.Worktree{Path: "/tmp/wt-featx", Branch: "feat/x", Head: "abc1234"}
-	m := newTestModel(t, nil, nil)
-	line := stripANSI(m.renderWorktreeRow(w, false))
+	main := discovery.Project{Path: "/tmp/multi", Name: "multi", PrimaryGroup: "g", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-featx", "feat/x")}
+	m := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{"/tmp/multi": s})
+	m, _ = press(m, "down") // cursor al repo (header primario en 0)
+	m, _ = press(m, " ")    // expandir
 
-	if !strings.Contains(line, "↳") || !strings.Contains(line, "wt-featx") {
-		t.Errorf("S34.1: sub-fila no distinguible: %q", line)
-	}
-	if !strings.Contains(line, "feat/x") {
-		t.Errorf("S34.2: BRANCH sin rama del worktree: %q", line)
-	}
-	for _, bad := range []string{"no-up", "↑", "↓", "clean", "error"} {
-		if strings.Contains(line, bad) {
-			t.Errorf("S34.4: la sub-fila inventa estado %q: %q", bad, line)
+	var repoLine, headerLine, wtLine string
+	for _, e := range m.entries() {
+		switch e.kind {
+		case kindPrimary:
+			headerLine = stripANSI(m.renderEntry(e, false))
+		case kindRepo:
+			repoLine = stripANSI(m.renderEntry(e, false))
+		case kindWorktree:
+			wtLine = stripANSI(m.renderEntry(e, false))
 		}
+	}
+	if wtLine == "" {
+		t.Fatal("S34.1: no hay sub-fila renderizada")
+	}
+
+	// LOW-c: la sub-fila nunca lee un Snapshot vacío como no-up/error/clean.
+	for _, bad := range []string{"no-up", "error", "clean", "↑", "↓"} {
+		if strings.Contains(wtLine, bad) {
+			t.Errorf("S34.4: la sub-fila inventa estado %q: %q", bad, wtLine)
+		}
+	}
+	if !strings.Contains(wtLine, "↳") || !strings.Contains(wtLine, "wt-featx") {
+		t.Errorf("S34.1: sub-fila no distinguible: %q", wtLine)
+	}
+	if !strings.Contains(wtLine, "feat/x") {
+		t.Errorf("S34.2: BRANCH sin rama del worktree: %q", wtLine)
+	}
+
+	// LOW-d: estrictamente distinta de la fila de repo y del header.
+	if wtLine == repoLine || wtLine == headerLine {
+		t.Errorf("S34.1: sub-fila idéntica a repo/header\n repo=%q\n header=%q\n wt=%q", repoLine, headerLine, wtLine)
+	}
+	if strings.Contains(repoLine, "↳") || strings.Contains(headerLine, "↳") {
+		t.Errorf("S34.1: glyph de sub-fila filtrado a otra fila: repo=%q header=%q", repoLine, headerLine)
+	}
+
+	// La sub-fila también se pinta en la vista completa.
+	if !strings.Contains(stripANSI(m.View().Content), "↳") {
+		t.Error("S34.1: la sub-fila no aparece en la vista")
 	}
 }
 
