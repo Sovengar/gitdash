@@ -120,6 +120,9 @@ func normalizeBranch(st Status) string {
 // (máximo concurrency a la vez) invocando emit por cada uno. defaultSync es
 // la sync branch global (R14): cada proyecto puede overriddenla desde el
 // marcador. Bloquea hasta terminar o cancelarse por contexto.
+//
+// emit se invoca concurrentemente desde hasta `concurrency` goroutines: el
+// callback DEBE ser seguro para uso concurrente (p.ej. mutex o canal).
 func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, concurrency int, emit func(path string, snap Snapshot)) {
 	if concurrency < 1 {
 		concurrency = 1

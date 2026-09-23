@@ -2,6 +2,7 @@
 package gitstatus
 
 import (
+	"sync"
 	"testing"
 
 	"gitdash/internal/discovery"
@@ -81,8 +82,12 @@ func TestStreamPoolSyncOverride(t *testing.T) {
 	}
 
 	got := map[string]Snapshot{}
+	var mu sync.Mutex
+	// emit se invoca concurrentemente (contrato de StreamPool): proteger el mapa.
 	StreamPool(t.Context(), projects, "global-branch", 2, func(path string, snap Snapshot) {
+		mu.Lock()
 		got[path] = snap
+		mu.Unlock()
 	})
 	snap := got[dir]
 	// la global "global-branch" no existe: si el override no se respetara,

@@ -2,6 +2,7 @@ package gitstatus
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"gitdash/internal/discovery"
@@ -216,8 +217,12 @@ func TestStreamPool(t *testing.T) {
 		{Path: b, HasRepo: true},
 	}
 	got := map[string]State{}
+	var mu sync.Mutex
+	// emit se invoca concurrentemente (contrato de StreamPool): proteger el mapa.
 	StreamPool(t.Context(), projects, "", 2, func(path string, st Snapshot) {
+		mu.Lock()
 		got[path] = st.State(true)
+		mu.Unlock()
 	})
 	if len(got) != 2 {
 		t.Fatalf("emit = %d paths, want 2", len(got))
