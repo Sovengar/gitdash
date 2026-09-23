@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,5 +108,33 @@ timeout = "nope"
 	}
 	if cfg.FetchConcurrency != 4 || cfg.FetchTimeout != 30*time.Second {
 		t.Errorf("valores inválidos no ignorados: %+v", cfg)
+	}
+}
+
+// 0006 R37.1: la expansión de worktrees tiene default `space` y es
+// configurable como el resto de keybindings.
+func TestExpandKeybindingR37(t *testing.T) {
+	cfg := Defaults()
+	if cfg.KeyFor("expand") != "space" {
+		t.Errorf("R37.1: default expand = %q, want space", cfg.KeyFor("expand"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "space expand") {
+		t.Errorf("R37.3: hint de expansión ausente: %v", cfg.HintBarLines())
+	}
+
+	// R37.2: rebind via config.toml.
+	path := write(t, `
+[keybindings]
+expand = "w"
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warn inesperado: %q", warn)
+	}
+	if cfg.KeyFor("expand") != "w" {
+		t.Errorf("R37.2: expand = %q, want w", cfg.KeyFor("expand"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "w expand") {
+		t.Errorf("R37.3: hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 }

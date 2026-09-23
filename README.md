@@ -87,7 +87,8 @@ attention-first).
 |---|---|
 | `j/k`, `↑↓` | mover cursor (`g`/`G` extremos) |
 | `n` | alternar solo repos con cambios pendientes |
-| `/` | filtrar por nombre/grupo (en vivo; `enter` confirma, `esc` limpia) |
+| `/` | filtrar por nombre/grupo o por rama/basename de worktree (en vivo; `enter` confirma, `esc` limpia) |
+| `space` | expandir/plegar los worktrees del repo bajo el cursor (configurable, acción `expand`) |
 | `tab` | plegar/desplegar el grupo bajo el cursor |
 | `r` | rescan completo (discovery + estados + fetch auto) |
 | `R` | re-coleccionar el repo del cursor |
@@ -100,10 +101,20 @@ attention-first).
 
 ## Worktrees y grupos
 
-- Los **worktrees** no ocupan filas: el repo principal los aglomera con un
-  indicador `(N wt)` (cuenta TODOS los de `git worktree list`, incluso los
-  sin marcador); el detalle lista cada uno con rama y ruta. Queda visible
-  como fila solo un worktree cuyo repo principal no está descubierto.
+- Los **worktrees** se muestran plegados bajo el repo principal con un
+  indicador `▸ (N wt)` y se **expanden/pliegan con `space`** sobre su fila.
+  Expandido, cada worktree de `git worktree list` aparece como **sub-fila
+  navegable y operable** (incluidos los que no tienen marcador y los que
+  están fuera de los roots): el cursor puede posarse en ella y *todas* las
+  acciones de repo (fetch, pull, sync, push, lazygit, update, editor,
+  recollect, `!` y detalle) se ejecutan contra el path de ese worktree. La
+  sub-fila muestra su rama (o `(detached)`) y deja vacías las celdas de
+  estado por-worktree (no se inventa dirty/ahead/behind/sync). El estado
+  expandido/plegado persiste entre sesiones (mismo `collapsed.json` que el
+  plegado de grupos, en un namespace propio). El filtro `/` encuentra
+  worktrees por rama o basename y revela su padre expandido de forma
+  transitoria (sin alterar la persistencia). Queda visible como fila propia
+  solo un worktree cuyo repo principal no está descubierto (tag `[wt]`).
 - Si algún marcador define `primary_group`, la tabla se **agrupa en dos
   niveles** (patrón vroom): el bloque de cada grupo desde la posición de su
   primer miembro con header `▾ nombre (n)`; dentro de un primario, cada

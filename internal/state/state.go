@@ -16,6 +16,12 @@ const DirName = "gitdash"
 // FileName es el nombre del fichero de estado de UI.
 const FileName = "collapsed.json"
 
+// WorktreePrefix es el namespace de las claves de expansión de worktrees
+// dentro de collapsed.json (0006 R35). Convención: `wt/<path canónico>` con
+// valor true = expandido. La polaridad es la inversa a la de las claves de
+// grupo (donde true = plegado); la carga separa ambos espacios por prefijo.
+const WorktreePrefix = "wt/"
+
 // Store accede al directorio de estado persistente.
 type Store struct {
 	base string

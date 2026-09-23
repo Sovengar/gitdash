@@ -121,3 +121,30 @@ func TestCompositeKeysNoCollision(t *testing.T) {
 		t.Errorf("loaded[beta/backend] = %v, want false", loaded["beta/backend"])
 	}
 }
+
+// 0006 R35: las claves de expansión de worktrees conviven con las de grupo
+// bajo el namespace WorktreePrefix sin colisionar (misma forma de store).
+func TestWorktreeNamespaceCoexistsR35(t *testing.T) {
+	store := NewStoreAt(t.TempDir())
+	combined := map[string]bool{
+		"backend":                     true,  // grupo plegado
+		WorktreePrefix + "/tmp/multi": true,  // worktree expandido
+		WorktreePrefix + "/tmp/otro":  false, // expandido y luego plegado
+	}
+	if err := store.SaveCollapsed(combined); err != nil {
+		t.Fatal(err)
+	}
+	loaded := store.LoadCollapsed()
+	if !loaded["backend"] {
+		t.Error("R35: clave de grupo perdida")
+	}
+	if !loaded[WorktreePrefix+"/tmp/multi"] {
+		t.Error("R35: clave de expansión perdida")
+	}
+	if loaded[WorktreePrefix+"/tmp/otro"] {
+		t.Error("R35: polaridad invertida mal persistida")
+	}
+	if _, ok := loaded["/tmp/multi"]; ok {
+		t.Error("R35: la clave se guardó sin namespace")
+	}
+}

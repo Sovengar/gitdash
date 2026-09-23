@@ -26,6 +26,7 @@ func newTestModel(t *testing.T, projects []discovery.Project, states map[string]
 	// Usar directorio temporal para tests (aislar del estado real)
 	m.store = state.NewStoreAt(t.TempDir())
 	m.collapsed = map[string]bool{}
+	m.expanded = map[string]bool{}
 	return m
 }
 

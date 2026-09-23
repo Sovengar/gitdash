@@ -2,12 +2,18 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/state"
+	"gitdash/internal/testutil"
 )
 
 func TestWorktreeHiddenS15_1(t *testing.T) {
@@ -118,4 +124,843 @@ func snapCleanAt(age time.Duration) gitstatus.Snapshot {
 	s := snapClean()
 	s.LastCommit = time.Now().Add(-age).Unix()
 	return s
+}
+
+// ---- 0006 R30–R40: expansión y operaciones de worktrees ----
+
+// wt construye un worktree del snapshot para los tests.
+func wt(path, branch string) gitstatus.Worktree {
+	return gitstatus.Worktree{Path: path, Branch: branch, Head: "abc1234"}
+}
+
+// repoWithWorktrees devuelve el proyecto y su snapshot con worktrees.
+func repoWithWorktrees(name, path string, wts ...gitstatus.Worktree) (discovery.Project, map[string]gitstatus.Snapshot) {
+	p := proj(name, path, true)
+	s := snapClean()
+	s.Worktrees = wts
+	return p, map[string]gitstatus.Snapshot{path: s}
+}
+
+// worktreeNames lista los basenames de las sub-filas kindWorktree.
+func worktreeNames(entries []tableEntry) []string {
+	var out []string
+	for _, e := range entries {
+		if e.kind == kindWorktree {
+			out = append(out, filepath.Base(e.wt.Path))
+		}
+	}
+	return out
+}
+
+// S30.1: repo con worktrees, plegado por defecto (▸ + contador, sin sub-filas).
+func TestWorktreeCollapsedByDefaultS30_1(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Fatalf("S30.1: sub-filas sin expandir: %v", got)
+	}
+	text, _ := m.nameCell(m.rows()[0])
+	if !strings.Contains(text, "▸") || !strings.Contains(text, "(2 wt)") {
+		t.Errorf("S30.1: NAME = %q, want ▸ y (2 wt)", text)
+	}
+	if strings.Contains(stripANSI(m.View().Content), "↳") {
+		t.Error("S30.1: no debe haber sub-filas en la vista")
+	}
+}
+
+// S30.2/S30.3: `space` alterna expandido/plegado.
+func TestWorktreeToggleS30_2_3(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+
+	m, _ = press(m, " ")
+	if !m.expanded[p.Path] {
+		t.Fatal("S30.2: space no expandió")
+	}
+	if got := worktreeNames(m.entries()); len(got) != 2 {
+		t.Fatalf("S30.2: sub-filas = %v, want 2", got)
+	}
+	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▾") {
+		t.Errorf("S30.2: glyph = %q, want ▾", text)
+	}
+
+	m, _ = press(m, " ")
+	if m.expanded[p.Path] {
+		t.Error("S30.3: space no volvió a plegar")
+	}
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S30.3: sub-filas tras plegar = %v", got)
+	}
+	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▸") {
+		t.Errorf("S30.3: glyph = %q, want ▸", text)
+	}
+}
+
+// S30.4: space sobre repo sin worktrees es no-op.
+func TestWorktreeExpandNoRepoWtsS30_4(t *testing.T) {
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
+	m, _ = press(m, " ")
+	if len(m.expanded) != 0 {
+		t.Errorf("S30.4: expansión cambiada en repo sin worktrees: %v", m.expanded)
+	}
+}
+
+// S30.5: space sobre un header de grupo no cambia el plegado.
+func TestWorktreeExpandOnHeaderS30_5(t *testing.T) {
+	p := discovery.Project{Path: "/a", Name: "a", PrimaryGroup: "g", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-a", "a")}
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/a": s})
+	if m.entries()[0].kind != kindPrimary {
+		t.Fatalf("precondición: cursor no en header: %+v", m.entries()[0])
+	}
+	m, _ = press(m, " ")
+	if len(m.expanded) != 0 || m.collapsed["g"] {
+		t.Errorf("S30.5: header alterado: expanded=%v collapsed=%v", m.expanded, m.collapsed)
+	}
+}
+
+// S30.6: space sobre una sub-fila no cambia la expansión del padre.
+func TestWorktreeExpandOnSubrowS30_6(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down") // repo → sub-fila
+	if e, _ := m.selectedEntry(); e.kind != kindWorktree {
+		t.Fatalf("S30.6: cursor no en sub-fila: %+v", e)
+	}
+	before := m.expanded[p.Path]
+	m, _ = press(m, " ")
+	if m.expanded[p.Path] != before {
+		t.Errorf("S30.6: la expansión del padre cambió: %v", m.expanded)
+	}
+	if got := worktreeNames(m.entries()); len(got) != 1 {
+		t.Errorf("S30.6: sub-fila desapareció: %v", got)
+	}
+}
+
+// S31.1/S31.2/S31.3: cobertura total, principal no sub-fila, dedupe.
+func TestWorktreeCoverageAndDedupeS31(t *testing.T) {
+	main := proj("multi", "/tmp/multi", true)
+	// worktree descubierto con marcador → dedupe: sub-fila, no top-level.
+	disc := discovery.Project{
+		Path: "/tmp/wt-marcado", Name: "wt-marcado", HasRepo: true,
+		IsWorktree: true, MainRepo: "/tmp/multi",
+	}
+	mainSnap := snapClean()
+	mainSnap.Worktrees = []gitstatus.Worktree{
+		wt("/tmp/wt-marcado", "feat/marcado"), // con marcador
+		wt("/tmp/wt-root", "feat/root"),       // sin marcador, dentro de root
+		wt("/outside/wt-fuera", "feat/fuera"), // sin marcador, fuera de roots
+	}
+	m := newTestModel(t, []discovery.Project{main, disc},
+		map[string]gitstatus.Snapshot{"/tmp/multi": mainSnap, "/tmp/wt-marcado": snapClean()})
+
+	m, _ = press(m, " ")
+	got := worktreeNames(m.entries())
+	if len(got) != 3 {
+		t.Fatalf("S31.1: sub-filas = %v, want 3", got)
+	}
+	for _, e := range m.entries() {
+		if e.kind == kindWorktree && filepath.Clean(e.wt.Path) == "/tmp/multi" {
+			t.Error("S31.2: el principal aparece como sub-fila")
+		}
+	}
+	// S31.3: el worktree descubierto no aparece como fila top-level
+	for _, e := range m.entries() {
+		if e.kind == kindRepo && e.r.project.Path == "/tmp/wt-marcado" {
+			t.Error("S31.3: worktree descubierto aparece como fila de repo")
+		}
+	}
+	n := 0
+	for _, name := range got {
+		if name == "wt-marcado" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("S31.3: worktree descubierto aparece %d veces como sub-fila, want 1", n)
+	}
+}
+
+// MEDIUM-2: el dedupe normaliza paths (symlink/barra final/`.`): un worktree
+// descubierto con MainRepo no idéntico al principal sigue oculto y su detalle
+// reutiliza el snapshot vivo.
+func TestWorktreeDedupeNormalizedPathsMEDIUM_2(t *testing.T) {
+	main := proj("multi", "/tmp/multi", true)
+	// Descubierto con marcador; path con barra final y MainRepo con `/./`.
+	disc := discovery.Project{
+		Path: "/tmp/multi/wt-feat/", Name: "wt-feat", HasRepo: true,
+		IsWorktree: true, MainRepo: "/tmp/multi/.",
+	}
+	mainSnap := snapClean()
+	// El snapshot del principal reporta el path sin barra final.
+	mainSnap.Worktrees = []gitstatus.Worktree{wt("/tmp/multi/wt-feat", "feat")}
+	discSnap := snapDirty(3, 0)
+	m := newTestModel(t, []discovery.Project{main, disc},
+		map[string]gitstatus.Snapshot{"/tmp/multi": mainSnap, "/tmp/multi/wt-feat/": discSnap})
+
+	// El descubierto queda oculto pese a los paths no idénticos.
+	for _, r := range m.rows() {
+		if filepath.Clean(r.project.Path) == "/tmp/multi/wt-feat" {
+			t.Errorf("MEDIUM-2: worktree descubierto visible como top-level: %q", r.project.Path)
+		}
+	}
+	m, _ = press(m, " ")
+	got := worktreeNames(m.entries())
+	if len(got) != 1 || got[0] != "wt-feat" {
+		t.Fatalf("MEDIUM-2: sub-filas = %v, want [wt-feat]", got)
+	}
+	// El dedupe materializa el snapshot vivo del descubierto (paths limpiados).
+	var wtEntry tableEntry
+	for _, e := range m.entries() {
+		if e.kind == kindWorktree {
+			wtEntry = e
+		}
+	}
+	r := m.worktreeRow(wtEntry.wt)
+	if r.project.Name != "wt-feat" || r.snap.Status.TrackedChanges != 3 {
+		t.Errorf("MEDIUM-2: el detalle no reutiliza el snapshot del descubierto: name=%q tracked=%d",
+			r.project.Name, r.snap.Status.TrackedChanges)
+	}
+}
+
+// S31.4: huérfano sigue visible con [wt] y no es expandible. Aunque su
+// snapshot tenga worktrees (caso realista: `git worktree list` desde el
+// propio worktree incluye el principal), NO debe mostrar glyph ni contador
+// (dead affordance, HIGH-1).
+func TestWorktreeOrphanS31_4(t *testing.T) {
+	orphan := discovery.Project{
+		Path: "/tmp/orphan", Name: "orphan", HasRepo: true,
+		IsWorktree: true, MainRepo: "/no-descubierto",
+	}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{
+		wt("/tmp/orphan", "topic"),
+		wt("/no-descubierto", "main"),
+	}
+	m := newTestModel(t, []discovery.Project{orphan},
+		map[string]gitstatus.Snapshot{"/tmp/orphan": s})
+
+	text, _ := m.nameCell(m.rows()[0])
+	if !strings.Contains(text, "[wt]") {
+		t.Errorf("S31.4: huérfano sin tag [wt]: %q", text)
+	}
+	if strings.Contains(text, "wt)") || strings.Contains(text, "▸") || strings.Contains(text, "▾") {
+		t.Errorf("S31.4/HIGH-1: huérfano con glyph/contador (dead affordance): %q", text)
+	}
+	m, _ = press(m, " ")
+	if len(m.expanded) != 0 {
+		t.Errorf("S31.4: huérfano expandible: %v", m.expanded)
+	}
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S31.4: sub-filas en huérfano: %v", got)
+	}
+}
+
+// S31.5/S31.6: sin worktrees o snapshot sin recolectar → sin glyph ni no-op.
+func TestWorktreeNoGlyphS31_5_6(t *testing.T) {
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
+	text, _ := m.nameCell(m.rows()[0])
+	if strings.Contains(text, "wt)") || strings.Contains(text, "▸") || strings.Contains(text, "▾") {
+		t.Errorf("S31.5: NAME con glyph/contador sin worktrees: %q", text)
+	}
+	m, _ = press(m, " ")
+	if len(m.expanded) != 0 {
+		t.Errorf("S31.6: space expandió un snapshot sin worktrees: %v", m.expanded)
+	}
+}
+
+// S32.1: el cursor alcanza la sub-fila y las acciones la resuelven.
+func TestWorktreeCursorS32_1(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	e, ok := m.selectedEntry()
+	if !ok || e.kind != kindWorktree || filepath.Base(e.wt.Path) != "wt-a" {
+		t.Fatalf("S32.1: cursor = %+v", e)
+	}
+	r, ok := m.selected()
+	if !ok || r.project.Path != "/tmp/wt-a" {
+		t.Errorf("S32.1: selected() = %+v, want path del worktree", r.project)
+	}
+}
+
+// S32.2: el scroll sigue a la sub-fila fuera de la ventana visible.
+func TestWorktreeScrollS32_2(t *testing.T) {
+	var projects []discovery.Project
+	states := map[string]gitstatus.Snapshot{}
+	for i := 0; i < 12; i++ {
+		p := proj(fmt.Sprintf("repo%02d", i), fmt.Sprintf("/tmp/repo%02d", i), true)
+		projects = append(projects, p)
+		states[p.Path] = snapClean()
+	}
+	last, lastSt := repoWithWorktrees("zzz-wt", "/tmp/zzz-wt", wt("/tmp/wt-a", "a"))
+	projects = append(projects, last)
+	for k, v := range lastSt {
+		states[k] = v
+	}
+	m := newTestModel(t, projects, states)
+	m.height = 8 // ventana pequeña
+	m.cursor = len(m.entries()) - 1
+	m, _ = press(m, " ") // expandir el último repo
+	m, _ = press(m, "down")
+
+	out := stripANSI(m.renderDashboard())
+	if !strings.Contains(out, "wt-a") {
+		t.Errorf("S32.2: la sub-fila no está visible tras el scroll:\n%s", out)
+	}
+}
+
+// S32.3 (revisado, ver "Revisiones"): una acción de vista real que hace
+// desaparecer las sub-filas bajo el cursor reclampa el cursor. Se usa el
+// filtro `d` (el repo es limpio, así deja de pasar el filtro) porque R30.6
+// hace `space` no-op sobre una sub-fila, así que no hay un camino de usuario
+// que pliegue el padre desde ella.
+func TestWorktreeFoldKeepsCursorS32_3(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "down") // cursor en la última sub-fila
+	if m.cursor != 2 {
+		t.Fatalf("precondición: cursor = %d, want 2", m.cursor)
+	}
+
+	m, _ = press(m, "d") // filtro dirty: el repo limpio desaparece con sus sub-filas
+	entries := m.entries()
+	if len(entries) == 0 {
+		if m.cursor != 0 {
+			t.Errorf("S32.3: cursor = %d con tabla vacía, want 0", m.cursor)
+		}
+	} else if m.cursor < 0 || m.cursor >= len(entries) {
+		t.Errorf("S32.3: cursor fuera de rango: %d (entries=%d)", m.cursor, len(entries))
+	}
+
+	m, _ = press(m, "d") // revertir el filtro
+	if got := worktreeNames(m.entries()); len(got) != 2 {
+		t.Errorf("S32.3: el repo no siguió expandido al revertir: %v", got)
+	}
+}
+
+// S33.2/S33.4: pull/sync/push/recollect operan sobre el path del worktree.
+func TestWorktreeActionsPathS33_2_4(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	for _, tc := range []struct{ key, kind string }{
+		{"p", "pull"}, {"s", "sync"}, {"P", "push"}, {"R", "collect"},
+	} {
+		m := newTestModel(t, []discovery.Project{p}, st)
+		m, _ = press(m, " ")
+		m, _ = press(m, "down")
+		m, _ = press(m, tc.key)
+		if m.running["/tmp/wt-a"] != tc.kind {
+			t.Errorf("S33.2/S33.4: %s en running = %q, want %q", tc.key, m.running["/tmp/wt-a"], tc.kind)
+		}
+	}
+}
+
+// S33.1: fetch corre sobre el path del worktree bajo el cursor. Se observa
+// el canal de eventos: el batch publica fetchStateMsg con el path objetivo.
+func TestWorktreeFetchPathS33_1(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	r, ok := m.selected()
+	if !ok || r.project.Path != "/tmp/wt-a" || !r.project.HasRepo {
+		t.Fatalf("S33.1: fetch operaría sobre %+v, want worktree", r.project)
+	}
+
+	m, _ = press(m, "f")
+	// El batch corre en goroutine: esperamos el evento con el path del worktree.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-m.events:
+			if fs, ok := ev.(fetchStateMsg); ok && filepath.Clean(fs.path) == "/tmp/wt-a" {
+				if fs.state != "fetching" {
+					t.Errorf("S33.1: primer estado = %q, want fetching", fs.state)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("S33.1: no se observó fetchStateMsg para el path del worktree")
+		}
+	}
+}
+
+// S33.3: lazygit/update/editor resuelven el path del worktree.
+func TestWorktreeHandoffPathS33_3(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+
+	// editor: el Cmd de handoff se construye (dir = path del worktree).
+	me, cmd := press(m, "e")
+	if cmd == nil {
+		t.Error("S33.3: editor sin tea.Cmd")
+	}
+	if r, _ := me.selected(); r.project.Path != "/tmp/wt-a" {
+		t.Errorf("S33.3: editor path = %q", r.project.Path)
+	}
+
+	// update: comando configurado → running sobre el path del worktree.
+	mu := newTestModel(t, []discovery.Project{p}, st)
+	mu, _ = press(mu, " ")
+	mu, _ = press(mu, "down")
+	mu.cfg.Commands["update"] = "echo"
+	mu, _ = press(mu, "u")
+	if mu.running["/tmp/wt-a"] != "update" {
+		t.Errorf("S33.3: update running = %q", mu.running["/tmp/wt-a"])
+	}
+
+	// lazygit: solo si está instalado (mismo skip que el resto de tests).
+	if !hasLazygit() {
+		return
+	}
+	mg := newTestModel(t, []discovery.Project{p}, st)
+	mg, _ = press(mg, " ")
+	mg, _ = press(mg, "down")
+	mg, _ = press(mg, "g")
+	if mg.running["/tmp/wt-a"] != "lazygit" {
+		t.Errorf("S33.3: lazygit running = %q", mg.running["/tmp/wt-a"])
+	}
+}
+
+// S33.5: comando `!` corre con el directorio del worktree.
+func TestWorktreeBangS33_5(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/gitdash-test/wt", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter") // abre el detalle de la sub-fila
+	if !m.detailOpen {
+		t.Fatal("S33.5: enter no abrió el detalle del worktree")
+	}
+	m, _ = press(m, "!")
+	if !m.cmdOpen {
+		t.Fatal("S33.5: ! no abrió el input")
+	}
+	m, _ = press(m, "g")
+	m, _ = press(m, "enter")
+	if m.running["/tmp/gitdash-test/wt"] != "cmd" {
+		t.Errorf("S33.5: running = %q, want cmd sobre el worktree", m.running["/tmp/gitdash-test/wt"])
+	}
+}
+
+// S33.6: detalle mínimo del worktree (path, rama, head) sin estado inventado.
+func TestWorktreeDetailS33_6(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi",
+		gitstatus.Worktree{Path: "/tmp/wt-detached", Branch: "", Head: "abc1234"})
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter")
+
+	out := stripANSI(m.View().Content)
+	for _, want := range []string{"/tmp/wt-detached", "(detached)", "abc1234"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("S33.6: detalle sin %q:\n%s", want, out)
+		}
+	}
+	// No se inventa estado git derivado para el worktree.
+	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("S33.6: detalle inventa estado %q:\n%s", bad, out)
+		}
+	}
+}
+
+// S33.6 (revisado, ver "Revisiones" en behavior.feature): si el worktree fue
+// descubierto con marcador y tiene snapshot vivo, el detalle muestra ESE
+// snapshot (intención confirmada por el usuario), no un panel mínimo.
+func TestWorktreeDetailDiscoveredS33_6(t *testing.T) {
+	main, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-marcado", "feat"))
+	disc := discovery.Project{
+		Path: "/tmp/wt-marcado", Name: "wt-marcado", HasRepo: true,
+		IsWorktree: true, MainRepo: "/tmp/multi",
+	}
+	st["/tmp/wt-marcado"] = snapDirty(2, 1)
+	m := newTestModel(t, []discovery.Project{main, disc}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter")
+
+	e, _ := m.selectedEntry()
+	out := stripANSI(m.renderWorktreeDetail(e))
+	// El snapshot vivo del worktree descubierto se muestra (estado derivado
+	// real: "2 ?1" dirty), no el panel mínimo path/rama/head.
+	if !strings.Contains(out, "wt-marcado") || !strings.Contains(out, "state") {
+		t.Errorf("S33.6: detalle de worktree descubierto incompleto:\n%s", out)
+	}
+	if !strings.Contains(out, "2 ?1") {
+		t.Errorf("S33.6: el detalle no refleja el snapshot vivo:\n%s", out)
+	}
+	// No es el panel mínimo (que no tiene línea "state").
+	if strings.Contains(out, "head    ") {
+		t.Errorf("S33.6: se usó el panel mínimo en vez del snapshot vivo:\n%s", out)
+	}
+}
+
+// S33.7: las notificaciones usan el basename, no la ruta absoluta.
+func TestWorktreeNotificationBasenameS33_7(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if got := m.nameOf("/tmp/projects/wt-feat-x"); got != "wt-feat-x" {
+		t.Errorf("S33.7: nameOf = %q, want basename", got)
+	}
+}
+
+// S34.1/S34.2/S34.4: la sub-fila se renderiza por el camino dedicado (no
+// `renderRow`), es estrictamente distinta de una fila de repo y de un header
+// de grupo, muestra la rama y no inventa estado por-worktree (LOW-c/LOW-d).
+func TestWorktreeRowRenderS34_1_2_4(t *testing.T) {
+	main := discovery.Project{Path: "/tmp/multi", Name: "multi", PrimaryGroup: "g", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-featx", "feat/x")}
+	m := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{"/tmp/multi": s})
+	m, _ = press(m, "down") // cursor al repo (header primario en 0)
+	m, _ = press(m, " ")    // expandir
+
+	var repoLine, headerLine, wtLine string
+	for _, e := range m.entries() {
+		switch e.kind {
+		case kindPrimary:
+			headerLine = stripANSI(m.renderEntry(e, false))
+		case kindRepo:
+			repoLine = stripANSI(m.renderEntry(e, false))
+		case kindWorktree:
+			wtLine = stripANSI(m.renderEntry(e, false))
+		}
+	}
+	if wtLine == "" {
+		t.Fatal("S34.1: no hay sub-fila renderizada")
+	}
+
+	// LOW-c: la sub-fila nunca lee un Snapshot vacío como no-up/error/clean.
+	for _, bad := range []string{"no-up", "error", "clean", "↑", "↓"} {
+		if strings.Contains(wtLine, bad) {
+			t.Errorf("S34.4: la sub-fila inventa estado %q: %q", bad, wtLine)
+		}
+	}
+	if !strings.Contains(wtLine, "↳") || !strings.Contains(wtLine, "wt-featx") {
+		t.Errorf("S34.1: sub-fila no distinguible: %q", wtLine)
+	}
+	if !strings.Contains(wtLine, "feat/x") {
+		t.Errorf("S34.2: BRANCH sin rama del worktree: %q", wtLine)
+	}
+
+	// LOW-d: estrictamente distinta de la fila de repo y del header.
+	if wtLine == repoLine || wtLine == headerLine {
+		t.Errorf("S34.1: sub-fila idéntica a repo/header\n repo=%q\n header=%q\n wt=%q", repoLine, headerLine, wtLine)
+	}
+	if strings.Contains(repoLine, "↳") || strings.Contains(headerLine, "↳") {
+		t.Errorf("S34.1: glyph de sub-fila filtrado a otra fila: repo=%q header=%q", repoLine, headerLine)
+	}
+
+	// La sub-fila también se pinta en la vista completa.
+	if !strings.Contains(stripANSI(m.View().Content), "↳") {
+		t.Error("S34.1: la sub-fila no aparece en la vista")
+	}
+}
+
+// S34.3: worktree detached muestra (detached) y el head corto.
+func TestWorktreeRowDetachedS34_3(t *testing.T) {
+	w := gitstatus.Worktree{Path: "/tmp/wt-det", Branch: "", Head: "abc1234"}
+	m := newTestModel(t, nil, nil)
+	line := stripANSI(m.renderWorktreeRow(w, false))
+	if !strings.Contains(line, "(detached)") || !strings.Contains(line, "abc1234") {
+		t.Errorf("S34.3: sub-fila detached = %q", line)
+	}
+}
+
+// S34.5: el NAME del principal muestra ▸/▾ junto a (N wt).
+func TestWorktreeGlyphCounterS34_5(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▸ (2 wt)") {
+		t.Errorf("S34.5: plegado = %q, want ▸ (2 wt)", text)
+	}
+	m.expanded[p.Path] = true
+	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▾ (2 wt)") {
+		t.Errorf("S34.5: expandido = %q, want ▾ (2 wt)", text)
+	}
+}
+
+// S35.1/S35.2: la expansión sobrevive al reinicio; por defecto plegado.
+func TestWorktreeExpansionPersistsS35_1_2(t *testing.T) {
+	dir := t.TempDir()
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+
+	// S35.2: sin estado persistido → plegado.
+	fresh := newTestModel(t, []discovery.Project{p}, st)
+	fresh.loadPersisted(nil)
+	if len(worktreeNames(fresh.entries())) != 0 || fresh.expanded[p.Path] {
+		t.Error("S35.2: repo no aparece plegado por defecto")
+	}
+
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.store = state.NewStoreAt(dir)
+	m, _ = press(m, " ") // expandir y persistir
+	if !m.expanded[p.Path] {
+		t.Fatal("S35.1: space no expandió")
+	}
+
+	// "reinicio": misma store, modelo nuevo.
+	m2 := newTestModel(t, []discovery.Project{p}, st)
+	m2.store = state.NewStoreAt(dir)
+	m2.loadPersisted(m2.store.LoadCollapsed())
+	if !m2.expanded[p.Path] {
+		t.Error("S35.1: la expansión no sobrevivió al reinicio")
+	}
+	if got := worktreeNames(m2.entries()); len(got) != 2 {
+		t.Errorf("S35.1: sub-filas tras reinicio = %v, want 2", got)
+	}
+}
+
+// S35.3: sin colisión con las claves de grupo de collapsed.json.
+func TestWorktreePersistNoCollisionS35_3(t *testing.T) {
+	dir := t.TempDir()
+	if err := state.NewStoreAt(dir).SaveCollapsed(map[string]bool{"backend": true}); err != nil {
+		t.Fatal(err)
+	}
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.store = state.NewStoreAt(dir)
+	m.loadPersisted(m.store.LoadCollapsed())
+	if !m.collapsed["backend"] {
+		t.Fatal("la clave de grupo existente no se cargó")
+	}
+	m, _ = press(m, " ")
+
+	loaded := state.NewStoreAt(dir).LoadCollapsed()
+	if !loaded["backend"] {
+		t.Error("S35.3: la clave de grupo existente se perdió")
+	}
+	if loaded[state.WorktreePrefix+p.Path] != true {
+		t.Errorf("S35.3: expansión ausente del namespace propio: %v", loaded)
+	}
+}
+
+// S35.4: collapsed.json corrupto o ausente degrada a plegado sin fallar.
+func TestWorktreePersistCorruptS35_4(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, state.FileName), []byte("{corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.store = state.NewStoreAt(dir)
+	m.loadPersisted(m.store.LoadCollapsed())
+	if len(m.expanded) != 0 {
+		t.Errorf("S35.4: expansión con fichero corrupto: %v", m.expanded)
+	}
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S35.4: sub-filas con fichero corrupto: %v", got)
+	}
+}
+
+// S36.1: el filtro dirty oculta al padre y a sus sub-filas.
+func TestWorktreeDirtyFilterS36_1(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.expanded[p.Path] = true
+	m.onlyDirty = true
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S36.1: sub-filas visibles bajo filtro dirty: %v", got)
+	}
+}
+
+// S36.2/S36.3: el plegado de grupos manda; independiente de la expansión.
+func TestWorktreeGroupFoldS36_2_3(t *testing.T) {
+	p := discovery.Project{Path: "/a", Name: "a", PrimaryGroup: "g", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-a", "a")}
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/a": s})
+
+	m, _ = press(m, "down") // cursor al repo
+	m, _ = press(m, " ")    // expandir
+	if len(worktreeNames(m.entries())) != 1 {
+		t.Fatal("precondición: repo no expandido")
+	}
+	m, _ = press(m, "home") // cursor al header primario
+	m, _ = press(m, "tab")  // plegar grupo
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S36.2: sub-filas visibles con grupo plegado: %v", got)
+	}
+	m, _ = press(m, "tab") // desplegar grupo
+	if !m.expanded["/a"] {
+		t.Error("S36.3: la expansión del repo se perdió al togglear el grupo")
+	}
+	if got := worktreeNames(m.entries()); len(got) != 1 {
+		t.Errorf("S36.3: sub-filas tras desplegar = %v, want 1", got)
+	}
+}
+
+// S37.1/S37.2: default `space` y rebind configurable.
+func TestWorktreeKeybindingS37_1_2(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+
+	// S37.1: default space.
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	if !m.expanded[p.Path] {
+		t.Error("S37.1: space no expandió con los bindings por defecto")
+	}
+
+	// S37.2: rebind a `w`.
+	m2 := newTestModel(t, []discovery.Project{p}, st)
+	m2.cfg.Keybindings["expand"] = "w"
+	m2, _ = press(m2, "w")
+	if !m2.expanded[p.Path] {
+		t.Fatal("S37.2: w no expandió tras el rebind")
+	}
+	m3 := newTestModel(t, []discovery.Project{p}, st)
+	m3.cfg.Keybindings["expand"] = "w"
+	m3, _ = press(m3, " ")
+	if m3.expanded[p.Path] {
+		t.Error("S37.2: space sigue expandiendo tras el rebind")
+	}
+}
+
+// S37.3: el hint de expansión aparece con su tecla configurada.
+func TestWorktreeHintS37_3(t *testing.T) {
+	cfg := config.Defaults()
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "space expand") {
+		t.Errorf("S37.3: hint de expansión ausente: %v", cfg.HintBarLines())
+	}
+	cfg.Keybindings["expand"] = "w"
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "w expand") {
+		t.Errorf("S37.3: hint sin la tecla rebindeada: %v", cfg.HintBarLines())
+	}
+}
+
+// S39.1: `tab` sobre una sub-fila no pliega grupos.
+func TestWorktreeTabOnSubrowS39_1(t *testing.T) {
+	p := discovery.Project{Path: "/a", Name: "a", PrimaryGroup: "g", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-a", "a")}
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/a": s})
+	m, _ = press(m, "down") // repo
+	m, _ = press(m, " ")    // expandir
+	m, _ = press(m, "down") // sub-fila
+	if e, _ := m.selectedEntry(); e.kind != kindWorktree {
+		t.Fatalf("S39.1: cursor no en sub-fila: %+v", e)
+	}
+	before := len(m.collapsed)
+	m, _ = press(m, "tab")
+	if len(m.collapsed) != before {
+		t.Errorf("S39.1: tab sobre sub-fila cambió el plegado: %v", m.collapsed)
+	}
+	if got := worktreeNames(m.entries()); len(got) != 1 {
+		t.Errorf("S39.1: sub-fila desapareció: %v", got)
+	}
+}
+
+// S40.1/S40.2/S40.3: match por rama/basename con expansión transitoria.
+func TestWorktreeSearchMatchS40_1_2_3(t *testing.T) {
+	p := proj("alpha", "/tmp/alpha", true) // no matchea por nombre
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{
+		wt("/tmp/wt-feature", "feat/x"),
+		wt("/tmp/wt-other", "chore/y"),
+		wt("/tmp/nombre-raro", "chore/z"),
+	}
+	states := map[string]gitstatus.Snapshot{"/tmp/alpha": s}
+
+	// S40.1: match por rama.
+	m := newTestModel(t, []discovery.Project{p}, states)
+	m.search = "feat/x"
+	if len(m.rows()) != 1 {
+		t.Fatalf("S40.1: el padre no es visible: %v", rowNames(m.rows()))
+	}
+	got := worktreeNames(m.entries())
+	if len(got) != 1 || got[0] != "wt-feature" {
+		t.Errorf("S40.1/S40.3: sub-filas = %v, want [wt-feature]", got)
+	}
+
+	// S40.2: match por basename.
+	m2 := newTestModel(t, []discovery.Project{p}, states)
+	m2.search = "nombre-raro"
+	if got := worktreeNames(m2.entries()); len(got) != 1 || got[0] != "nombre-raro" {
+		t.Errorf("S40.2: sub-filas = %v, want [nombre-raro]", got)
+	}
+}
+
+// S40.4: sin match no se muestra ninguna fila.
+func TestWorktreeSearchNoMatchS40_4(t *testing.T) {
+	p, st := repoWithWorktrees("alpha", "/tmp/alpha", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.search = "zzzz-no-existe"
+	if got := m.entries(); len(got) != 0 {
+		t.Errorf("S40.4: entries = %v, want vacío", got)
+	}
+}
+
+// S40.5: la expansión inducida por búsqueda es transitoria.
+func TestWorktreeSearchTransientS40_5(t *testing.T) {
+	p, st := repoWithWorktrees("alpha", "/tmp/alpha", wt("/tmp/wt-feature", "feat/x"))
+
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.search = "feat/x"
+	if _, ok := m.expanded[p.Path]; ok {
+		t.Error("S40.5: la búsqueda escribió el estado persistido")
+	}
+	if got := worktreeNames(m.entries()); len(got) != 1 {
+		t.Fatalf("S40.5: sub-fila no visible con la búsqueda activa: %v", got)
+	}
+	m.search = "" // limpiar la búsqueda
+	if got := worktreeNames(m.entries()); len(got) != 0 {
+		t.Errorf("S40.5: el repo no volvió a plegado tras limpiar la búsqueda: %v", got)
+	}
+	if _, ok := m.expanded[p.Path]; ok {
+		t.Error("S40.5: el estado persistido quedó contaminado")
+	}
+}
+
+// Integración: repo y worktrees git reales (testutil) → sub-filas reales.
+func TestWorktreeExpandRealFixture(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtFeat := filepath.Join(t.TempDir(), "wt-feat")
+	testutil.MakeWorktree(t, dir, wtFeat, "feat/x")
+	wtDetached := filepath.Join(t.TempDir(), "wt-detached")
+	testutil.MakeWorktree(t, dir, wtDetached, "otra")
+	testutil.Detach(t, wtDetached)
+
+	snap := gitstatus.Collect(t.Context(), dir, "main")
+	if len(snap.Worktrees) != 2 {
+		t.Fatalf("fixture: worktrees = %d, want 2", len(snap.Worktrees))
+	}
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+
+	m, _ = press(m, " ")
+	entries := m.entries()
+	if got := worktreeNames(entries); len(got) != 2 {
+		t.Fatalf("sub-filas reales = %v, want 2", got)
+	}
+	// La rama real del worktree aparece en la sub-fila.
+	var featLine string
+	for _, e := range entries {
+		if e.kind == kindWorktree && filepath.Base(e.wt.Path) == "wt-feat" {
+			featLine = stripANSI(m.renderWorktreeRow(e.wt, false))
+		}
+	}
+	if !strings.Contains(featLine, "feat/x") {
+		t.Errorf("rama real no visible: %q", featLine)
+	}
+	// El worktree detached real muestra (detached).
+	var detLine string
+	for _, e := range entries {
+		if e.kind == kindWorktree && filepath.Base(e.wt.Path) == "wt-detached" {
+			detLine = stripANSI(m.renderWorktreeRow(e.wt, false))
+		}
+	}
+	if !strings.Contains(detLine, "(detached)") {
+		t.Errorf("detached real no visible: %q", detLine)
+	}
 }
