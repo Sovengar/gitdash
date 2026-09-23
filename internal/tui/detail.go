@@ -161,11 +161,7 @@ func (m *Model) renderDetail(r row) string {
 // vivo, se delega al detalle completo; si no, panel mínimo con los datos que
 // trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
 func (m *Model) renderWorktreeDetail(e tableEntry) string {
-	clean := filepath.Clean(e.wt.Path)
-	for _, p := range m.projects {
-		if filepath.Clean(p.Path) != clean {
-			continue
-		}
+	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
 			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)})
 		}

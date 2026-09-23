@@ -593,12 +593,9 @@ func (m *Model) selected() (row, bool) {
 // proyecto y su snapshot vivo; si no, un proyecto mínimo con HasRepo=true y
 // MarkerErr vacío para satisfacer los guards de las operaciones.
 func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
-	clean := filepath.Clean(wt.Path)
-	for _, p := range m.projects {
-		if filepath.Clean(p.Path) == clean {
-			snap := m.states[p.Path]
-			return row{project: p, snap: snap, state: snap.State(p.HasRepo)}
-		}
+	if p, ok := m.discoveredByPath(wt.Path); ok {
+		snap := m.states[p.Path]
+		return row{project: p, snap: snap, state: snap.State(p.HasRepo)}
 	}
 	return row{project: discovery.Project{
 		Path:       wt.Path,
@@ -606,4 +603,17 @@ func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
 		HasRepo:    true,
 		IsWorktree: true,
 	}}
+}
+
+// discoveredByPath busca el proyecto descubierto que corresponde a un path
+// de worktree (dedupe R31.3), comparando paths normalizados para tolerar
+// symlinks o barras finales.
+func (m *Model) discoveredByPath(path string) (discovery.Project, bool) {
+	clean := filepath.Clean(path)
+	for _, p := range m.projects {
+		if filepath.Clean(p.Path) == clean {
+			return p, true
+		}
+	}
+	return discovery.Project{}, false
 }
