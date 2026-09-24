@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gitdash/internal/tui/bordered"
@@ -20,7 +21,7 @@ func (m Model) section(title, content string) string {
 
 // layout calcula el reparto de alto para el estado actual del modelo.
 func (m Model) layout() layout {
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen)
+	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()))
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
@@ -42,9 +43,10 @@ func (m Model) compose(lay layout, middle string) string {
 
 // statsSection resume el estado global. El indicador compacto de actividad va
 // primero para que sobreviva al recorte en anchos estrechos; después el
-// resumen y, por último, los nombres de las acciones en curso.
+// resumen. El propio indicador ya nombra las acciones en curso, así que no se
+// duplican aparte.
 func (m Model) statsSection() string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 2)
 	if activity := m.activityIndicator(); activity != "" {
 		parts = append(parts, activity)
 	}
@@ -54,37 +56,44 @@ func (m Model) statsSection() string {
 		summary += " [dirty]"
 	}
 	parts = append(parts, styleBar.Render(summary))
-	for path, kind := range m.running {
-		if kind == "pull" || kind == "push" || kind == "sync" {
-			parts = append(parts, styleFetchRun.Render(fmt.Sprintf("%s %s…", kind, m.nameOf(path))))
-		}
-	}
 	return m.section("gitdash", strings.Join(parts, "  "))
 }
 
 // activityIndicator es el indicador compacto de "algo en curso": scan, fetch o
-// una acción pull/push/sync.
+// una acción pull/push/sync (a la que añade el repo cuando hay sitio).
 func (m Model) activityIndicator() string {
 	switch {
 	case m.scanning:
 		return m.spinner.View() + " scanning"
 	case m.fetchingAll():
 		return m.spinner.View() + " fetching"
-	case m.runningAction():
-		return m.spinner.View() + " working"
-	default:
+	}
+	running := m.runningActions()
+	if len(running) == 0 {
 		return ""
 	}
+	label := running[0]
+	if extra := len(running) - 1; extra > 0 {
+		label = fmt.Sprintf("%s +%d", label, extra)
+	}
+	return m.spinner.View() + " " + label
 }
 
-// runningAction reporta si hay algún pull/push/sync en curso.
-func (m Model) runningAction() bool {
-	for _, kind := range m.running {
+// runningActions lista las acciones en curso como "kind nombre…", ordenadas por
+// path para que el render sea determinista (m.running es un mapa).
+func (m Model) runningActions() []string {
+	paths := make([]string, 0, len(m.running))
+	for path, kind := range m.running {
 		if kind == "pull" || kind == "push" || kind == "sync" {
-			return true
+			paths = append(paths, path)
 		}
 	}
-	return false
+	sort.Strings(paths)
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, fmt.Sprintf("%s %s…", m.running[path], m.nameOf(path)))
+	}
+	return out
 }
 
 // filterSection muestra el input de búsqueda en vivo o el filtro confirmado.
@@ -126,9 +135,7 @@ func (m Model) tableSection(bodyLines int) string {
 		rows = append(rows, "")
 	}
 
-	header := "  " + pad("NAME", colName) + pad("BRANCH", colBranch) +
-		pad("Work Tree", colWT) + pad("↑↓up", colUpDown) + pad("SYNC", colSync) +
-		pad("ACTIVITY", colActivity) + pad("FETCH", colFetch)
+	header := "  " + headerColumns(m.width)
 	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"))
 }
 

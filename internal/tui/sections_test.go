@@ -66,7 +66,7 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 
 // Terminal baja degrada secciones en orden antes de romper el layout.
 func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
-	lay := computeLayout(40, false, false)
+	lay := computeLayout(40, false, false, 3)
 	if !lay.showStats || !lay.showKeybinds || lay.hintLines != 3 {
 		t.Errorf("altura amplia: %+v, want todo visible", lay)
 	}
@@ -74,21 +74,31 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 		t.Errorf("bodyLines = %d, want %d", lay.bodyLines, 40-(statsSectionLines+tableChrome+keybindsChrome+3))
 	}
 
+	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
+	// HintBarLines)
+	pocas := computeLayout(40, false, false, 1)
+	if pocas.hintLines != 1 {
+		t.Errorf("hintBarLines=1: hintLines = %d, want 1", pocas.hintLines)
+	}
+	if want := 40 - (statsSectionLines + tableChrome + keybindsChrome + 1); pocas.bodyLines != want {
+		t.Errorf("hintBarLines=1: bodyLines = %d, want %d", pocas.bodyLines, want)
+	}
+
 	// altura intermedia: se recortan las hints antes de ocultar secciones
-	mid := computeLayout(10, false, false)
+	mid := computeLayout(10, false, false, 3)
 	if mid.hintLines != 1 || !mid.showKeybinds {
 		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
 	}
 
 	// más baja: keybinds fuera, stats aún visible
-	baja := computeLayout(9, false, false)
+	baja := computeLayout(9, false, false, 3)
 	if baja.showKeybinds || !baja.showStats {
 		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
 	}
 
 	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false)
+		l := computeLayout(h, false, false, 3)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
@@ -196,7 +206,8 @@ func TestDetalleTituloIdentificaRepo(t *testing.T) {
 	}
 }
 
-// El indicador de actividad sobrevive a anchos estrechos (va primero en stats).
+// El indicador de actividad sobrevive a anchos estrechos (va primero en stats)
+// y nombra la acción en curso sin duplicarla.
 func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
@@ -204,12 +215,36 @@ func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
 	m.running["/tmp/old-clean"] = "pull"
 
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(out, "working") {
+	if !strings.Contains(out, "pull old-clean") {
 		t.Errorf("el indicador de acción en curso no sobrevive a width=40:\n%s", out)
+	}
+	if n := strings.Count(out, "pull"); n != 1 {
+		t.Errorf("la acción en curso aparece %d veces, want 1 (sin duplicar):\n%s", n, out)
 	}
 	for i, l := range strings.Split(m.View().Content, "\n") {
 		if w := ansi.StringWidth(l); w != m.width {
 			t.Errorf("línea %d ancho = %d, want %d", i, w, m.width)
+		}
+	}
+}
+
+// En anchos estrechos la tabla omite columnas por la derecha en vez de
+// truncarlas a medias (la cabecera nunca desborda el borde).
+func TestCabeceraOmiteColumnasEstrecho(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m.width = 60
+	content := m.renderDashboard()
+	out := stripANSI(content)
+	if strings.Contains(out, "FETCH") {
+		t.Errorf("FETCH no debería caber a width=60:\n%s", out)
+	}
+	if !strings.Contains(out, "NAME") || !strings.Contains(out, "BRANCH") {
+		t.Errorf("faltan columnas básicas:\n%s", out)
+	}
+	for i, l := range strings.Split(content, "\n") {
+		if w := ansi.StringWidth(l); w > m.width {
+			t.Errorf("línea %d ancho = %d > %d", i, w, m.width)
 		}
 	}
 }
