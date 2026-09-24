@@ -345,6 +345,49 @@ func (m *Model) renderEntry(e tableEntry, selected bool) string {
 // primario.
 const indentHeader = "  "
 
+// tableColumn describe una columna de la tabla (título y ancho).
+type tableColumn struct {
+	title string
+	width int
+}
+
+// tableColumns son las columnas en orden de prioridad: en anchos estrechos se
+// omiten por la derecha (primero FETCH, luego ACTIVITY…) para que las columnas
+// de estado no queden fuera del borde.
+var tableColumns = []tableColumn{
+	{"NAME", colName},
+	{"BRANCH", colBranch},
+	{"Work Tree", colWT},
+	{"↑↓up", colUpDown},
+	{"SYNC", colSync},
+	{"ACTIVITY", colActivity},
+	{"FETCH", colFetch},
+}
+
+// fitColumns devuelve cuántas columnas caben en innerWidth celdas, dejando
+// siempre al menos NAME.
+func fitColumns(innerWidth int) int {
+	used := 0
+	for i, c := range tableColumns {
+		if used+c.width > innerWidth {
+			return max(1, i)
+		}
+		used += c.width
+	}
+	return len(tableColumns)
+}
+
+// headerColumns compone los títulos de las columnas que caben en el ancho
+// disponible (terminal menos bordes y sangrado), sin dejar las últimas
+// truncadas a medias.
+func headerColumns(width int) string {
+	var b strings.Builder
+	for _, c := range tableColumns[:fitColumns(width-4)] {
+		b.WriteString(pad(c.title, c.width))
+	}
+	return b.String()
+}
+
 // renderWorktreeRow compone una sub-fila de worktree: indentada
 // con glyph propio `↳`, distinta de una fila de repo y de un header de grupo.
 // Muestra el basename del worktree y su rama (o `(detached)` con el head
@@ -374,6 +417,7 @@ func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
 		{"", styleDim, colActivity},
 		{"", styleDim, colFetch},
 	}
+	cells = cells[:fitColumns(m.width-4)]
 	line := ""
 	for _, c := range cells {
 		line += c.style.Render(pad(truncate(c.text, c.width), c.width))
@@ -453,6 +497,7 @@ func (m *Model) renderRow(r row, selected bool) string {
 		{activity, activityStyle, colActivity},
 		{fetch, fetchStyle, colFetch},
 	}
+	cells = cells[:fitColumns(m.width-4)]
 
 	line := ""
 	for _, c := range cells {

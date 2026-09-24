@@ -36,10 +36,7 @@ func RenderWithTitles(border lipgloss.Border, borderFg color.Color, topTitle str
 		width = 2
 	}
 
-	innerWidth := width - 2
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
+	innerWidth := width - 2 // width >= 2 → nunca negativo
 
 	var style *ansi.Style
 	if borderFg != nil {
@@ -98,7 +95,7 @@ func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerW
 		rightChar = " "
 	}
 
-	raw := strings.Split(content, "\n")
+	raw := strings.Split(content, "\n") // siempre >= 1 elemento
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
 		if w := ansi.StringWidth(line); w > innerWidth {
@@ -108,9 +105,6 @@ func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerW
 			line += strings.Repeat(" ", pad)
 		}
 		lines = append(lines, styled(style, leftChar)+line+styled(style, rightChar))
-	}
-	if len(lines) == 0 {
-		lines = append(lines, styled(style, leftChar)+strings.Repeat(" ", innerWidth)+styled(style, rightChar))
 	}
 	return lines
 }

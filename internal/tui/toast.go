@@ -5,6 +5,7 @@ package tui
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -40,13 +41,15 @@ type toastManager struct {
 	toasts []toast
 }
 
-// show encola un toast; texto vacío se ignora.
+// show encola un toast; texto vacío se ignora. Se descartan los retornos de
+// carro para que el texto nunca rompa el render por líneas del overlay (los
+// saltos `\n` sí se conservan: producen un toast de varias líneas).
 func (t *toastManager) show(text string, level toastLevel) {
 	if text == "" {
 		return
 	}
 	t.toasts = append(t.toasts, toast{
-		text:     text,
+		text:     strings.ReplaceAll(text, "\r", ""),
 		level:    level,
 		created:  time.Now(),
 		duration: toastDuration,
@@ -70,12 +73,22 @@ func (t *toastManager) update() {
 	t.toasts = active
 }
 
-// blocks devuelve un bloque de líneas por toast (de más antiguo a más reciente,
-// el más reciente se apila abajo).
-func (t *toastManager) blocks() [][]string {
+// blocks devuelve un bloque de líneas por toast al ancho máximo del toast (no
+// conoce la terminal): de más antiguo a más reciente, el más reciente se apila
+// abajo.
+func (t *toastManager) blocks() [][]string { return t.blocksFor(0) }
+
+// blocksFor envuelve cada toast al ancho disponible de la terminal, de modo
+// que en terminales estrechas el mensaje se re-envuelve a más líneas en vez de
+// truncarse. termWidth <= 0 usa el ancho máximo del toast.
+func (t *toastManager) blocksFor(termWidth int) [][]string {
+	maxWidth := toastMaxWidth
+	if termWidth > 0 {
+		maxWidth = max(1, min(toastMaxWidth, termWidth-1))
+	}
 	out := make([][]string, 0, len(t.toasts))
 	for _, to := range t.toasts {
-		out = append(out, renderToast(to))
+		out = append(out, renderToast(to, maxWidth))
 	}
 	return out
 }
@@ -91,10 +104,11 @@ func (t *toastManager) lines() []string {
 
 // renderToast compone el toast como caja de ancho adaptativo (clamp) y hace
 // word-wrap del mensaje, de modo que el texto completo (p.ej. el hint
-// accionable de un fallo) quede visible en varias líneas. Cada línea se
-// rellena al ancho del toast midiendo sin ANSI.
-func renderToast(to toast) []string {
-	width := toastWidth(to.text)
+// accionable de un fallo) quede visible en varias líneas. maxWidth es el ancho
+// máximo disponible (terminal); cada línea se rellena al ancho del toast
+// midiendo sin ANSI.
+func renderToast(to toast, maxWidth int) []string {
+	width := toastWidth(to.text, maxWidth)
 	wrapped := wrapText(to.text, width-4)
 	out := make([]string, 0, len(wrapped))
 	for i, seg := range wrapped {
@@ -111,14 +125,15 @@ func renderToast(to toast) []string {
 	return out
 }
 
-// toastWidth es el ancho objetivo del toast, clampado entre mínimo y máximo.
-func toastWidth(text string) int {
+// toastWidth es el ancho objetivo del toast: el del texto + 4, acotado por
+// abajo a toastMinWidth y por arriba a toastMaxWidth y al ancho disponible.
+func toastWidth(text string, maxWidth int) int {
 	w := ansi.StringWidth(text) + 4
 	if w < toastMinWidth {
 		w = toastMinWidth
 	}
-	if w > toastMaxWidth {
-		w = toastMaxWidth
+	if w > maxWidth {
+		w = maxWidth
 	}
 	return w
 }
@@ -166,6 +181,9 @@ func wrapText(text string, maxWidth int) []string {
 		for _, w := range words {
 			for ansi.StringWidth(w) > maxWidth {
 				head, tail := splitWidth(w, maxWidth)
+				if head == "" { // salvaguarda: nunca ceder sin progreso
+					break
+				}
 				if cur != "" {
 					lines = append(lines, cur)
 					cur = ""
@@ -193,12 +211,18 @@ func wrapText(text string, maxWidth int) []string {
 	return lines
 }
 
-// splitWidth corta s en el mayor prefijo que cabe en maxWidth celdas.
+// splitWidth corta s en el mayor prefijo que cabe en maxWidth celdas. Si la
+// primera runa ya es más ancha que maxWidth se corta igualmente (una runa),
+// para garantizar progreso y no entrar en bucle.
 func splitWidth(s string, maxWidth int) (string, string) {
 	width := 0
 	for i, r := range s {
 		rw := ansi.StringWidth(string(r))
 		if width+rw > maxWidth {
+			if i == 0 {
+				_, size := utf8.DecodeRuneInString(s)
+				return s[:size], s[size:]
+			}
 			return s[:i], s[i:]
 		}
 		width += rw
@@ -233,7 +257,15 @@ func overlayToasts(base string, blocks [][]string, width, height, reserved int) 
 		}
 		top := bottom - bh + 1
 		if top < 0 {
-			break // no cabe: se priorizan los toasts más recientes
+			// El bloque no cabe entero: se dibujan sus últimas filas (el
+			// cierre del mensaje, que suele llevar el detalle accionable) en
+			// lugar de descartarlo.
+			keep := bottom + 1
+			if keep <= 0 {
+				break // sin ninguna fila libre: se priorizan los más recientes
+			}
+			block = block[bh-keep:]
+			top = 0
 		}
 		for j, b := range block {
 			y := top + j

@@ -22,10 +22,12 @@ type layout struct {
 }
 
 // computeLayout reparte el alto de la terminal entre las secciones. En
-// terminales bajas degrada en orden: recortar hints de keybinds (3→2→1→0),
-// ocultar keybinds, ocultar stats y, por último, garantizar bodyLines >= 1.
+// terminales bajas degrada en orden: recortar hints de keybinds (hasta
+// defaultHintLines→0), ocultar keybinds, ocultar stats y, por último,
+// garantizar bodyLines >= 1. hintBarLines es el número real de líneas de hints
+// (config): la reserva de keybinds nunca pide más de las que se van a pintar.
 // Seguro con height = 0 (primer render antes de WindowSizeMsg).
-func computeLayout(height int, hasFilter, detailOpen bool) layout {
+func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
@@ -37,7 +39,7 @@ func computeLayout(height int, hasFilter, detailOpen bool) layout {
 
 	showStats := true
 	showKeybinds := true
-	hint := defaultHintLines
+	hint := min(defaultHintLines, max(0, hintBarLines))
 
 	fixed := func() int {
 		n := chrome + filterH
