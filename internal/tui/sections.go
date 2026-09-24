@@ -19,9 +19,11 @@ func (m Model) section(title, content string) string {
 	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, m.width)
 }
 
-// layout calcula el reparto de alto para el estado actual del modelo.
+// layout calcula el reparto de alto para el estado actual del modelo. Con una
+// confirmación de borrado armada se fuerza la visibilidad de stats para que el
+// prompt no desaparezca en terminales bajas.
 func (m Model) layout() layout {
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()))
+	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()), m.armed != nil)
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
@@ -89,7 +91,7 @@ func (m Model) activityIndicator() string {
 func (m Model) runningActions() []string {
 	paths := make([]string, 0, len(m.running))
 	for path, kind := range m.running {
-		if kind == "pull" || kind == "push" || kind == "sync" {
+		if kind == "pull" || kind == "push" || kind == "sync" || kind == "worktree_remove" {
 			paths = append(paths, path)
 		}
 	}
