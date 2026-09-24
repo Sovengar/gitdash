@@ -4,7 +4,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -25,16 +24,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tickMsg:
-		cmds := []tea.Cmd{tickCmd()}
-		if time.Now().After(m.notifyUntil) && m.notify != "" {
-			m.notify = ""
-		}
-		return m, tea.Batch(cmds...)
+		m.toasts.update()
+		return m, tickCmd()
 
 	case scanProjectsMsg:
 		m.projects = msg.projects
-		m.scanNote = msg.note
 		m.clampCursor()
+		if msg.note != "" {
+			m.toasts.showError("roots: " + msg.note)
+		}
 		return m.withPump(nil)
 
 	case statusMsg:
@@ -61,48 +59,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fetchStateMsg:
 		m.fetchStates[msg.path] = msg.state
 		if msg.state == "failed" {
-			return m.withPump(m.notifyCmd(fmt.Sprintf("fetch failed %s: %s", m.nameOf(msg.path), msg.err)))
+			m.toasts.showError(fmt.Sprintf("fetch failed %s: %s", m.nameOf(msg.path), msg.err))
 		}
 		return m.withPump(nil)
 
 	case fetchDoneMsg:
-		var note string
 		switch {
 		case msg.failed > 0:
-			note = fmt.Sprintf("fetch: %d ok, %d failed", msg.ok, msg.failed)
+			m.toasts.showWarning(fmt.Sprintf("fetch: %d ok, %d failed", msg.ok, msg.failed))
 		case msg.ok == 1:
-			note = "fetch ok"
+			m.toasts.showSuccess("fetch ok")
 		default:
-			note = fmt.Sprintf("fetch ok (%d repos)", msg.ok)
+			m.toasts.showSuccess(fmt.Sprintf("fetch ok (%d repos)", msg.ok))
 		}
-		return m.withPump(m.notifyCmd(note))
+		return m.withPump(nil)
 
 	case actionMsg:
 		delete(m.running, msg.path)
 		m.lastAction[msg.path] = actionResult{kind: msg.kind, output: msg.output, err: msg.err}
-		return m.withPump(m.notifyCmd(actionNote(msg.kind, m.nameOf(msg.path), msg.output, msg.err)))
+		note := actionNote(msg.kind, m.nameOf(msg.path), msg.output, msg.err)
+		if msg.err != "" {
+			m.toasts.showError(note)
+		} else {
+			m.toasts.showSuccess(note)
+		}
+		return m.withPump(nil)
 
 	case execDoneMsg:
 		delete(m.running, msg.path)
 		// el handoff pudo cambiar el estado del repo: siempre re-colecta
 		cmd := m.recollectCmd(msg.path)
 		if msg.err != nil {
-			return m, tea.Batch(cmd, m.notifyCmd(fmt.Sprintf("command: %v", msg.err)))
+			m.toasts.showError(fmt.Sprintf("command: %v", msg.err))
 		}
 		return m, cmd
 
 	case cmdResultMsg:
 		delete(m.running, msg.path)
-		verdict := "ok"
-		if msg.exit != "0" {
-			verdict = "exit " + msg.exit
-		}
 		m.lastCmd[msg.path] = cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
-		return m.withPump(m.notifyCmd(fmt.Sprintf("! %s — %s", msg.command, verdict)))
+		if msg.exit != "0" {
+			m.toasts.showError(fmt.Sprintf("! %s — exit %s", msg.command, msg.exit))
+		} else {
+			m.toasts.showInfo(fmt.Sprintf("! %s — ok", msg.command))
+		}
+		return m.withPump(nil)
 
 	case notifyMsg:
-		m.notify = msg.text
-		m.notifyUntil = time.Now().Add(3 * time.Second)
+		m.toasts.show(msg.text, msg.level)
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -171,7 +174,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cmdInput.SetValue("")
 			if r, ok := m.selected(); ok {
 				if !r.project.HasRepo {
-					return m, m.notifyCmd("no git repo — nothing to do")
+					return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 				}
 				if cmdStr == "" {
 					return m, m.openShellCmd(r.project.Path) // shell interactiva
@@ -253,38 +256,38 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "fetch":
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
-				return m, m.notifyCmd("no git repo — nothing to do")
+				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
 			return m, m.fetchBatchCmd([]string{r.project.Path})
 		}
 	case "fetch_all":
 		paths := m.fetchTargets()
 		if len(paths) == 0 {
-			return m, m.notifyCmd("no repositories with upstream to fetch")
+			return m, m.toastCmd(toastInfo, "no repositories with upstream to fetch")
 		}
 		return m, m.fetchBatchCmd(paths)
 	case "pull":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.notifyCmd("no git repo — nothing to do")
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "pull")
 		}
 	case "sync":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.notifyCmd("no git repo — nothing to do")
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "sync")
 		}
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.notifyCmd("no git repo — nothing to do")
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
 			return m, m.startActionCmd(r.project.Path, "push")
 		}
 	case "editor":
 		if r, ok := m.selected(); ok {
 			if r.project.MarkerErr != "" {
-				return m, m.notifyCmd("marker error — fix .gitdash.toml first")
+				return m, m.toastCmd(toastWarning, "marker error — fix .gitdash.toml first")
 			}
 			return m, m.openEditorCmd(r.project.Path)
 		}
@@ -292,20 +295,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// G abre lazygit en el repo bajo el cursor.
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
-				return m, m.notifyCmd("no git repo — nothing to do")
+				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
 			return m, m.openLazygitCmd(r.project.Path)
 		}
 	case "update":
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
-				return m, m.notifyCmd("no git repo — nothing to do")
+				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
 			return m, m.openUpdateCmd(r.project.Path)
 		}
 	case "rescan":
 		if m.scanning {
-			return m, m.notifyCmd("scan already running")
+			return m, m.toastCmd(toastInfo, "scan already running")
 		}
 		return m, m.startScanCmd()
 	case "recollect":
@@ -361,7 +364,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// enter vacío = shell interactiva).
 		if m.detailOpen {
 			if r, ok := m.selected(); !ok || !r.project.HasRepo {
-				return m, m.notifyCmd("no git repo — nothing to do")
+				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
 			m.cmdOpen = true
 			return m, m.cmdInput.Focus()
@@ -381,100 +384,42 @@ func (m Model) actionForKey(key string) string {
 	return ""
 }
 
-// View compone la pantalla: tabla o detalle. El detalle usa la
-// fila viva bajo el cursor; si el filtro la hizo desaparecer, cae a la tabla.
+// View compone la pantalla: dashboard o detalle, con el overlay de toasts en
+// la esquina inferior derecha. El detalle usa la fila viva bajo el cursor; si
+// el filtro la hizo desaparecer, cae al dashboard.
 func (m Model) View() tea.View {
 	content := m.renderDashboard()
 	if m.detailOpen {
+		lay := m.layout()
 		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
 			// Detalle dedicado del worktree (sin inventar estado).
-			content = m.renderWorktreeDetail(e)
+			content = m.compose(lay, m.detailSection(worktreeTitle(e), m.renderWorktreeDetail(e), lay.bodyLines))
 		} else if r, ok := m.selected(); ok {
-			content = m.renderDetail(r)
+			content = m.compose(lay, m.detailSection(detailTitle(r), m.renderDetail(r), lay.bodyLines))
 		}
+	}
+	if toasts := m.toasts.lines(); len(toasts) > 0 {
+		content = overlayToasts(content, toasts, m.width, m.height, m.toastReserve())
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
 
-// renderDashboard compone título, cabecera, filas y barras.
+// renderDashboard apila las secciones bordadas del dashboard.
 func (m Model) renderDashboard() string {
-	var b strings.Builder
+	lay := m.layout()
+	return m.compose(lay, m.tableSection(lay.bodyLines))
+}
 
-	// título + resumen + estado
-	total, dirty, ahead, behind := m.summary()
-	title := styleTitle.Render("gitdash") +
-		styleBar.Render(fmt.Sprintf("  %d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind))
-	flags := ""
-	if m.onlyDirty {
-		flags += styleWarn.Render(" [dirty]")
+// toastReserve es el alto de la sección de keybinds visible, para que el
+// overlay de toasts no la tape.
+func (m Model) toastReserve() int {
+	lay := m.layout()
+	if !lay.showKeybinds {
+		return 0
 	}
-	if m.searchActive {
-		// Feedback inmediato al pulsar / — [/|] con cursor sólido y
-		// placeholder estático (el typewriter animado de bubbles se queda
-		// en el primer carácter sin ticks)
-		in := m.searchInput
-		in.Placeholder = ""
-		flags += styleWarn.Render(" [") + in.View()
-		if in.Value() == "" {
-			flags += styleDim.Render(searchPlaceholder)
-		}
-		flags += styleWarn.Render("]")
-	} else if m.search != "" {
-		flags += styleWarn.Render(" [/" + m.search + "]")
-	}
-	status := ""
-	if m.scanning {
-		status = " " + m.spinner.View() + " scanning"
-	} else if m.fetchingAll() {
-		status = " " + m.spinner.View() + " fetching"
-	}
-	b.WriteString(title + flags + status + "\n")
-	if m.scanNote != "" {
-		b.WriteString(styleError.Render("roots: "+m.scanNote) + "\n")
-	}
-
-	// cabecera (sin GROUP — los headers plegables ya lo dicen —,
-	// Work Tree en vez de STATE y ↑↓up explícito; anchos > headers →
-	// siempre hay separador, nunca "ACTIVITYFETCH")
-	header := "  " + pad("NAME", colName) + pad("BRANCH", colBranch) +
-		pad("Work Tree", colWT) + pad("↑↓up", colUpDown) + pad("SYNC", colSync) +
-		pad("ACTIVITY", colActivity) + pad("FETCH", colFetch)
-	b.WriteString(styleHint.Render(header) + "\n")
-
-	// filas con scroll (headers de grupo incluidos)
-	entries := m.entries()
-	// altura del bar: 1 separador + 1 notify/status + 3 hints lines
-	barLines := 4 // separator + 3 hint rows
-	if m.notify != "" || m.scanning || m.fetchingAll() {
-		barLines++
-	}
-	for _, kind := range m.running {
-		if kind == "pull" || kind == "push" || kind == "sync" {
-			barLines++
-			break
-		}
-	}
-	bodyLines := max(1, m.height-1-barLines)
-	if m.scanNote != "" {
-		bodyLines--
-	}
-	m.syncOffset(len(entries), bodyLines)
-	for i := m.offset; i < min(len(entries), m.offset+bodyLines); i++ {
-		b.WriteString(m.renderEntry(entries[i], i == m.cursor) + "\n")
-	}
-	if len(entries) == 0 && !m.scanning {
-		hint := "no repositories — create a .gitdash.toml in your projects"
-		if m.search != "" || m.onlyDirty {
-			hint = "no repositories match the current filter"
-		}
-		b.WriteString(styleHint.Render("  "+hint) + "\n")
-	}
-
-	// barra inferior
-	b.WriteString(m.renderBar())
-	return b.String()
+	return keybindsChrome + lay.hintLines
 }
 
 // syncOffset ajusta el scroll para que el cursor siga visible.
@@ -491,33 +436,3 @@ func (m *Model) syncOffset(total, window int) {
 	}
 }
 
-// renderBar pinta notificación o run-states y las líneas de hints.
-func (m Model) renderBar() string {
-	var b strings.Builder
-
-	// separador visual entre contenido y barra
-	b.WriteString(styleSeparator.Render(strings.Repeat("─", m.width)) + "\n")
-
-	left := ""
-	if m.notify != "" {
-		// truncate ANTES del estilo: el ANSI rompe el cálculo de ancho.
-		left = styleWarn.Render(truncate(m.notify, max(40, m.width)))
-	} else {
-		if m.scanning || m.fetchingAll() {
-			left = m.spinner.View() + " working  "
-		}
-		for path, kind := range m.running {
-			if kind == "pull" || kind == "push" || kind == "sync" {
-				left += styleFetchRun.Render(fmt.Sprintf("%s %s…  ", kind, m.nameOf(path)))
-			}
-		}
-	}
-	if left != "" {
-		b.WriteString(left + "\n")
-	}
-
-	for _, line := range m.cfg.HintBarLines() {
-		b.WriteString(styleHint.Render(truncate(line, max(40, m.width))) + "\n")
-	}
-	return b.String()
-}

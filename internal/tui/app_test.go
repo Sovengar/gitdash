@@ -197,28 +197,28 @@ func TestSearch(t *testing.T) {
 	}
 }
 
-// Feedback visual inmediato — al pulsar / el título pinta [/|] con el
+// Feedback visual inmediato — al pulsar / la sección de filtro pinta [/|] con
 // el cursor del input (o su placeholder) ANTES de teclear nada.
 func TestSearchImmediateFeedback(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	m, _ = press(m, "/")
-	top := stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
-	if !strings.Contains(top, "[/") {
-		t.Errorf("falta [/…] al entrar en filter mode: %q", top)
+	out := stripANSI(m.renderDashboard())
+	if !strings.Contains(out, "[/") {
+		t.Errorf("falta [/…] al entrar en filter mode:\n%s", out)
 	}
 	// placeholder visible con input vacío (nombre/grupo…)
-	if !strings.Contains(top, "name/group") {
-		t.Errorf("placeholder no visible al abrir: %q", top)
+	if !strings.Contains(out, "name/group") {
+		t.Errorf("placeholder no visible al abrir:\n%s", out)
 	}
 
 	// al confirmar el flag persiste con el texto confirmado
 	m, _ = press(m, "a")
 	m, _ = press(m, "enter")
-	top = stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
-	if !strings.Contains(top, "[/a]") {
-		t.Errorf("tras confirmar falta [/a]: %q", top)
+	out = stripANSI(m.renderDashboard())
+	if !strings.Contains(out, "[/a]") {
+		t.Errorf("tras confirmar falta [/a]:\n%s", out)
 	}
 }
 

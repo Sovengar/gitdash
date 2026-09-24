@@ -71,8 +71,11 @@ type cmdResultMsg struct {
 	path, command, output, exit string
 }
 
-// notifyMsg fija una notificación transitoria en la barra.
-type notifyMsg struct{ text string }
+// notifyMsg alimenta un toast (el nivel clasifica color e icono).
+type notifyMsg struct {
+	text  string
+	level toastLevel
+}
 
 // tickMsg expira notificaciones y anima el spinner.
 type tickMsg struct{}
@@ -103,9 +106,7 @@ type Model struct {
 	// propio (polaridad inversa a las claves de grupo).
 	expanded map[string]bool
 
-	scanning  bool
-	scanNote  string
-	fetchNote string
+	scanning bool
 
 	events  chan event
 	ctx     context.Context
@@ -116,8 +117,7 @@ type Model struct {
 	running     map[string]string // path → kind en curso (pull/push/collect)
 	lastAction  map[string]actionResult
 
-	notify      string
-	notifyUntil time.Time
+	toasts toastManager
 
 	detailOpen    bool
 	width, height int
@@ -241,7 +241,6 @@ func tickCmd() tea.Cmd {
 // vez" vive en el handler de la tecla r (New ya marca scanning=true).
 func (m *Model) startScanCmd() tea.Cmd {
 	m.scanning = true
-	m.scanNote = ""
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	events := m.events
@@ -343,7 +342,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 // además el texto de guard si la acción está bloqueada.
 func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
-		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = kind
 	appCtx := m.ctx
@@ -388,9 +387,9 @@ func (m *Model) recollectCmd(path string) tea.Cmd {
 	return nil
 }
 
-// notifyCmd fija una notificación transitoria (3s).
-func (m *Model) notifyCmd(text string) tea.Cmd {
-	return func() tea.Msg { return notifyMsg{text: text} }
+// toastCmd emite un toast efímero con el nivel dado (llega como notifyMsg).
+func (m *Model) toastCmd(level toastLevel, text string) tea.Cmd {
+	return func() tea.Msg { return notifyMsg{text: text, level: level} }
 }
 
 // openEditorCmd abre $EDITOR en el repo con handoff de terminal.
@@ -407,10 +406,10 @@ func (m *Model) openEditorCmd(path string) tea.Cmd {
 // puede hacer pull/commit/push).
 func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	if _, err := exec.LookPath("lazygit"); err != nil {
-		return m.notifyCmd("lazygit not installed")
+		return m.toastCmd(toastWarning, "lazygit not installed")
 	}
 	if prev, busy := m.running[path]; busy {
-		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "lazygit"
 	cmd := exec.Command("lazygit")
@@ -426,13 +425,13 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 func (m *Model) openUpdateCmd(path string) tea.Cmd {
 	bin := m.cfg.Commands["update"]
 	if bin == "" {
-		return m.notifyCmd("commands.update not configured")
+		return m.toastCmd(toastWarning, "commands.update not configured")
 	}
 	if _, err := exec.LookPath(bin); err != nil {
-		return m.notifyCmd(fmt.Sprintf("%s not installed", bin))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s not installed", bin))
 	}
 	if prev, busy := m.running[path]; busy {
-		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "update"
 	cmd := exec.Command(bin)
@@ -472,7 +471,7 @@ func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) 
 // abreviaciones de fish no aplican porque no hay sesión de edición.
 func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
-		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "cmd"
 	shell := os.Getenv("SHELL")
@@ -500,10 +499,10 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 		shell = "/bin/sh"
 	}
 	if _, err := exec.LookPath(shell); err != nil {
-		return m.notifyCmd("shell not found")
+		return m.toastCmd(toastWarning, "shell not found")
 	}
 	if prev, busy := m.running[path]; busy {
-		return m.notifyCmd(fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "shell"
 	cmd := exec.Command(shell)
