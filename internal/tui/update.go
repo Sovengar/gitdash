@@ -401,7 +401,7 @@ func (m Model) View() tea.View {
 	if content == "" {
 		content = m.renderDashboard()
 	}
-	if toasts := m.toasts.lines(); len(toasts) > 0 {
+	if toasts := m.toasts.blocks(); len(toasts) > 0 {
 		content = overlayToasts(content, toasts, m.width, m.height, m.toastReserve())
 	}
 	v := tea.NewView(content)
