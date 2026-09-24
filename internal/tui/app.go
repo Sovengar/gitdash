@@ -59,6 +59,14 @@ type actionMsg struct {
 	err                string
 }
 
+// worktreeRemovedMsg entrega el resultado de borrar un worktree: el nombre
+// visible, la salida combinada y el motivo real de git si falló.
+type worktreeRemovedMsg struct {
+	parent, wtPath, name string
+	output, err          string
+	force                bool
+}
+
 // execDoneMsg marca la vuelta de un proceso con handoff de terminal:
 // editor, lazygit (tecla g) o shell interactiva (tecla !, vacío).
 type execDoneMsg struct {
@@ -83,6 +91,16 @@ type tickMsg struct{}
 // actionResult guarda la salida de la última acción por repo.
 type actionResult struct {
 	kind, output, err string
+}
+
+// armedRemoval es la confirmación pendiente de borrado de un worktree (nil =
+// sin confirmación). Un único nivel de estado cubre los dos escalones: normal
+// y forzado (force=true).
+type armedRemoval struct {
+	wtPath string
+	parent string
+	name   string // basename visible del worktree
+	force  bool
 }
 
 // Model es el modelo raíz de la TUI.
@@ -118,6 +136,10 @@ type Model struct {
 	lastAction  map[string]actionResult
 
 	toasts toastManager
+
+	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
+	// Es estado efímero de sesión: no se persiste.
+	armed *armedRemoval
 
 	detailOpen    bool
 	width, height int
@@ -369,6 +391,40 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		sendEvent(appCtx, events, actionMsg{path: path, kind: kind, output: out, err: errStr})
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
+		}
+	}()
+	return nil
+}
+
+// removeWorktreeCmd lanza el borrado de un worktree desde el repo padre.
+// Replica el patrón de startActionCmd: guard de acción en curso por path del
+// padre, goroutine con timeout, y tras el éxito publica además el snapshot del
+// padre para que la sub-fila desaparezca. No usa recollectCmd porque su guard
+// chocaría con el flag running de esta propia acción.
+func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool) tea.Cmd {
+	if prev, busy := m.running[parent]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(parent)))
+	}
+	m.running[parent] = "worktree_remove"
+	appCtx := m.ctx
+	events := m.events
+	syncBranch := m.syncOf(parent)
+	go func() {
+		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
+		defer cancel()
+		out, err := gitstatus.RemoveWorktree(ctx, parent, wtPath, withForce)
+		errStr := ""
+		if err != nil {
+			// El error del proceso es "exit status 1"; el motivo real está en
+			// la salida combinada de git.
+			errStr = gitstatus.FailureReason(out, err)
+		}
+		sendEvent(appCtx, events, worktreeRemovedMsg{
+			parent: parent, wtPath: wtPath, name: name,
+			output: out, err: errStr, force: withForce,
+		})
+		if err == nil {
+			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch)})
 		}
 	}()
 	return nil

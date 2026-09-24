@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -38,6 +39,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.states[msg.path] = msg.snap
 		delete(m.running, msg.path)
+		// La sub-fila de un worktree borrado desaparece: el cursor debe
+		// quedar en rango.
+		m.clampCursor()
 		return m.withPump(nil)
 
 	case collectDoneMsg:
@@ -82,6 +86,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toasts.showError(note)
 		} else {
 			m.toasts.showSuccess(note)
+		}
+		return m.withPump(nil)
+
+	case worktreeRemovedMsg:
+		delete(m.running, msg.parent)
+		if msg.err == "" {
+			m.armed = nil
+			m.toasts.showSuccess("worktree removed " + msg.name)
+			return m.withPump(nil)
+		}
+		m.toasts.showError(fmt.Sprintf("worktree remove failed %s: %s", msg.name, msg.err))
+		if msg.force {
+			// El forzado también falló: se desarma para no entrar en bucle.
+			m.armed = nil
+		} else {
+			// Primer intento fallido (worktree sucio): se arma el forzado para
+			// la siguiente pulsación.
+			m.armed = &armedRemoval{
+				wtPath: msg.wtPath, parent: msg.parent,
+				name: msg.name, force: true,
+			}
 		}
 		return m.withPump(nil)
 
@@ -164,6 +189,22 @@ func (m *Model) clampCursor() {
 // se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Confirmación armada de borrado de worktree: tiene prioridad sobre el
+	// resto (incluido el esc que cierra el detalle y los inputs de
+	// búsqueda/comando). Cualquier tecla distinta de la acción de borrado y de
+	// esc desarma y sigue su curso normal.
+	if m.armed != nil {
+		switch {
+		case m.actionForKey(key) == "worktree_remove":
+			return m.handleWorktreeRemove()
+		case key == "esc":
+			m.armed = nil
+			return m, nil
+		default:
+			m.armed = nil
+		}
+	}
 
 	if m.cmdOpen { // modo comando del detalle: prioridad sobre todo
 		switch key {
@@ -344,6 +385,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		m.saveCollapsed()
 		return m, nil
+	case "worktree_remove":
+		return m.handleWorktreeRemove()
 	case "detail":
 		entries := m.entries()
 		if len(entries) > 0 && m.cursor < len(entries) {
@@ -382,6 +425,47 @@ func (m Model) actionForKey(key string) string {
 		}
 	}
 	return ""
+}
+
+// handleWorktreeRemove gestiona la acción de borrado de worktree. Solo actúa
+// sobre una sub-fila de worktree con padre válido; si el cursor no está en una,
+// avisa y no arma nada. Sobre una sub-fila válida: si ya hay una confirmación
+// armada sobre esa misma sub-fila, ejecuta el borrado con el nivel de forzado
+// armado; si no, arma la confirmación normal. La rama del worktree nunca se
+// toca.
+func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
+	e, ok := m.selectedEntry()
+	if !ok || e.kind != kindWorktree || e.parent == "" || e.wt.Path == "" {
+		m.armed = nil
+		return m, m.toastCmd(toastInfo, "select a worktree")
+	}
+	wtPath := filepath.Clean(e.wt.Path)
+	if m.armed != nil &&
+		filepath.Clean(m.armed.wtPath) == wtPath &&
+		filepath.Clean(m.armed.parent) == filepath.Clean(e.parent) {
+		return m, m.removeWorktreeCmd(m.armed.parent, m.armed.wtPath, m.armed.name, m.armed.force)
+	}
+	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
+	// un worktree distinto al que se armó.
+	m.armed = &armedRemoval{
+		wtPath: e.wt.Path,
+		parent: e.parent,
+		name:   filepath.Base(e.wt.Path),
+	}
+	return m, nil
+}
+
+// removePrompt compone el aviso persistente de la confirmación armada. La
+// tecla mostrada es la configurada para la acción.
+func (m Model) removePrompt() string {
+	if m.armed == nil {
+		return ""
+	}
+	key := m.cfg.KeyFor("worktree_remove")
+	if m.armed.force {
+		return fmt.Sprintf("remove worktree %s? has changes — %s to force, esc to cancel", m.armed.name, key)
+	}
+	return fmt.Sprintf("remove worktree %s? %s to confirm, esc to cancel", m.armed.name, key)
 }
 
 // View compone la pantalla: dashboard o detalle, con el overlay de toasts en

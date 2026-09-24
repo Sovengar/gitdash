@@ -46,9 +46,14 @@ func (m Model) compose(lay layout, middle string) string {
 // resumen. El propio indicador ya nombra las acciones en curso, así que no se
 // duplican aparte.
 func (m Model) statsSection() string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if activity := m.activityIndicator(); activity != "" {
 		parts = append(parts, activity)
+	}
+	if m.armed != nil {
+		// Aviso persistente de confirmación: sobrevive hasta la segunda
+		// pulsación o la cancelación (los toasts expiran a los 3 s).
+		parts = append(parts, styleWarn.Render(m.removePrompt()))
 	}
 	total, dirty, ahead, behind := m.summary()
 	summary := fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind)
