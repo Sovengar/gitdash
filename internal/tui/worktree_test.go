@@ -115,17 +115,6 @@ func TestSyncCell(t *testing.T) {
 	}
 }
 
-// Helper de snapshot con primario no vacío.
-func groupedProj(name, path, primary string) discovery.Project {
-	return discovery.Project{Path: path, Name: name, PrimaryGroup: primary, HasRepo: true}
-}
-
-func snapCleanAt(age time.Duration) gitstatus.Snapshot {
-	s := snapClean()
-	s.LastCommit = time.Now().Add(-age).Unix()
-	return s
-}
-
 // ---- expansión y operaciones de worktrees ----
 
 // wt construye un worktree del snapshot para los tests.

@@ -116,11 +116,11 @@ func (m *Model) renderDetail(r row) string {
 	if len(r.snap.Commits) > 0 {
 		b.WriteString("\n" + key("commits") + "\n")
 		for _, c := range r.snap.Commits {
-			b.WriteString(fmt.Sprintf("  %s %s %s\n",
+			fmt.Fprintf(&b, "  %s %s %s\n",
 				styleDim.Render(pad(c.Sha, 8)),
 				pad(relativeTime(c.When), 6),
 				truncate(c.Subject, max(20, m.width-24)),
-			))
+			)
 		}
 	}
 

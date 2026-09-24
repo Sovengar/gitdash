@@ -46,7 +46,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cache best-effort al final de cada rescan
 		if path, err := cache.Path(); err == nil {
 			projects := m.projects
-			go cache.Save(path, projects)
+			go func() { _ = cache.Save(path, projects) }()
 		}
 		// fetch automático en batches
 		if m.cfg.FetchAuto {
@@ -438,4 +438,3 @@ func (m *Model) syncOffset(total, window int) {
 		m.offset = m.cursor - window + 1
 	}
 }
-

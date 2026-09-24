@@ -12,7 +12,7 @@ import (
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
-)// Cada área funcional se dibuja en su propia sección bordeada, todas con el
+) // Cada área funcional se dibuja en su propia sección bordeada, todas con el
 // ancho exterior de la terminal.
 func TestDashboardSeccionesBordeadas(t *testing.T) {
 	projects, states := fixtureProjects()
