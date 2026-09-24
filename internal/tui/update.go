@@ -107,7 +107,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.withPump(nil)
 		default:
-			// Token distinto: el intento fue sustituido; no se libera ni muta.
+			// Token distinto: el intento fue sustituido, así que el resultado
+			// es obsoleto. Ocurre cuando un statusMsg de fondo (scan/fetch)
+			// libera running[parent] con un borrado aún en vuelo: el usuario
+			// relanza (t2) y sobrescribe removeTokens[parent]; cuando llega el
+			// resultado de t1 hay que ignorarlo. NO se libera running[parent]
+			// porque ahora pertenece al intento nuevo (t2), ni se muta el
+			// banner.
 			return m.withPump(nil)
 		}
 		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", output: msg.output, err: msg.err}
@@ -219,10 +225,11 @@ func (m *Model) clampCursor() {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Un borrado en vuelo se cancela de forma definitiva con esc: se invalidan
-	// sus tokens para que un resultado tardío no re-arme el forzado ni toque el
-	// banner (su running residual se libera al llegar el resultado). El esc
-	// sigue su curso normal (cerrar detalle, etc.).
+	// esc cancela de forma definitiva TODOS los borrados en vuelo, no solo uno:
+	// limpia el mapa completo de tokens para que cualquier resultado tardío se
+	// descarte sin re-armar el forzado ni tocar el banner (su running residual
+	// se libera al llegar el resultado). El esc sigue su curso normal (cerrar
+	// detalle, etc.).
 	if key == "esc" && len(m.removeTokens) > 0 {
 		clear(m.removeTokens)
 	}

@@ -845,3 +845,50 @@ func TestRemoveWorktreeArmedMatchesNormalization(t *testing.T) {
 		t.Error("matches cruzó padres distintos")
 	}
 }
+
+// Un resultado con token sustituido (t1 obsoleto tras relanzar t2) se ignora
+// por completo: no libera el running del intento nuevo, no toca el banner y no
+// emite toast. Es la colisión de un statusMsg de fondo que libera
+// running[parent] con un borrado en vuelo y permite relanzar.
+func TestRemoveWorktreeSubstitutedTokenIgnored(t *testing.T) {
+	cases := []struct {
+		name string
+		err  string
+	}{
+		{"resultado de fallo obsoleto", "fatal: sucio t1"},
+		{"resultado de éxito obsoleto", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+			// Intento nuevo (t2) en vuelo; el banner está armado sobre otro
+			// worktree y no debe tocarse.
+			m.removeTokens[p.Path] = 2
+			m.running[p.Path] = "worktree_remove"
+			m.armed = &armedRemoval{wtPath: "/tmp/wt-b", parent: p.Path, name: "wt-b"}
+
+			before := len(m.toasts.toasts)
+			updated, _ := m.Update(worktreeRemovedMsg{
+				parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
+				output: "salida de t1", err: tc.err, gen: 1, // t1 < t2: obsoleto
+			})
+			m = updated.(Model)
+
+			if m.running[p.Path] != "worktree_remove" {
+				t.Errorf("se liberó el running del intento nuevo: %q", m.running[p.Path])
+			}
+			if m.removeTokens[p.Path] != 2 {
+				t.Errorf("se alteró el token vigente: %v", m.removeTokens)
+			}
+			if m.armed == nil || m.armed.name != "wt-b" {
+				t.Errorf("se tocó el banner: %+v", m.armed)
+			}
+			if len(m.toasts.toasts) != before {
+				t.Errorf("se emitió un toast para un resultado obsoleto: %+v", m.toasts.toasts)
+			}
+			if _, ok := m.lastAction[p.Path]; ok {
+				t.Errorf("se guardó lastAction de un resultado obsoleto: %+v", m.lastAction[p.Path])
+			}
+		})
+	}
+}
