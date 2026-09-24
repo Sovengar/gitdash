@@ -49,4 +49,13 @@ var (
 
 	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	styleDetailTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
+
+	// Borde de las secciones (gris tenue, no compite con el contenido)
+	styleBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+
+	// Toasts: mismo código de color que los estados de la tabla
+	styleToastSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+	styleToastError   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	styleToastInfo    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	styleToastWarning = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
 )
