@@ -19,8 +19,6 @@ const (
 )
 
 var (
-	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-
 	styleCursor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
 	styleDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
@@ -34,10 +32,9 @@ var (
 	styleFetchRun = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	styleFetchBad = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	styleBar       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleHint      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	styleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	styleSel       = lipgloss.NewStyle().Bold(true)
+	styleBar  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleHint = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleSel  = lipgloss.NewStyle().Bold(true)
 
 	// Header de grupo (vroom)
 	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))

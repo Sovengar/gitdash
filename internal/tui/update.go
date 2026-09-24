@@ -388,7 +388,7 @@ func (m Model) actionForKey(key string) string {
 // la esquina inferior derecha. El detalle usa la fila viva bajo el cursor; si
 // el filtro la hizo desaparecer, cae al dashboard.
 func (m Model) View() tea.View {
-	content := m.renderDashboard()
+	var content string
 	if m.detailOpen {
 		lay := m.layout()
 		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
@@ -397,6 +397,9 @@ func (m Model) View() tea.View {
 		} else if r, ok := m.selected(); ok {
 			content = m.compose(lay, m.detailSection(detailTitle(r), m.renderDetail(r), lay.bodyLines))
 		}
+	}
+	if content == "" {
+		content = m.renderDashboard()
 	}
 	if toasts := m.toasts.lines(); len(toasts) > 0 {
 		content = overlayToasts(content, toasts, m.width, m.height, m.toastReserve())
