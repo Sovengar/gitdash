@@ -362,7 +362,9 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		}
 		errStr := ""
 		if err != nil {
-			errStr = err.Error()
+			// El error del proceso es siempre "exit status 1"; el motivo real
+			// está en la salida combinada de git.
+			errStr = gitstatus.FailureReason(out, err)
 		}
 		sendEvent(appCtx, events, actionMsg{path: path, kind: kind, output: out, err: errStr})
 		if err == nil {

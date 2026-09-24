@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -199,10 +200,48 @@ func Sync(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, args...)
 }
 
+// gitEnv devuelve el entorno para los subprocess de git forzando mensajes en
+// inglés (LC_ALL=C). El porcelain no depende del idioma, pero los mensajes de
+// error sí: sin esto la UI no puede reconocer fallos concretos (diverged, sin
+// upstream...) cuando el usuario tiene el locale en español.
+func gitEnv() []string {
+	env := os.Environ()
+	out := env[:0]
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "LC_ALL="),
+			strings.HasPrefix(kv, "LANG="),
+			strings.HasPrefix(kv, "LANGUAGE="),
+			strings.HasPrefix(kv, "LC_MESSAGES="):
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "LC_ALL=C")
+}
+
+// FailureReason resume un fallo de git en una línea para la UI: la primera
+// línea de la salida combinada que no sea un `hint:` (los hints son verbosos y
+// se ven completos en el panel de detalle). Fallback al error del proceso.
+func FailureReason(out string, err error) string {
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "hint:") {
+			continue
+		}
+		return l
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // runGit ejecuta git en dir y devuelve stdout.
 func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = gitEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -219,6 +258,7 @@ func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 func runGitCombined(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = gitEnv()
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

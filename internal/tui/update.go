@@ -80,17 +80,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		delete(m.running, msg.path)
 		m.lastAction[msg.path] = actionResult{kind: msg.kind, output: msg.output, err: msg.err}
-		name := m.nameOf(msg.path)
-		note := fmt.Sprintf("%s ok %s", msg.kind, name)
-		if msg.err != "" {
-			hint := ""
-			if msg.kind == "pull" &&
-				(strings.Contains(msg.err, "divergent") || strings.Contains(msg.err, "Not possible to fast-forward")) {
-				hint = " — diverged? pull --rebase manual" // S9.2
-			}
-			note = fmt.Sprintf("%s failed %s%s", msg.kind, name, hint)
-		}
-		return m.withPump(m.notifyCmd(note))
+		return m.withPump(m.notifyCmd(actionNote(msg.kind, m.nameOf(msg.path), msg.output, msg.err)))
 
 	case execDoneMsg:
 		delete(m.running, msg.path)
@@ -125,6 +115,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // (los Cmds leen UN evento cada vez: sin esto los estados nunca llegan).
 func (m Model) withPump(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, waitForEvent(m.events))
+}
+
+// actionNote compone la notificación de una acción terminada (pull/push/sync).
+// En el fallo incluye el motivo real de git (errStr, ya resumido) y, cuando se
+// reconoce, un hint accionable; la salida completa queda en el detalle.
+func actionNote(kind, name, output, errStr string) string {
+	if errStr == "" {
+		return fmt.Sprintf("%s ok %s", kind, name)
+	}
+	hint := ""
+	if kind == "pull" || kind == "sync" {
+		switch {
+		case strings.Contains(output, "Not possible to fast-forward"),
+			strings.Contains(output, "divergent"):
+			hint = " — diverged? pull --rebase manual"
+		case strings.Contains(errStr, "no tracking information"),
+			strings.Contains(errStr, "no upstream"):
+			hint = " — no upstream; set it with git branch --set-upstream-to"
+		}
+	}
+	return fmt.Sprintf("%s failed %s: %s%s", kind, name, errStr, hint)
 }
 
 // fetchingAll reporta si hay algún fetch en curso (para el spinner).
@@ -489,7 +500,8 @@ func (m Model) renderBar() string {
 
 	left := ""
 	if m.notify != "" {
-		left = styleWarn.Render(m.notify)
+		// truncate ANTES del estilo: el ANSI rompe el cálculo de ancho.
+		left = styleWarn.Render(truncate(m.notify, max(40, m.width)))
 	} else {
 		if m.scanning || m.fetchingAll() {
 			left = m.spinner.View() + " working  "
