@@ -98,13 +98,14 @@ func runPrint(cfg config.Config) {
 	// GROUP se conserva en print (tabla plana, sin headers de
 	// grupo); WT = working tree; WTS = contador de worktrees (renombrado
 	// desde WT para liberar la sigla); ↑↓up explícito.
+	// La tabla va a stdout: un fallo de escritura no es accionable aquí.
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tWT\t↑↓up\tSYNC\tWTS\tACTIVITY\tPATH")
+	_, _ = fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tWT\t↑↓up\tSYNC\tWTS\tACTIVITY\tPATH")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.name, r.group, r.branch, r.state, r.upDown, r.sync, r.wt, r.activity, r.path)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 // hasProject reporta si algún proyecto descubierto tiene esa ruta.
@@ -150,10 +151,10 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	// omite → solo untracked es "?1", no "0 ?1".
 	var b strings.Builder
 	if s.TrackedChanges > 0 {
-		b.WriteString(fmt.Sprintf("%d", s.TrackedChanges))
+		fmt.Fprintf(&b, "%d", s.TrackedChanges)
 	}
 	if s.Untracked > 0 {
-		b.WriteString(fmt.Sprintf(" ?%d", s.Untracked))
+		fmt.Fprintf(&b, " ?%d", s.Untracked)
 	}
 	return b.String()
 }

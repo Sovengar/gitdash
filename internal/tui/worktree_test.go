@@ -115,17 +115,6 @@ func TestSyncCell(t *testing.T) {
 	}
 }
 
-// Helper de snapshot con primario no vacío.
-func groupedProj(name, path, primary string) discovery.Project {
-	return discovery.Project{Path: path, Name: name, PrimaryGroup: primary, HasRepo: true}
-}
-
-func snapCleanAt(age time.Duration) gitstatus.Snapshot {
-	s := snapClean()
-	s.LastCommit = time.Now().Add(-age).Unix()
-	return s
-}
-
 // ---- expansión y operaciones de worktrees ----
 
 // wt construye un worktree del snapshot para los tests.
@@ -568,10 +557,16 @@ func TestWorktreeDetail(t *testing.T) {
 			t.Errorf("detalle sin %q:\n%s", want, out)
 		}
 	}
-	// No se inventa estado git derivado para el worktree.
+	// No se inventa estado git derivado para el worktree: el panel mínimo (no
+	// la sección de stats, que sí menciona ahead/behind globales) no los tiene.
+	e, ok := m.selectedEntry()
+	if !ok {
+		t.Fatal("sin entrada seleccionada")
+	}
+	panel := stripANSI(m.renderWorktreeDetail(e))
 	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("detalle inventa estado %q:\n%s", bad, out)
+		if strings.Contains(panel, bad) {
+			t.Errorf("detalle inventa estado %q:\n%s", bad, panel)
 		}
 	}
 }
