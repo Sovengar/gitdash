@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# setup-repo-protection.sh — configura de forma idempotente el ruleset
-# `protect-main`, el ajuste de merge del repo y las labels que referencia
-# dependabot.yml.
+# setup-repo-protection.sh — configura de forma idempotente el ruleset de
+# protección (nombre `protect-<rama>`, p. ej. `protect-main`), el ajuste de
+# merge del repo y las labels que referencia dependabot.yml.
 #
 # Política (ver el plan / descripción del PR para el razonamiento):
 #   - bloquea el borrado de la rama      (`deletion`)
@@ -35,11 +35,10 @@
 #   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test] [--sha <commit>]
 #
 # Variables de entorno:
-#   RULESET_NAME=protect-main   BRANCH=<default del repo>   GH_ACTIONS_APP_ID=15368
+#   RULESET_NAME=protect-<rama>   BRANCH=<default del repo>   GH_ACTIONS_APP_ID=15368
 
 set -euo pipefail
 
-RULESET_NAME="${RULESET_NAME:-protect-main}"
 # GitHub Actions es la integración que reporta nuestros check runs de CI.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
 REQUIRED_DEFAULT=(Build Lint Test)
@@ -80,6 +79,10 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 # La rama por defecto se deriva del repo; BRANCH (entorno) la sobreescribe.
 BRANCH="${BRANCH:-$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)}"
 [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ] || { echo "ERROR: no se pudo resolver la rama por defecto de ${REPO}." >&2; exit 1; }
+
+# El nombre del ruleset se deriva de la rama (protect-<rama>), de modo que el
+# script sirva igual para repos cuya rama por defecto no sea `main`.
+RULESET_NAME="${RULESET_NAME:-protect-${BRANCH}}"
 
 # find_ruleset_id imprime el id del ruleset llamado RULESET_NAME, o nada.
 # La lista es paginada (per_page=100) para que una colección grande no haga
