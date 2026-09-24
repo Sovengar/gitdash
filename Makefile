@@ -34,18 +34,13 @@ fmt-check: ## Verifica formato gofmt sin modificar (falla si hay pendientes)
 vet: ## go vet
 	go vet ./...
 
-lint: vet fmt-check ## go vet + gofmt + golangci-lint (binario local o go run)
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
-	else \
-		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run; \
-	fi
+lint: vet fmt-check ## go vet + gofmt + golangci-lint (versión pineada, siempre vía go run)
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
-test: ## Ejecuta la suite de tests
-	go test ./...
-
-test-race: ## Ejecuta la suite con el detector de carreras
+test: ## Ejecuta la suite de tests con -race (misma clase que CI)
 	go test -race ./...
+
+test-race: test ## Alias de test: la suite ya corre con -race
 
 check: build lint test ## build + lint + test (equivalente al gate de CI)
 	@echo "check OK"
