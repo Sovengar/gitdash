@@ -60,11 +60,14 @@ type actionMsg struct {
 }
 
 // worktreeRemovedMsg entrega el resultado de borrar un worktree: el nombre
-// visible, la salida combinada y el motivo real de git si falló.
+// visible, la salida combinada y el motivo real de git si falló. gen es el
+// token del intento: los resultados cuyo token ya no es el vigente se
+// descartan (se canceló con esc o fueron sustituidos).
 type worktreeRemovedMsg struct {
 	parent, wtPath, name string
 	output, err          string
 	force                bool
+	gen                  int
 }
 
 // execDoneMsg marca la vuelta de un proceso con handoff de terminal:
@@ -101,6 +104,13 @@ type armedRemoval struct {
 	parent string
 	name   string // basename visible del worktree
 	force  bool
+}
+
+// matches reporta si la confirmación apunta al mismo worktree (parent + path),
+// comparando paths normalizados.
+func (a armedRemoval) matches(parent, wtPath string) bool {
+	return filepath.Clean(a.parent) == filepath.Clean(parent) &&
+		filepath.Clean(a.wtPath) == filepath.Clean(wtPath)
 }
 
 // Model es el modelo raíz de la TUI.
@@ -140,6 +150,12 @@ type Model struct {
 	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
 	// Es estado efímero de sesión: no se persiste.
 	armed *armedRemoval
+	// removeGen/removeToken correlacionan un borrado en vuelo con su resultado:
+	// removeToken es el token del intento vigente (0 = ninguno) y gen el
+	// contador monótono que lo genera. Un resultado con token distinto se
+	// descarta (cancelado con esc o sustituido).
+	removeGen   int
+	removeToken int
 
 	detailOpen    bool
 	width, height int
@@ -396,14 +412,24 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	return nil
 }
 
+// busyActionCmd devuelve el toast de "ya hay una acción en curso" en el repo,
+// o nil si está libre.
+func (m *Model) busyActionCmd(path string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	return nil
+}
+
 // removeWorktreeCmd lanza el borrado de un worktree desde el repo padre.
 // Replica el patrón de startActionCmd: guard de acción en curso por path del
 // padre, goroutine con timeout, y tras el éxito publica además el snapshot del
 // padre para que la sub-fila desaparezca. No usa recollectCmd porque su guard
-// chocaría con el flag running de esta propia acción.
-func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool) tea.Cmd {
-	if prev, busy := m.running[parent]; busy {
-		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(parent)))
+// chocaría con el flag running de esta propia acción. token correlaciona el
+// resultado con el intento que lo lanzó.
+func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, token int) tea.Cmd {
+	if cmd := m.busyActionCmd(parent); cmd != nil {
+		return cmd
 	}
 	m.running[parent] = "worktree_remove"
 	appCtx := m.ctx
@@ -421,7 +447,7 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool) t
 		}
 		sendEvent(appCtx, events, worktreeRemovedMsg{
 			parent: parent, wtPath: wtPath, name: name,
-			output: out, err: errStr, force: withForce,
+			output: out, err: errStr, force: withForce, gen: token,
 		})
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch)})

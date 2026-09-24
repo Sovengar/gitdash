@@ -90,13 +90,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withPump(nil)
 
 	case worktreeRemovedMsg:
-		delete(m.running, msg.parent)
+		// Liberar el running del padre solo si corresponde a este intento: si
+		// ya lo reemplazó otro (cancelado y reintentado, o una acción distinta)
+		// no se pisa.
+		if m.running[msg.parent] == "worktree_remove" && (m.removeToken == 0 || msg.gen == m.removeToken) {
+			delete(m.running, msg.parent)
+		}
+		if msg.gen == 0 || msg.gen != m.removeToken {
+			// Resultado obsoleto (se canceló con esc o lo sustituyó otro
+			// intento): no toca el banner ni re-arma el forzado.
+			return m.withPump(nil)
+		}
+		m.removeToken = 0
+		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", output: msg.output, err: msg.err}
+		// La mutación del estado armado solo aplica si este sigue apuntando al
+		// mismo worktree (o está vacío): un armado posterior sobre otro
+		// worktree no se pisa con el resultado tardío.
+		targetsArmed := m.armed == nil || m.armed.matches(msg.parent, msg.wtPath)
 		if msg.err == "" {
-			m.armed = nil
+			if targetsArmed {
+				m.armed = nil
+			}
 			m.toasts.showSuccess("worktree removed " + msg.name)
 			return m.withPump(nil)
 		}
 		m.toasts.showError(fmt.Sprintf("worktree remove failed %s: %s", msg.name, msg.err))
+		if !targetsArmed {
+			return m.withPump(nil)
+		}
 		if msg.force {
 			// El forzado también falló: se desarma para no entrar en bucle.
 			m.armed = nil
@@ -189,6 +210,13 @@ func (m *Model) clampCursor() {
 // se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Un borrado en vuelo se cancela de forma definitiva con esc: se invalida
+	// su token para que un resultado tardío no re-arme el forzado ni toque el
+	// banner. El esc sigue su curso normal (cerrar detalle, etc.).
+	if key == "esc" && m.removeToken != 0 {
+		m.removeToken = 0
+	}
 
 	// Confirmación armada de borrado de worktree: tiene prioridad sobre el
 	// resto (incluido el esc que cierra el detalle y los inputs de
@@ -439,11 +467,18 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		m.armed = nil
 		return m, m.toastCmd(toastInfo, "select a worktree")
 	}
-	wtPath := filepath.Clean(e.wt.Path)
-	if m.armed != nil &&
-		filepath.Clean(m.armed.wtPath) == wtPath &&
-		filepath.Clean(m.armed.parent) == filepath.Clean(e.parent) {
-		return m, m.removeWorktreeCmd(m.armed.parent, m.armed.wtPath, m.armed.name, m.armed.force)
+	if m.armed != nil && m.armed.matches(e.parent, e.wt.Path) {
+		// Segunda pulsación sobre la misma sub-fila: si el padre está libre, se
+		// lanza el borrado con el nivel de forzado armado; el banner se limpia
+		// mientras la acción está en vuelo y se marca el token del intento.
+		if cmd := m.busyActionCmd(m.armed.parent); cmd != nil {
+			return m, cmd // el armado no se rompe: no se toca
+		}
+		armed := *m.armed
+		m.removeGen++
+		m.removeToken = m.removeGen
+		m.armed = nil
+		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeToken)
 	}
 	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
 	// un worktree distinto al que se armó.

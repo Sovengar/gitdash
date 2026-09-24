@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,18 @@ import (
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/testutil"
 )
+
+// gitOutT ejecuta git en dir y devuelve stdout (para comprobar la rama).
+func gitOutT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
 
 // removeWtModel construye un modelo con un repo y sus worktrees, lo expande y
 // deja el cursor sobre la primera sub-fila de worktree.
@@ -248,12 +261,15 @@ func TestRemoveWorktreeOtherKeysDisarm(t *testing.T) {
 // Un fallo del primer intento muestra el motivo de git y arma el forzado.
 func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m.armed = &armedRemoval{wtPath: "/tmp/wt-a", parent: p.Path, name: "wt-a"}
+	// Estado tras la 2ª D: banner limpio y token del intento en vuelo.
+	m.armed = nil
+	m.removeToken = 7
 	m.running[p.Path] = "worktree_remove"
 
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
 		output: "fatal: contiene archivos modificados", err: "fatal: contiene archivos modificados",
+		gen: 7,
 	})
 	m = updated.(Model)
 
@@ -266,9 +282,16 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	if m.running[p.Path] != "" {
 		t.Error("el fallo no liberó el running del padre")
 	}
+	if m.removeToken != 0 {
+		t.Errorf("el token debe consumirse: %d", m.removeToken)
+	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastError || !strings.Contains(last.text, "archivos modificados") {
 		t.Errorf("toast = %+v, want error con el motivo real", last)
+	}
+	// El detalle conserva la salida/motivo de git.
+	if act := m.lastAction[p.Path]; act.kind != "worktree_remove" || act.err == "" {
+		t.Errorf("lastAction = %+v, want kind worktree_remove con error", act)
 	}
 }
 
@@ -300,17 +323,19 @@ func TestRemoveWorktreeForceExecutes(t *testing.T) {
 // Un fallo forzado desarma y muestra el error (sin re-armar, sin bucle).
 func TestRemoveWorktreeForceFailureDisarms(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m.armed = &armedRemoval{wtPath: "/tmp/wt-a", parent: p.Path, name: "wt-a", force: true}
+	// Estado tras lanzar el forzado: banner limpio y token en vuelo.
+	m.armed = nil
+	m.removeToken = 9
 	m.running[p.Path] = "worktree_remove"
 
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		err: "fatal: no se puede", force: true,
+		err: "fatal: no se puede", force: true, gen: 9,
 	})
 	m = updated.(Model)
 
 	if m.armed != nil {
-		t.Errorf("el fallo forzado debe desarmar: %+v", m.armed)
+		t.Errorf("el fallo forzado no debe re-armar: %+v", m.armed)
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastError || !strings.Contains(last.text, "no se puede") {
@@ -515,5 +540,153 @@ func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 	msg, ok := cmd().(notifyMsg)
 	if !ok || msg.level != toastWarning {
 		t.Errorf("aviso = %+v, want warning", msg)
+	}
+}
+
+// esc durante un borrado en vuelo lo cancela de forma definitiva: el resultado
+// tardío de un fallo sucio no re-arma el forzado.
+func TestRemoveWorktreeEscDuringFlightIgnoresLateFailure(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	m, _ = press(m, "D") // armar
+	m, _ = press(m, "D") // lanzar
+
+	if m.armed != nil {
+		t.Fatal("el banner debe limpiarse al lanzar el borrado")
+	}
+	token := m.removeToken
+	if token == 0 {
+		t.Fatal("sin token de intento en vuelo")
+	}
+
+	m, _ = press(m, "esc") // cancelación definitiva
+	if m.removeToken != 0 {
+		t.Fatalf("esc no invalidó el intento en vuelo: %d", m.removeToken)
+	}
+
+	// Llega tarde el fallo sucio del intento cancelado.
+	updated, _ := m.Update(worktreeRemovedMsg{
+		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
+		err: "fatal: sucio", gen: token,
+	})
+	m = updated.(Model)
+
+	if m.armed != nil {
+		t.Errorf("un fallo tardío tras esc no debe re-armar: %+v", m.armed)
+	}
+	if m.running[p.Path] != "" {
+		t.Error("el running del padre debe liberarse al llegar el resultado")
+	}
+}
+
+// El resultado tardío de un borrado sobre A no pisa el armado sobre B.
+func TestRemoveWorktreeLateResultDoesNotClobberOtherArmed(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m, _ = press(m, "D") // armar A
+	m, _ = press(m, "D") // lanzar A
+	token := m.removeToken
+
+	// El usuario se mueve a B y lo arma mientras A está en vuelo.
+	m, _ = press(m, "down")
+	m, _ = press(m, "D")
+	if m.armed == nil || m.armed.name != "wt-b" {
+		t.Fatalf("no se armó B: %+v", m.armed)
+	}
+
+	// Llega tarde el fallo sucio de A.
+	updated, _ := m.Update(worktreeRemovedMsg{
+		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
+		err: "fatal: sucio A", gen: token,
+	})
+	m = updated.(Model)
+
+	if m.armed == nil || m.armed.name != "wt-b" || m.armed.force {
+		t.Errorf("el resultado tardío de A pisó el armado de B: %+v", m.armed)
+	}
+}
+
+// D sobre un header secundario es no-op con toast info.
+func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
+	p := discovery.Project{
+		Path: "/s", Name: "s", HasRepo: true,
+		PrimaryGroup: "g", SecondaryGroup: "sub",
+	}
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/s": snapClean()})
+	m.cursor = 1
+	if e, _ := m.selectedEntry(); e.kind != kindSecondary {
+		t.Fatalf("precondición: entrada = %+v, want header secundario", e)
+	}
+
+	m, cmd := press(m, "D")
+	m = applyNotify(m, cmd)
+
+	if m.armed != nil {
+		t.Error("D sobre un header secundario no debe armar")
+	}
+	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
+		last.text != "select a worktree" {
+		t.Errorf("toast = %+v, want info 'select a worktree'", last)
+	}
+}
+
+// `!` (modo comando) desarma la confirmación y abre el input.
+func TestRemoveWorktreeCommandKeyDisarms(t *testing.T) {
+	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	m.detailOpen = true
+	m, _ = press(m, "D") // armar
+
+	m, _ = press(m, "!")
+
+	if m.armed != nil {
+		t.Error("! no desarmó la confirmación")
+	}
+	if !m.cmdOpen {
+		t.Error("! no abrió el modo comando")
+	}
+}
+
+// End-to-end con un repo real: worktree sucio → fallo sin force → forzado →
+// éxito, con la rama intacta.
+func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty")
+	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "x"})
+	snap := gitstatus.Collect(t.Context(), dir, "main")
+	if len(snap.Worktrees) != 1 {
+		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
+	}
+
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "D") // armar
+	m, _ = press(m, "D") // intento sin force → falla
+
+	waitEvent(t, &m, func(ev event) bool {
+		mm, ok := ev.(worktreeRemovedMsg)
+		return ok && mm.err != "" && !mm.force
+	})
+	if m.armed == nil || !m.armed.force {
+		t.Fatalf("no se armó el forzado tras el fallo sucio: %+v", m.armed)
+	}
+
+	m, _ = press(m, "D") // forzar → éxito
+	waitEvent(t, &m, func(ev event) bool {
+		sm, ok := ev.(statusMsg)
+		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
+	})
+
+	if m.armed != nil {
+		t.Errorf("el éxito no desarmó: %+v", m.armed)
+	}
+	if m.running[dir] != "" {
+		t.Errorf("el padre sigue ocupado: %v", m.running[dir])
+	}
+	if len(m.states[dir].Worktrees) != 0 {
+		t.Errorf("el snapshot conserva el worktree: %+v", m.states[dir].Worktrees)
+	}
+	if branches := gitOutT(t, dir, "branch", "--list", "wt-dirty"); !strings.Contains(branches, "wt-dirty") {
+		t.Errorf("la rama wt-dirty desapareció: %q", branches)
 	}
 }
