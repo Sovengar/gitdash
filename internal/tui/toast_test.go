@@ -27,8 +27,50 @@ func TestToastApilado(t *testing.T) {
 	tm.showInfo("a")
 	tm.showWarning("b")
 	tm.showError("c")
+	if got := len(tm.blocks()); got != 3 {
+		t.Fatalf("bloques = %d, want 3 apiladas", got)
+	}
 	if got := len(tm.lines()); got != 3 {
-		t.Fatalf("líneas = %d, want 3 apiladas", got)
+		t.Fatalf("líneas = %d, want 3 (una por toast corto)", got)
+	}
+}
+
+// Un mensaje largo (p.ej. acción fallida con hint) se envuelve en varias líneas
+// y el texto completo —incluido el hint— queda visible.
+func TestToastWrapMuestraHintCompleto(t *testing.T) {
+	msg := "pull failed diverged-node: fatal: Not possible to fast-forward — diverged? pull --rebase manual"
+	var tm toastManager
+	tm.showError(msg)
+
+	block := tm.blocks()[0]
+	if len(block) < 2 {
+		t.Fatalf("esperaba word-wrap en varias líneas, got %d", len(block))
+	}
+	plano := collapse(strings.Join(block, "\n"))
+	if !strings.Contains(plano, "pull --rebase manual") {
+		t.Errorf("el hint accionable no es visible:\n%s", plano)
+	}
+	if !strings.Contains(plano, "Not possible to fast-forward") {
+		t.Errorf("el motivo se perdió:\n%s", plano)
+	}
+	for i, l := range block {
+		if w := ansi.StringWidth(l); w > toastMaxWidth {
+			t.Errorf("línea %d ancho = %d, want <= %d", i, w, toastMaxWidth)
+		}
+	}
+}
+
+// Una palabra sin espacios más ancha que el toast se corta duro, sin desbordar.
+func TestToastPalabraLargaNoDesborda(t *testing.T) {
+	var tm toastManager
+	tm.showError(strings.Repeat("x", 500))
+	for i, l := range tm.lines() {
+		if w := ansi.StringWidth(l); w > toastMaxWidth {
+			t.Errorf("línea %d ancho = %d, want <= %d", i, w, toastMaxWidth)
+		}
+	}
+	if got := ansi.Strip(strings.Join(tm.lines(), "")); strings.Contains(got, "…") {
+		t.Errorf("el wrap no debe truncar con elipsis: %q", got)
 	}
 }
 
@@ -57,15 +99,16 @@ func TestToastIconos(t *testing.T) {
 	}
 }
 
-// El splice preserva el texto a la derecha del toast y no corrompe el ANSI.
+// El splice preserva el texto a la derecha del toast y no corrompe el ANSI de
+// la línea de debajo (que llega con SGR abierto).
 func TestOverlayANSIYSafe(t *testing.T) {
 	base := strings.Join([]string{
 		pad("line0", 40),
-		"\x1b[31m" + pad("aaaa", 40) + "\x1b[0m",
-		pad("line2", 38) + "ZZ",
+		pad("line1", 40),
+		"\x1b[31m" + pad("line2", 38) + "ZZ" + "\x1b[0m",
 		pad("line3", 40),
 	}, "\n")
-	out := overlayToasts(base, []string{"\x1b[32mOK\x1b[0m"}, 40, 4, 1)
+	out := overlayToasts(base, [][]string{{"\x1b[32mOK\x1b[0m"}}, 40, 4, 1)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 4 {
 		t.Fatalf("líneas = %d, want 4", len(lines))
@@ -76,7 +119,8 @@ func TestOverlayANSIYSafe(t *testing.T) {
 		}
 	}
 	// y = 4-1-1 = 2
-	plano := ansi.Strip(lines[2])
+	spliced := lines[2]
+	plano := ansi.Strip(spliced)
 	if !strings.Contains(plano, "OK") {
 		t.Errorf("toast ausente en la esquina inferior derecha: %q", plano)
 	}
@@ -87,12 +131,40 @@ func TestOverlayANSIYSafe(t *testing.T) {
 	if !strings.HasSuffix(plano, "Z") {
 		t.Errorf("no se preservó el texto a la derecha del toast: %q", plano)
 	}
+	// el SGR de la base sigue presente (izquierda roja) y el del toast (verde)
+	if !strings.Contains(spliced, "\x1b[31m") {
+		t.Errorf("se perdió el color de la línea de debajo: %q", spliced)
+	}
+	if !strings.Contains(spliced, "\x1b[32m") {
+		t.Errorf("se perdió el color del toast: %q", spliced)
+	}
+}
+
+// El overlay acota el ancho del toast al de la terminal: ninguna línea supera
+// el ancho disponible.
+func TestOverlayClampaAnchoTerminal(t *testing.T) {
+	base := strings.Join(sliceOf(pad("contenido", 20), 20), "\n")
+	var tm toastManager
+	tm.showError(strings.Repeat("palabra ", 30)) // mensaje largo → toast de 60
+	blocks := tm.blocks()
+	if blockWidth(blocks[0]) <= 20 {
+		t.Fatalf("precondición: el toast debería superar el ancho de terminal")
+	}
+	out := overlayToasts(base, blocks, 20, 20, 0)
+	for i, l := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(l); w > 20 {
+			t.Errorf("línea %d ancho = %d > 20: %q", i, w, ansi.Strip(l))
+		}
+	}
+	if !strings.Contains(ansi.Strip(out), "palabra") {
+		t.Errorf("el toast no se dibujó:\n%s", ansi.Strip(out))
+	}
 }
 
 // El overlay reserva las filas inferiores (keybinds) y no las toca.
 func TestOverlayReservaKeybinds(t *testing.T) {
 	base := strings.Join([]string{"l0", "l1", "l2", "k0", "k1"}, "\n")
-	out := overlayToasts(base, []string{"TOAST"}, 20, 5, 2)
+	out := overlayToasts(base, [][]string{{"TOAST"}}, 20, 5, 2)
 	lines := strings.Split(out, "\n")
 	if lines[3] != "k0" || lines[4] != "k1" {
 		t.Errorf("se tapó la sección de keybinds: %q", lines[3:])
@@ -105,7 +177,7 @@ func TestOverlayReservaKeybinds(t *testing.T) {
 // Sin sitio, se prioriza el toast más reciente y nunca se sale por arriba.
 func TestOverlaySinEspacioPriorizaReciente(t *testing.T) {
 	base := strings.Join([]string{"l0", "l1", "l2"}, "\n")
-	out := overlayToasts(base, []string{"viejo", "nuevo"}, 20, 3, 2)
+	out := overlayToasts(base, [][]string{{"viejo"}, {"nuevo"}}, 20, 3, 2)
 	lines := strings.Split(out, "\n")
 	plano := ansi.Strip(lines[0])
 	if !strings.Contains(plano, "nuevo") {
@@ -116,12 +188,46 @@ func TestOverlaySinEspacioPriorizaReciente(t *testing.T) {
 	}
 }
 
+// Un toast de varias líneas se apila sin desbordar por arriba ni tapar keybinds.
+func TestOverlayToastMultilinea(t *testing.T) {
+	var tm toastManager
+	tm.showError("pull failed node: fatal: Not possible to fast-forward — diverged? pull --rebase manual")
+	out := overlayToasts(strings.Join(sliceOf(pad("x", 60), 8), "\n"), tm.blocks(), 60, 8, 5)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 8 {
+		t.Fatalf("líneas = %d, want 8", len(lines))
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w > 60 {
+			t.Errorf("línea %d ancho = %d > 60", i, w)
+		}
+	}
+	if !strings.Contains(collapse(strings.Join(lines, "\n")), "pull --rebase manual") {
+		t.Errorf("el toast multilínea no se dibujó completo:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// sliceOf repite s n veces.
+func sliceOf(s string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
+}
+
+// collapse quita ANSI y normaliza espacios/saltos para comparar frases que el
+// word-wrap pudo partir entre líneas.
+func collapse(s string) string {
+	return strings.Join(strings.Fields(ansi.Strip(s)), " ")
+}
+
 // Overlay sin ancho o sin toasts es no-op.
 func TestOverlayNoop(t *testing.T) {
 	if got := overlayToasts("x", nil, 10, 5, 0); got != "x" {
 		t.Errorf("sin toasts = %q, want x", got)
 	}
-	if got := overlayToasts("x", []string{"t"}, 0, 5, 0); got != "x" {
+	if got := overlayToasts("x", [][]string{{"t"}}, 0, 5, 0); got != "x" {
 		t.Errorf("sin ancho = %q, want x", got)
 	}
 }
