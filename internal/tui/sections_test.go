@@ -174,6 +174,28 @@ func TestDetalleSeccionBordada(t *testing.T) {
 	}
 }
 
+// El título de la sección de detalle identifica el repo con su grupo y, en
+// una sub-fila de worktree, con la marca [worktree].
+func TestDetalleTituloIdentificaRepo(t *testing.T) {
+	grouped := discovery.Project{Path: "/x", Name: "api", PrimaryGroup: "backend", HasRepo: true}
+	m := newTestModel(t, []discovery.Project{grouped},
+		map[string]gitstatus.Snapshot{"/x": snapClean()})
+	m, _ = press(m, "down") // saltar el header de grupo
+	m, _ = press(m, "enter")
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ api · backend ") {
+		t.Errorf("el título no incluye el grupo:\n%s", out)
+	}
+
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m = newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, " ")
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter")
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ wt-a [worktree] ") {
+		t.Errorf("el título no marca el worktree:\n%s", out)
+	}
+}
+
 // La línea de notificación permanente ya no existe.
 func TestSinLineaPermanenteDeNotificacion(t *testing.T) {
 	projects, states := fixtureProjects()
