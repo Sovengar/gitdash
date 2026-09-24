@@ -22,7 +22,7 @@ func setupDivergedFromSync(t *testing.T) (dir string) {
 	return dir
 }
 
-// behind = commits de sync (m1) ausentes en la rama actual,
+// Behind = commits de sync (m1) ausentes en la rama actual,
 // NO los propios de feat (merge-base, no diff de tips).
 func TestSyncBehind(t *testing.T) {
 	dir := setupDivergedFromSync(t)
@@ -47,7 +47,7 @@ func TestSyncOnBranch(t *testing.T) {
 	}
 }
 
-// sync branch inexistente → comparación desconocida,
+// Sync branch inexistente → comparación desconocida,
 // pero la rama resuelta queda rellena para verse como "<rama> —" en la UI.
 func TestSyncMissing(t *testing.T) {
 	dir := setupDivergedFromSync(t)

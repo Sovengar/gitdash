@@ -168,7 +168,7 @@ func TestMarkerMetadata(t *testing.T) {
 	}
 }
 
-// primary_group/secondary_group del marcador; la clave
+// Primary_group/secondary_group del marcador; la clave
 // vieja group ya no agrupa; secondary sin primary se ignora.
 func TestMarkerGroups(t *testing.T) {
 	root := t.TempDir()

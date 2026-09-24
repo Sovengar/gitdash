@@ -10,7 +10,7 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// counts sin bola; limpio en silencio.
+// Counts sin bola; limpio en silencio.
 func TestWtCellQuiet(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 
@@ -43,7 +43,7 @@ func TestWtCellQuiet(t *testing.T) {
 	}
 }
 
-// detached solo en BRANCH, y el dirty NO se suprime.
+// Detached solo en BRANCH, y el dirty NO se suprime.
 func TestWtDetachedKeepsDirty(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 	s := snapClean()
@@ -108,7 +108,7 @@ func TestFetchCellTransient(t *testing.T) {
 	check("", "")
 }
 
-// headers separados — ningún título pegado al siguiente.
+// Headers separados — ningún título pegado al siguiente.
 func TestHeaderSpacing(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)

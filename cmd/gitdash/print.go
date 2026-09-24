@@ -47,7 +47,7 @@ func runPrint(cfg config.Config) {
 
 	rows := make([]printRow, 0, len(projects))
 	for _, p := range projects {
-		// worktree plegado bajo su repo principal descubierto
+		// Worktree plegado bajo su repo principal descubierto
 		if p.IsWorktree && p.MainRepo != "" && hasProject(projects, p.MainRepo) {
 			continue
 		}

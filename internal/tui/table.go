@@ -39,7 +39,7 @@ type tableEntry struct {
 	group string // válido en kindPrimary/kindSecondary
 	r     row    // válido en kindRepo
 
-	// datos de la sub-fila de worktree (path/rama/head) y el
+	// Datos de la sub-fila de worktree (path/rama/head) y el
 	// path del repo principal para el detalle. No reutiliza `r` porque un
 	// worktree no tiene Snapshot/State propios.
 	wt     gitstatus.Worktree
@@ -67,7 +67,7 @@ func groupLabel(p discovery.Project) string {
 
 // pendingStates son los estados que el filtro `n` considera no-limpios:
 // cambios pendientes de subir/bajar o en el working tree. Los errores y los
-// proyectos sin repo se excluyen (interpretación documentada).
+// proyectos sin repo se excluyen.
 func pendingStates(st gitstatus.State) bool {
 	switch st {
 	case gitstatus.StateDirty, gitstatus.StateAhead, gitstatus.StateBehind, gitstatus.StateDiverged:
@@ -132,7 +132,7 @@ func (m *Model) entries() []tableEntry {
 		}
 		r := row{project: e.Proj, snap: e.Snap, state: e.State}
 		out = append(out, tableEntry{kind: kindRepo, r: r})
-		// sub-filas de worktree justo bajo su padre visible,
+		// Sub-filas de worktree justo bajo su padre visible,
 		// solo si el repo está expandido (persistido o inducido por búsqueda).
 		// Se inyectan DESPUÉS de group.Arrange, así no alteran headers,
 		// orden, contadores ni resumen (intactos). El guard de
@@ -333,7 +333,7 @@ func (m *Model) renderEntry(e tableEntry, selected bool) string {
 		}
 		return "  " + indentHeader + line
 	case kindWorktree:
-		// render DEDICADO. NO usar renderRow: un Snapshot vacío se
+		// Render DEDICADO. NO usar renderRow: un Snapshot vacío se
 		// leería como no-up/clean (falsa información de estado).
 		return m.renderWorktreeRow(e.wt, selected)
 	default:
@@ -353,7 +353,7 @@ const indentHeader = "  "
 // dirty/ahead/behind/sync por worktree. Respeta el contrato de celda
 // `(texto, estilo)` con pad() ANTES del estilo.
 func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
-	// en detached no hay rama; el head corto es el dato disponible.
+	// En detached no hay rama; el head corto es el dato disponible.
 	branch := wt.Branch
 	if branch == "" {
 		branch = "(detached)"
@@ -428,8 +428,8 @@ func (m *Model) countSecondary(key string) int {
 	return n
 }
 
-// renderRow compone una línea de la tabla con cursor opcional.
-// sin columna GROUP (los headers plegables ya identifican el
+// renderRow compone una línea de la tabla con cursor opcional, sin
+// columna GROUP (los headers plegables ya identifican el
 // grupo); Work Tree sustituye a STATE.
 func (m *Model) renderRow(r row, selected bool) string {
 	name, nameStyle := m.nameCell(r)
@@ -469,7 +469,7 @@ func (m *Model) nameCell(r row) (string, lipglossStyle) {
 	if r.project.IsWorktree {
 		name += " [wt]" // tag de worktree (huérfanos y modo print)
 	}
-	// indicador de worktrees del repo principal;
+	// Indicador de worktrees del repo principal;
 	// glyph de expansión `▸/▾` junto al contador. Misma guarda que
 	// `expandable` (HIGH-1): un worktree huérfano (kindRepo +
 	// IsWorktree) no es expandible, así que no debe mostrar glyph ni

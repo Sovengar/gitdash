@@ -56,7 +56,7 @@ func TestWorktreeHidden(t *testing.T) {
 	}
 }
 
-// el detalle lista los worktrees con rama y path.
+// El detalle lista los worktrees con rama y path.
 func TestDetailWorktrees(t *testing.T) {
 	main := proj("multi-wt", "/tmp/multi-wt", true)
 	s := snapClean()
@@ -73,7 +73,7 @@ func TestDetailWorktrees(t *testing.T) {
 	}
 }
 
-// celda SYNC con la rama visible — behind, en sync (tabla
+// Celda SYNC con la rama visible — behind, en sync (tabla
 // quieta), ref missing, sin rama resuelta y override del marcador.
 func TestSyncCell(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
@@ -103,7 +103,7 @@ func TestSyncCell(t *testing.T) {
 		}
 	}
 
-	// la rama del override aparece por fila
+	// La rama del override aparece por fila
 	develop := snapClean()
 	develop.SyncBranch, develop.SyncBehind, develop.SyncKnown = "develop", 2, true
 	ovr := proj("api", "/tmp/api", true)
@@ -115,7 +115,7 @@ func TestSyncCell(t *testing.T) {
 	}
 }
 
-// helper de snapshot con primario no vacío.
+// Helper de snapshot con primario no vacío.
 func groupedProj(name, path, primary string) discovery.Project {
 	return discovery.Project{Path: path, Name: name, PrimaryGroup: primary, HasRepo: true}
 }
@@ -152,7 +152,7 @@ func worktreeNames(entries []tableEntry) []string {
 	return out
 }
 
-// repo con worktrees, plegado por defecto (▸ + contador, sin sub-filas).
+// Repo con worktrees, plegado por defecto (▸ + contador, sin sub-filas).
 func TestWorktreeCollapsedByDefault(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -197,7 +197,7 @@ func TestWorktreeToggleS30_2_3(t *testing.T) {
 	}
 }
 
-// space sobre repo sin worktrees es no-op.
+// Space sobre repo sin worktrees es no-op.
 func TestWorktreeExpandNoRepoWts(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
@@ -207,7 +207,7 @@ func TestWorktreeExpandNoRepoWts(t *testing.T) {
 	}
 }
 
-// space sobre un header de grupo no cambia el plegado.
+// Space sobre un header de grupo no cambia el plegado.
 func TestWorktreeExpandOnHeader(t *testing.T) {
 	p := discovery.Project{Path: "/a", Name: "a", PrimaryGroup: "g", HasRepo: true}
 	s := snapClean()
@@ -222,7 +222,7 @@ func TestWorktreeExpandOnHeader(t *testing.T) {
 	}
 }
 
-// space sobre una sub-fila no cambia la expansión del padre.
+// Space sobre una sub-fila no cambia la expansión del padre.
 func TestWorktreeExpandOnSubrow(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -241,10 +241,10 @@ func TestWorktreeExpandOnSubrow(t *testing.T) {
 	}
 }
 
-// cobertura total, principal no sub-fila, dedupe.
+// Cobertura total, principal no sub-fila, dedupe.
 func TestWorktreeCoverageAndDedupe(t *testing.T) {
 	main := proj("multi", "/tmp/multi", true)
-	// worktree descubierto con marcador → dedupe: sub-fila, no top-level.
+	// Worktree descubierto con marcador → dedupe: sub-fila, no top-level.
 	disc := discovery.Project{
 		Path: "/tmp/wt-marcado", Name: "wt-marcado", HasRepo: true,
 		IsWorktree: true, MainRepo: "/tmp/multi",
@@ -268,7 +268,7 @@ func TestWorktreeCoverageAndDedupe(t *testing.T) {
 			t.Error("el principal aparece como sub-fila")
 		}
 	}
-	// el worktree descubierto no aparece como fila top-level
+	// El worktree descubierto no aparece como fila top-level
 	for _, e := range m.entries() {
 		if e.kind == kindRepo && e.r.project.Path == "/tmp/wt-marcado" {
 			t.Error("worktree descubierto aparece como fila de repo")
@@ -327,7 +327,7 @@ func TestWorktreeDedupeNormalizedPathsMEDIUM_2(t *testing.T) {
 	}
 }
 
-// huérfano sigue visible con [wt] y no es expandible. Aunque su
+// Huérfano sigue visible con [wt] y no es expandible. Aunque su
 // snapshot tenga worktrees (caso realista: `git worktree list` desde el
 // propio worktree incluye el principal), NO debe mostrar glyph ni contador
 // (dead affordance, HIGH-1).
@@ -360,7 +360,7 @@ func TestWorktreeOrphan(t *testing.T) {
 	}
 }
 
-// sin worktrees o snapshot sin recolectar → sin glyph ni no-op.
+// Sin worktrees o snapshot sin recolectar → sin glyph ni no-op.
 func TestWorktreeNoGlyphS31_5_6(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
@@ -374,7 +374,7 @@ func TestWorktreeNoGlyphS31_5_6(t *testing.T) {
 	}
 }
 
-// el cursor alcanza la sub-fila y las acciones la resuelven.
+// El cursor alcanza la sub-fila y las acciones la resuelven.
 func TestWorktreeCursor(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -390,7 +390,7 @@ func TestWorktreeCursor(t *testing.T) {
 	}
 }
 
-// el scroll sigue a la sub-fila fuera de la ventana visible.
+// El scroll sigue a la sub-fila fuera de la ventana visible.
 func TestWorktreeScroll(t *testing.T) {
 	var projects []discovery.Project
 	states := map[string]gitstatus.Snapshot{}
@@ -416,7 +416,7 @@ func TestWorktreeScroll(t *testing.T) {
 	}
 }
 
-// una acción de vista real que hace
+// Una acción de vista real que hace
 // desaparecer las sub-filas bajo el cursor reclampa el cursor. Se usa el
 // filtro `d` (el repo es limpio, así deja de pasar el filtro) porque
 // hace `space` no-op sobre una sub-fila, así que no hay un camino de usuario
@@ -447,7 +447,7 @@ func TestWorktreeFoldKeepsCursor(t *testing.T) {
 	}
 }
 
-// pull/sync/push/recollect operan sobre el path del worktree.
+// Pull/sync/push/recollect operan sobre el path del worktree.
 func TestWorktreeActionsPathS33_2_4(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	for _, tc := range []struct{ key, kind string }{
@@ -463,7 +463,7 @@ func TestWorktreeActionsPathS33_2_4(t *testing.T) {
 	}
 }
 
-// fetch corre sobre el path del worktree bajo el cursor. Se observa
+// Fetch corre sobre el path del worktree bajo el cursor. Se observa
 // el canal de eventos: el batch publica fetchStateMsg con el path objetivo.
 func TestWorktreeFetchPath(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
@@ -493,7 +493,7 @@ func TestWorktreeFetchPath(t *testing.T) {
 	}
 }
 
-// lazygit/update/editor resuelven el path del worktree.
+// Lazygit/update/editor resuelven el path del worktree.
 func TestWorktreeHandoffPath(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -532,7 +532,7 @@ func TestWorktreeHandoffPath(t *testing.T) {
 	}
 }
 
-// comando `!` corre con el directorio del worktree.
+// Comando `!` corre con el directorio del worktree.
 func TestWorktreeBang(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/gitdash-test/wt", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -553,7 +553,7 @@ func TestWorktreeBang(t *testing.T) {
 	}
 }
 
-// detalle mínimo del worktree (path, rama, head) sin estado inventado.
+// Detalle mínimo del worktree (path, rama, head) sin estado inventado.
 func TestWorktreeDetail(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi",
 		gitstatus.Worktree{Path: "/tmp/wt-detached", Branch: "", Head: "abc1234"})
@@ -576,7 +576,7 @@ func TestWorktreeDetail(t *testing.T) {
 	}
 }
 
-// si el worktree fue
+// Si el worktree fue
 // descubierto con marcador y tiene snapshot vivo, el detalle muestra ESE
 // snapshot (intención confirmada por el usuario), no un panel mínimo.
 func TestWorktreeDetailDiscovered(t *testing.T) {
@@ -607,7 +607,7 @@ func TestWorktreeDetailDiscovered(t *testing.T) {
 	}
 }
 
-// las notificaciones usan el basename, no la ruta absoluta.
+// Las notificaciones usan el basename, no la ruta absoluta.
 func TestWorktreeNotificationBasename(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	if got := m.nameOf("/tmp/projects/wt-feat-x"); got != "wt-feat-x" {
@@ -615,7 +615,7 @@ func TestWorktreeNotificationBasename(t *testing.T) {
 	}
 }
 
-// la sub-fila se renderiza por el camino dedicado (no
+// La sub-fila se renderiza por el camino dedicado (no
 // `renderRow`), es estrictamente distinta de una fila de repo y de un header
 // de grupo, muestra la rama y no inventa estado por-worktree (LOW-c/LOW-d).
 func TestWorktreeRowRenderS34_1_2_4(t *testing.T) {
@@ -668,7 +668,7 @@ func TestWorktreeRowRenderS34_1_2_4(t *testing.T) {
 	}
 }
 
-// worktree detached muestra (detached) y el head corto.
+// Worktree detached muestra (detached) y el head corto.
 func TestWorktreeRowDetached(t *testing.T) {
 	w := gitstatus.Worktree{Path: "/tmp/wt-det", Branch: "", Head: "abc1234"}
 	m := newTestModel(t, nil, nil)
@@ -678,7 +678,7 @@ func TestWorktreeRowDetached(t *testing.T) {
 	}
 }
 
-// el NAME del principal muestra ▸/▾ junto a (N wt).
+// El NAME del principal muestra ▸/▾ junto a (N wt).
 func TestWorktreeGlyphCounter(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -691,12 +691,12 @@ func TestWorktreeGlyphCounter(t *testing.T) {
 	}
 }
 
-// la expansión sobrevive al reinicio; por defecto plegado.
+// La expansión sobrevive al reinicio; por defecto plegado.
 func TestWorktreeExpansionPersistsS35_1_2(t *testing.T) {
 	dir := t.TempDir()
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 
-	// sin estado persistido → plegado.
+	// Sin estado persistido → plegado.
 	fresh := newTestModel(t, []discovery.Project{p}, st)
 	fresh.loadPersisted(nil)
 	if len(worktreeNames(fresh.entries())) != 0 || fresh.expanded[p.Path] {
@@ -722,7 +722,7 @@ func TestWorktreeExpansionPersistsS35_1_2(t *testing.T) {
 	}
 }
 
-// sin colisión con las claves de grupo de collapsed.json.
+// Sin colisión con las claves de grupo de collapsed.json.
 func TestWorktreePersistNoCollision(t *testing.T) {
 	dir := t.TempDir()
 	if err := state.NewStoreAt(dir).SaveCollapsed(map[string]bool{"backend": true}); err != nil {
@@ -746,7 +746,7 @@ func TestWorktreePersistNoCollision(t *testing.T) {
 	}
 }
 
-// collapsed.json corrupto o ausente degrada a plegado sin fallar.
+// Collapsed.json corrupto o ausente degrada a plegado sin fallar.
 func TestWorktreePersistCorrupt(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, state.FileName), []byte("{corrupt"), 0o644); err != nil {
@@ -764,7 +764,7 @@ func TestWorktreePersistCorrupt(t *testing.T) {
 	}
 }
 
-// el filtro dirty oculta al padre y a sus sub-filas.
+// El filtro dirty oculta al padre y a sus sub-filas.
 func TestWorktreeDirtyFilter(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -775,7 +775,7 @@ func TestWorktreeDirtyFilter(t *testing.T) {
 	}
 }
 
-// el plegado de grupos manda; independiente de la expansión.
+// El plegado de grupos manda; independiente de la expansión.
 func TestWorktreeGroupFoldS36_2_3(t *testing.T) {
 	p := discovery.Project{Path: "/a", Name: "a", PrimaryGroup: "g", HasRepo: true}
 	s := snapClean()
@@ -801,18 +801,18 @@ func TestWorktreeGroupFoldS36_2_3(t *testing.T) {
 	}
 }
 
-// default `space` y rebind configurable.
+// Default `space` y rebind configurable.
 func TestWorktreeKeybindingS37_1_2(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 
-	// default space.
+	// Default space.
 	m := newTestModel(t, []discovery.Project{p}, st)
 	m, _ = press(m, " ")
 	if !m.expanded[p.Path] {
 		t.Error("space no expandió con los bindings por defecto")
 	}
 
-	// rebind a `w`.
+	// Rebind a `w`.
 	m2 := newTestModel(t, []discovery.Project{p}, st)
 	m2.cfg.Keybindings["expand"] = "w"
 	m2, _ = press(m2, "w")
@@ -827,7 +827,7 @@ func TestWorktreeKeybindingS37_1_2(t *testing.T) {
 	}
 }
 
-// el hint de expansión aparece con su tecla configurada.
+// El hint de expansión aparece con su tecla configurada.
 func TestWorktreeHint(t *testing.T) {
 	cfg := config.Defaults()
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "space expand") {
@@ -861,7 +861,7 @@ func TestWorktreeTabOnSubrow(t *testing.T) {
 	}
 }
 
-// match por rama/basename con expansión transitoria.
+// Match por rama/basename con expansión transitoria.
 func TestWorktreeSearchMatchS40_1_2_3(t *testing.T) {
 	p := proj("alpha", "/tmp/alpha", true) // no matchea por nombre
 	s := snapClean()
@@ -872,7 +872,7 @@ func TestWorktreeSearchMatchS40_1_2_3(t *testing.T) {
 	}
 	states := map[string]gitstatus.Snapshot{"/tmp/alpha": s}
 
-	// match por rama.
+	// Match por rama.
 	m := newTestModel(t, []discovery.Project{p}, states)
 	m.search = "feat/x"
 	if len(m.rows()) != 1 {
@@ -883,7 +883,7 @@ func TestWorktreeSearchMatchS40_1_2_3(t *testing.T) {
 		t.Errorf("sub-filas = %v, want [wt-feature]", got)
 	}
 
-	// match por basename.
+	// Match por basename.
 	m2 := newTestModel(t, []discovery.Project{p}, states)
 	m2.search = "nombre-raro"
 	if got := worktreeNames(m2.entries()); len(got) != 1 || got[0] != "nombre-raro" {
@@ -891,7 +891,7 @@ func TestWorktreeSearchMatchS40_1_2_3(t *testing.T) {
 	}
 }
 
-// sin match no se muestra ninguna fila.
+// Sin match no se muestra ninguna fila.
 func TestWorktreeSearchNoMatch(t *testing.T) {
 	p, st := repoWithWorktrees("alpha", "/tmp/alpha", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -901,7 +901,7 @@ func TestWorktreeSearchNoMatch(t *testing.T) {
 	}
 }
 
-// la expansión inducida por búsqueda es transitoria.
+// La expansión inducida por búsqueda es transitoria.
 func TestWorktreeSearchTransient(t *testing.T) {
 	p, st := repoWithWorktrees("alpha", "/tmp/alpha", wt("/tmp/wt-feature", "feat/x"))
 

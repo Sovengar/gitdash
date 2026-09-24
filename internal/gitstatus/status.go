@@ -66,7 +66,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	snap.Status, snap.Files = st, files
 
 	if syncBranch != "" {
-		// la rama resuelta se rellena siempre (visible en UI
+		// La rama resuelta se rellena siempre (visible en UI
 		// aunque la comparación falle → "<rama> —").
 		snap.SyncBranch = syncBranch
 		if n, ok := syncBehind(ctx, dir, syncBranch); ok {
@@ -85,7 +85,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	}
 	// Un repo sin commits es legítimo: el error de log se ignora.
 
-	// inventario de worktrees (sin el repo principal).
+	// Inventario de worktrees (sin el repo principal).
 	if wtOut, err := runGit(ctx, dir, "worktree", "list", "--porcelain"); err == nil {
 		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
 	}

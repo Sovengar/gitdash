@@ -289,7 +289,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.openEditorCmd(r.project.Path)
 		}
 	case "lazygit":
-		// g abre lazygit en el repo bajo el cursor.
+		// G abre lazygit en el repo bajo el cursor.
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
 				return m, m.notifyCmd("no git repo — nothing to do")
@@ -313,7 +313,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.recollectCmd(r.project.Path)
 		}
 	case "fold":
-		// plegar/desplegar el contenedor bajo
+		// Plegar/desplegar el contenedor bajo
 		// el cursor (secundario interno para repos, header si es header).
 		// sobre una sub-fila de worktree es no-op (no debe plegar
 		// la sección (ungrouped) por accidente).
@@ -387,7 +387,7 @@ func (m Model) View() tea.View {
 	content := m.renderDashboard()
 	if m.detailOpen {
 		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
-			// detalle dedicado del worktree (sin inventar estado).
+			// Detalle dedicado del worktree (sin inventar estado).
 			content = m.renderWorktreeDetail(e)
 		} else if r, ok := m.selected(); ok {
 			content = m.renderDetail(r)
@@ -411,7 +411,7 @@ func (m Model) renderDashboard() string {
 		flags += styleWarn.Render(" [dirty]")
 	}
 	if m.searchActive {
-		// feedback inmediato al pulsar / — [/|] con cursor sólido y
+		// Feedback inmediato al pulsar / — [/|] con cursor sólido y
 		// placeholder estático (el typewriter animado de bubbles se queda
 		// en el primer carácter sin ticks)
 		in := m.searchInput

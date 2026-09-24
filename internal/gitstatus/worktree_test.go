@@ -23,7 +23,7 @@ func TestParseWorktrees(t *testing.T) {
 	}
 }
 
-// el conteo incluye worktrees aunque no tengan marcador.
+// El conteo incluye worktrees aunque no tengan marcador.
 func TestCollectWorktrees(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtA := t.TempDir()

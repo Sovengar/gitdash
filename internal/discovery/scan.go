@@ -122,7 +122,7 @@ func inspect(dir, marker string) Project {
 			p.Name = metadata.Name
 		}
 		p.PrimaryGroup = metadata.PrimaryGroup
-		// secondary sin primary se ignora (cae en ungrouped)
+		// Secondary sin primary se ignora (cae en ungrouped)
 		if metadata.PrimaryGroup != "" {
 			p.SecondaryGroup = metadata.SecondaryGroup
 		}
@@ -137,7 +137,7 @@ func inspect(dir, marker string) Project {
 		p.IsWorktree = true
 		p.MainRepo = main // para plegar wt bajo su repo principal
 	default:
-		// sin repo, queda visible con HasRepo=false
+		// Sin repo, queda visible con HasRepo=false
 	}
 	return p
 }

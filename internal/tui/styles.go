@@ -39,12 +39,12 @@ var (
 	styleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 	styleSel       = lipgloss.NewStyle().Bold(true)
 
-	// header de grupo (vroom)
+	// Header de grupo (vroom)
 	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	// header secundario (nivel 2, menos protagonista)
+	// Header secundario (nivel 2, menos protagonista)
 	styleSecondaryHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
-	// sub-fila de worktree (indentada, distinta de repo/header)
+	// Sub-fila de worktree (indentada, distinta de repo/header)
 	styleWorktree = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
 	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))

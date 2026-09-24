@@ -65,7 +65,7 @@ func TestFoldToggle(t *testing.T) {
 	}
 }
 
-// los filtros aplican antes de agrupar; grupos vacíos desaparecen.
+// Los filtros aplican antes de agrupar; grupos vacíos desaparecen.
 func TestGroupsWithFilter(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "api", PrimaryGroup: "backend", HasRepo: true},
@@ -88,7 +88,7 @@ func TestGroupsWithFilter(t *testing.T) {
 	}
 }
 
-// vista anidada con headers de dos niveles.
+// Vista anidada con headers de dos niveles.
 func TestNestedView(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
@@ -128,7 +128,7 @@ func TestNestedView(t *testing.T) {
 	}
 }
 
-// plegar un secundario oculta solo sus repos.
+// Plegar un secundario oculta solo sus repos.
 func TestFoldSecondary(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
@@ -156,7 +156,7 @@ func TestFoldSecondary(t *testing.T) {
 	}
 }
 
-// plegar el primario oculta también sus headers secundarios.
+// Plegar el primario oculta también sus headers secundarios.
 func TestFoldPrimaryHidesSecondaryHeaders(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
@@ -171,7 +171,7 @@ func TestFoldPrimaryHidesSecondaryHeaders(t *testing.T) {
 	}
 }
 
-// tab sobre un repo pliega el contenedor más interno.
+// Tab sobre un repo pliega el contenedor más interno.
 func TestTabOnRepoFoldsInnermost(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
@@ -199,7 +199,7 @@ func TestTabOnRepoFoldsInnermost(t *testing.T) {
 	}
 }
 
-// claves de plegado sin colisión entre primarios distintos.
+// Claves de plegado sin colisión entre primarios distintos.
 func TestFoldKeysNoCollision(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "alfa", SecondaryGroup: "backend", HasRepo: true},
@@ -222,7 +222,7 @@ func TestFoldKeysNoCollision(t *testing.T) {
 	t.Errorf("repo b desapareció al plegar alfa/backend: %s", rowsOf(entries))
 }
 
-// el conteo del primario suma todos sus secundarios.
+// El conteo del primario suma todos sus secundarios.
 func TestPrimaryCountIncludesSecondary(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},

@@ -122,7 +122,7 @@ func TestCompositeKeysNoCollision(t *testing.T) {
 	}
 }
 
-// las claves de expansión de worktrees conviven con las de grupo
+// Las claves de expansión de worktrees conviven con las de grupo
 // bajo el namespace WorktreePrefix sin colisionar (misma forma de store).
 func TestWorktreeNamespaceCoexists(t *testing.T) {
 	store := NewStoreAt(t.TempDir())

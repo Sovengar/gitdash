@@ -197,7 +197,7 @@ func TestSearch(t *testing.T) {
 	}
 }
 
-// feedback visual inmediato — al pulsar / el título pinta [/|] con el
+// Feedback visual inmediato — al pulsar / el título pinta [/|] con el
 // el cursor del input (o su placeholder) ANTES de teclear nada.
 func TestSearchImmediateFeedback(t *testing.T) {
 	projects, states := fixtureProjects()

@@ -18,7 +18,7 @@ func entry(path, primary, secondary string) Entry {
 	}
 }
 
-// bloques anidados contiguos; ungrouped al final.
+// Bloques anidados contiguos; ungrouped al final.
 func TestArrangeNestedBlocks(t *testing.T) {
 	in := []Entry{
 		entry("/a", "vsocial", "backend"),
@@ -46,7 +46,7 @@ func TestArrangeNestedBlocks(t *testing.T) {
 	}
 }
 
-// primario en posición del primer miembro; orden de primera aparición.
+// Primario en posición del primer miembro; orden de primera aparición.
 func TestArrangePrimaryPosition(t *testing.T) {
 	in := []Entry{
 		entry("/x", "otros", ""),
@@ -62,7 +62,7 @@ func TestArrangePrimaryPosition(t *testing.T) {
 	}
 }
 
-// repo con primario y sin secundario conserva su posición de sort
+// Repo con primario y sin secundario conserva su posición de sort
 // dentro del primario, sin bloque propio que lo reordene.
 func TestArrangeMixedSecondary(t *testing.T) {
 	in := []Entry{
@@ -82,7 +82,7 @@ func TestArrangeMixedSecondary(t *testing.T) {
 	}
 }
 
-// aplicado a dos niveles: grupo de un solo miembro mantiene header.
+// Aplicado a dos niveles: grupo de un solo miembro mantiene header.
 func TestArrangeSingleMember(t *testing.T) {
 	in := []Entry{entry("/a", "backend", ""), entry("/b", "solo", "")}
 	got := Arrange(in)
@@ -108,7 +108,7 @@ func TestArrangeFlat(t *testing.T) {
 	}
 }
 
-// a través del arrangement: secondary sin primary ya llega vacío de
+// A través del arrangement: secondary sin primary ya llega vacío de
 // discovery, pero Arrange también lo defiende.
 func TestArrangeSecondaryIgnoredWithoutPrimary(t *testing.T) {
 	in := []Entry{

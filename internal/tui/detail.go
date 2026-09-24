@@ -48,7 +48,7 @@ func (m *Model) renderDetail(r row) string {
 	}
 	b.WriteString(key("branch  ") + branch + "\n")
 	b.WriteString(key("upstream") + " " + upstream + "\n")
-	// working tree + deriva vs upstream. El detalle SÍ es
+	// Working tree + deriva vs upstream. El detalle SÍ es
 	// verboso: "clean" explícito en vez de celda vacía.
 	wtText, wtStyle := m.wtCell(r)
 	if wtText == "" {
@@ -156,7 +156,7 @@ func (m *Model) renderDetail(r row) string {
 	return b.String()
 }
 
-// renderWorktreeDetail compone el detalle de una sub-fila de worktree
+// renderWorktreeDetail compone el detalle de una sub-fila de worktree.
 // Si el worktree fue descubierto con marcador y tiene snapshot
 // vivo, se delega al detalle completo; si no, panel mínimo con los datos que
 // trae `worktree list` (path/rama/head) SIN inventar estado git derivado.

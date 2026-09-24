@@ -76,7 +76,7 @@ func TestLoadWrongVersion(t *testing.T) {
 	}
 }
 
-// cache v2 (con clave group) se ignora silenciosamente.
+// Cache v2 (con clave group) se ignora silenciosamente.
 func TestLoadV2Ignored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repos.json")
 	raw := `{"version":2,"repos":[{"path":"/x","name":"api","group":"vsocial","has_repo":true}]}`

@@ -111,7 +111,7 @@ timeout = "nope"
 	}
 }
 
-// la expansión de worktrees tiene default `space` y es
+// La expansión de worktrees tiene default `space` y es
 // configurable como el resto de keybindings.
 func TestExpandKeybinding(t *testing.T) {
 	cfg := Defaults()
@@ -122,7 +122,7 @@ func TestExpandKeybinding(t *testing.T) {
 		t.Errorf("hint de expansión ausente: %v", cfg.HintBarLines())
 	}
 
-	// rebind via config.toml.
+	// Rebind via config.toml.
 	path := write(t, `
 [keybindings]
 expand = "w"

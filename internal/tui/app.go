@@ -1,4 +1,4 @@
-// Package tui implementa el dashboard gitdash con Bubbletea v2
+// Package tui implementa el dashboard gitdash con Bubbletea v2:
 // tabla de repos con estado git vivo, filtros, fetch automático en
 // batches y acciones pull/push/editor.
 package tui
@@ -98,7 +98,7 @@ type Model struct {
 	searchInput  textinput.Model
 	collapsed    map[string]bool // grupos plegados
 
-	// expansión de worktrees por path canónico del repo principal.
+	// Expansión de worktrees por path canónico del repo principal.
 	// Ausente = plegado. Persiste en collapsed.json bajo namespace
 	// propio (polaridad inversa a las claves de grupo).
 	expanded map[string]bool
