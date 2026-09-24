@@ -352,11 +352,12 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		defer cancel()
 		var out string
 		var err error
-		if kind == "pull" {
+		switch kind {
+		case "pull":
 			out, err = gitstatus.Pull(ctx, path, m.cfg.CmdArgs("pull")...)
-		} else if kind == "sync" {
+		case "sync":
 			out, err = gitstatus.Sync(ctx, path, m.cfg.CmdArgs("sync")...)
-		} else {
+		default:
 			out, err = gitstatus.Push(ctx, path, m.cfg.CmdArgs("push")...)
 		}
 		errStr := ""
@@ -450,7 +451,7 @@ func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) 
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	var out bytes.Buffer
-	cmd := exec.Command(shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Dir = dir
 	cmd.Stdout = &out
 	cmd.Stderr = &out
