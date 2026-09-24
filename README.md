@@ -89,6 +89,7 @@ attention-first).
 | `n` | alternar solo repos con cambios pendientes |
 | `/` | filtrar por nombre/grupo o por rama/basename de worktree (en vivo; `enter` confirma, `esc` limpia) |
 | `space` | expandir/plegar los worktrees del repo bajo el cursor (configurable, acción `expand`) |
+| `D` | borrar el worktree bajo el cursor (configurable, acción `worktree_remove`; solo el worktree, la rama se conserva) |
 | `tab` | plegar/desplegar el grupo bajo el cursor |
 | `r` | rescan completo (discovery + estados + fetch auto) |
 | `R` | re-coleccionar el repo del cursor |
@@ -115,6 +116,18 @@ attention-first).
   worktrees por rama o basename y revela su padre expandido de forma
   transitoria (sin alterar la persistencia). Queda visible como fila propia
   solo un worktree cuyo repo principal no está descubierto (tag `[wt]`).
+- Con el cursor sobre una **sub-fila de worktree**, `D` (acción
+  `worktree_remove`, configurable) borra el worktree: carpeta y registro en
+  `.git/worktrees`, **nunca la rama**. El primer `D` arma una confirmación
+  persistente (`remove worktree <nombre>? D to confirm, esc to cancel`); el
+  segundo `D` ejecuta `git worktree remove` desde el repo principal y, al
+  terminar, re-colecciona el padre para que la sub-fila desaparezca. Si el
+  worktree tiene cambios sin commitear o untracked, git falla: se muestra el
+  motivo real y se arma un segundo nivel (`D to force`) que reintenta con
+  `--force`; un fallo del forzado reporta el error y desarma (sin bucle).
+  `esc` cancela en cualquier punto, y cualquier otra tecla desarma. `D` sobre
+  una fila de repo, un header de grupo o la tabla vacía no hace nada (avisa
+  `select a worktree`).
 - Si algún marcador define `primary_group`, la tabla se **agrupa en dos
   niveles** (patrón vroom): el bloque de cada grupo desde la posición de su
   primer miembro con header `▾ nombre (n)`; dentro de un primario, cada
