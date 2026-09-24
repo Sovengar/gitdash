@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Genera testdata/playground con repos git fixture determinísticos
-# (spec 0001, tabla de fixtures). Remotos "origin" bare bajo .origin/
+# (tabla de fixtures). Remotos "origin" bare bajo .origin/
 # (oculto: el scanner lo poda).
 set -euo pipefail
 
@@ -91,8 +91,8 @@ new_repo no-upstream-cpp no-upstream-cpp gitdash playground >/dev/null
 dir=$(new_repo detached-shell detached-shell gitdash playground); origin=$(with_origin "$dir")
 G -C "$dir" checkout -q --detach HEAD
 
-# worktree-wt: worktree del repo principal + otro sin marcador (S15.4:
-# el conteo WT incluye worktrees sin .gitdash.toml)
+# worktree-wt: worktree del repo principal + otro sin marcador
+# (el conteo WT incluye worktrees sin .gitdash.toml)
 # gitdash playground
 main=$(new_repo worktree-main worktree-main gitdash playground)
 G -C "$main" worktree add -q "$BASE/worktree-wt" -b wt-branch
@@ -100,8 +100,8 @@ marker "$BASE/worktree-wt" worktree-wt gitdash playground
 G -C "$BASE/worktree-wt" add -A && G -C "$BASE/worktree-wt" commit -qm marker
 G -C "$main" worktree add -q "$BASE/worktree-nomarker" -b nomarker
 
-# sync-behind: rama feat con main a 2 commits por delante (SYNC ↓2,
-# spec 0002 S14.1); el ↑↓ del upstream sigue en 0
+# sync-behind: rama feat con main a 2 commits por delante (SYNC ↓2);
+# el ↑↓ del upstream sigue en 0
 # gitdash playground
 dir=$(new_repo sync-behind sync-behind gitdash playground)
 G -C "$dir" checkout -q -b feat

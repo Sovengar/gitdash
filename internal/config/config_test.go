@@ -17,7 +17,7 @@ func write(t *testing.T, content string) string {
 	return path
 }
 
-func TestDefaultsS1_1(t *testing.T) {
+func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Marker != ".gitdash.toml" {
 		t.Errorf("marker = %q", cfg.Marker)
@@ -33,7 +33,7 @@ func TestDefaultsS1_1(t *testing.T) {
 	}
 }
 
-func TestPartialOverrideS1_2(t *testing.T) {
+func TestPartialOverride(t *testing.T) {
 	path := write(t, `roots = ["~/code", "~/work"]`)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
@@ -47,7 +47,7 @@ func TestPartialOverrideS1_2(t *testing.T) {
 	}
 }
 
-func TestMalformedS1_3(t *testing.T) {
+func TestMalformed(t *testing.T) {
 	path := write(t, `roots = [`)
 	cfg, warn := LoadFrom(path)
 	if warn == "" {
@@ -58,7 +58,7 @@ func TestMalformedS1_3(t *testing.T) {
 	}
 }
 
-func TestMissingFileS1_1(t *testing.T) {
+func TestMissingFile(t *testing.T) {
 	cfg, warn := LoadFrom(filepath.Join(t.TempDir(), "nope.toml"))
 	if warn != "" {
 		t.Fatalf("warn inesperado: %q", warn)
@@ -68,7 +68,7 @@ func TestMissingFileS1_1(t *testing.T) {
 	}
 }
 
-func TestExpansionS1_4(t *testing.T) {
+func TestExpansion(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	path := write(t, "roots = [\"~/dev\"]\n")
 	cfg, _ := LoadFrom(path)
@@ -111,18 +111,18 @@ timeout = "nope"
 	}
 }
 
-// 0006 R37.1: la expansión de worktrees tiene default `space` y es
+// la expansión de worktrees tiene default `space` y es
 // configurable como el resto de keybindings.
-func TestExpandKeybindingR37(t *testing.T) {
+func TestExpandKeybinding(t *testing.T) {
 	cfg := Defaults()
 	if cfg.KeyFor("expand") != "space" {
-		t.Errorf("R37.1: default expand = %q, want space", cfg.KeyFor("expand"))
+		t.Errorf("default expand = %q, want space", cfg.KeyFor("expand"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "space expand") {
-		t.Errorf("R37.3: hint de expansión ausente: %v", cfg.HintBarLines())
+		t.Errorf("hint de expansión ausente: %v", cfg.HintBarLines())
 	}
 
-	// R37.2: rebind via config.toml.
+	// rebind via config.toml.
 	path := write(t, `
 [keybindings]
 expand = "w"
@@ -132,9 +132,9 @@ expand = "w"
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if cfg.KeyFor("expand") != "w" {
-		t.Errorf("R37.2: expand = %q, want w", cfg.KeyFor("expand"))
+		t.Errorf("expand = %q, want w", cfg.KeyFor("expand"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "w expand") {
-		t.Errorf("R37.3: hint rebindeado ausente: %v", cfg.HintBarLines())
+		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 }

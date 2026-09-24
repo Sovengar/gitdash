@@ -1,4 +1,4 @@
-// Tests de worktrees (0002 R15): parseo canned y recolección real.
+// Tests de worktrees: parseo canned y recolección real.
 package gitstatus
 
 import (
@@ -23,8 +23,8 @@ func TestParseWorktrees(t *testing.T) {
 	}
 }
 
-// S15.4: el conteo incluye worktrees aunque no tengan marcador.
-func TestCollectWorktreesS15_4(t *testing.T) {
+// el conteo incluye worktrees aunque no tengan marcador.
+func TestCollectWorktrees(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtA := t.TempDir()
 	testutil.MakeWorktree(t, dir, wtA, "wt-a")
@@ -33,7 +33,7 @@ func TestCollectWorktreesS15_4(t *testing.T) {
 
 	snap := Collect(t.Context(), dir, "")
 	if len(snap.Worktrees) != 2 {
-		t.Fatalf("S15.4: wts = %d, want 2 (marcador o no)", len(snap.Worktrees))
+		t.Fatalf("wts = %d, want 2 (marcador o no)", len(snap.Worktrees))
 	}
 	if snap.Worktrees[0].Branch != "wt-a" {
 		t.Errorf("branch = %q, want wt-a", snap.Worktrees[0].Branch)

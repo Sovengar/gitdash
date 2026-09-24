@@ -16,20 +16,20 @@ const porcelainClean = `# branch.oid 3f4e0c0f6a4e3c5a5d5b5e5a5d5b5e5a5d5b5e5a
 # branch.ab +0 -0
 `
 
-func TestParseCleanS5_1(t *testing.T) {
+func TestParseClean(t *testing.T) {
 	st, files := ParsePorcelain(porcelainClean)
 	if st.Branch != "main" || st.Upstream != "origin/main" || !st.HasUpstream {
 		t.Errorf("st = %+v", st)
 	}
 	if st.Ahead != 0 || st.Behind != 0 || st.Dirty() != 0 || len(files) != 0 {
-		t.Errorf("S5.1 falla: %+v files=%v", st, files)
+		t.Errorf("falla: %+v files=%v", st, files)
 	}
 	if got := st.Derive(); got != StateClean {
 		t.Errorf("derive = %v, want clean", got)
 	}
 }
 
-func TestParseAheadBehindDivergedS5_2(t *testing.T) {
+func TestParseAheadBehindDiverged(t *testing.T) {
 	ahead := strings.Replace(porcelainClean, "# branch.ab +0 -0", "# branch.ab +2 -0", 1)
 	st, _ := ParsePorcelain(ahead)
 	if st.Ahead != 2 || st.Behind != 0 {
@@ -55,7 +55,7 @@ func TestParseAheadBehindDivergedS5_2(t *testing.T) {
 	}
 }
 
-func TestParseDirtyS5_3(t *testing.T) {
+func TestParseDirty(t *testing.T) {
 	out := porcelainClean + `1 .M NRM 100644 100644 100644 abc def src/main.go
 ? README.md
 ? docs/
@@ -63,7 +63,7 @@ func TestParseDirtyS5_3(t *testing.T) {
 `
 	st, files := ParsePorcelain(out)
 	if st.TrackedChanges != 2 || st.Untracked != 2 {
-		t.Errorf("S5.3: tracked=%d untracked=%d", st.TrackedChanges, st.Untracked)
+		t.Errorf("tracked=%d untracked=%d", st.TrackedChanges, st.Untracked)
 	}
 	if st.Derive() != StateDirty {
 		t.Errorf("derive = %v, want dirty", st.Derive())
@@ -82,21 +82,21 @@ func TestParseDirtyS5_3(t *testing.T) {
 	}
 }
 
-func TestParseNoUpstreamS5_4(t *testing.T) {
+func TestParseNoUpstream(t *testing.T) {
 	st, _ := ParsePorcelain("# branch.oid abc\n# branch.head main\n")
 	if st.HasUpstream {
-		t.Error("S5.4: upstream detectado sin línea")
+		t.Error("upstream detectado sin línea")
 	}
 	if st.Derive() != StateNoUpstream {
 		t.Errorf("derive = %v, want no-upstream", st.Derive())
 	}
 }
 
-func TestParseDetachedS5_5(t *testing.T) {
+func TestParseDetached(t *testing.T) {
 	out := strings.Replace(porcelainClean, "# branch.head main", "# branch.head (detached)", 1)
 	st, _ := ParsePorcelain(out)
 	if !st.Detached || st.Branch != "" {
-		t.Errorf("S5.5: %+v", st)
+		t.Errorf("detached: %+v", st)
 	}
 }
 
@@ -120,18 +120,18 @@ func TestParseLog(t *testing.T) {
 
 // --- tests de recolección real con repos fixture ---
 
-func TestCollectCleanS5_1(t *testing.T) {
+func TestCollectClean(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	st := Collect(t.Context(), dir, "")
 	if st.Err != "" {
-		t.Fatalf("S5.6: err = %q", st.Err)
+		t.Fatalf("err = %q", st.Err)
 	}
 	if st.Status.Derive() != StateClean || st.LastCommit == 0 {
 		t.Errorf("snap = %+v", snapSummary(st))
 	}
 }
 
-func TestCollectDirtyS5_3(t *testing.T) {
+func TestCollectDirty(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	// base.txt está trackeado: modificarlo cuenta como cambio tracked.
 	testutil.WriteUncommitted(t, dir, map[string]string{"base.txt": "changed"})
@@ -139,21 +139,21 @@ func TestCollectDirtyS5_3(t *testing.T) {
 
 	st := Collect(t.Context(), dir, "")
 	if st.Status.TrackedChanges != 1 || st.Status.Untracked != 2 {
-		t.Errorf("S5.3: tracked=%d untracked=%d", st.Status.TrackedChanges, st.Status.Untracked)
+		t.Errorf("tracked=%d untracked=%d", st.Status.TrackedChanges, st.Status.Untracked)
 	}
 	if st.Status.Derive() != StateDirty {
 		t.Errorf("derive = %v", st.Status.Derive())
 	}
 }
 
-func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
+func TestCollectAheadBehindDiverged(t *testing.T) {
 	ahead, _ := testutil.NewRepo(t, true)
 	testutil.CommitFiles(t, ahead, map[string]string{"extra.txt": "x"}, "local 1")
 	testutil.CommitFiles(t, ahead, map[string]string{"extra2.txt": "x"}, "local 2")
 
 	st := Collect(t.Context(), ahead, "")
 	if st.Status.Ahead != 2 || st.Status.Derive() != StateAhead {
-		t.Errorf("S5.2 ahead: %+v", snapSummary(st))
+		t.Errorf("ahead: %+v", snapSummary(st))
 	}
 
 	behind, origin := testutil.NewRepo(t, true)
@@ -161,7 +161,7 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 	testutil.FetchLocal(t, behind) // sin fetch el repo no ve el behind
 	st = Collect(t.Context(), behind, "")
 	if st.Status.Behind != 3 || st.Status.Derive() != StateBehind {
-		t.Errorf("S5.2 behind: %+v", snapSummary(st))
+		t.Errorf("behind: %+v", snapSummary(st))
 	}
 
 	diverged, origin2 := testutil.NewRepo(t, true)
@@ -170,37 +170,37 @@ func TestCollectAheadBehindDivergedS5_2(t *testing.T) {
 	testutil.FetchLocal(t, diverged)
 	st = Collect(t.Context(), diverged, "")
 	if st.Status.Ahead != 1 || st.Status.Behind != 2 || st.Status.Derive() != StateDiverged {
-		t.Errorf("S5.2 diverged: %+v", snapSummary(st))
+		t.Errorf("diverged: %+v", snapSummary(st))
 	}
 }
 
-func TestCollectNoUpstreamS5_4(t *testing.T) {
+func TestCollectNoUpstream(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	st := Collect(t.Context(), dir, "")
 	if st.Status.HasUpstream || st.Status.Derive() != StateNoUpstream {
-		t.Errorf("S5.4: %+v", snapSummary(st))
+		t.Errorf("no-upstream: %+v", snapSummary(st))
 	}
 }
 
-func TestCollectDetachedS5_5(t *testing.T) {
+func TestCollectDetached(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	testutil.Detach(t, dir)
 	st := Collect(t.Context(), dir, "")
 	if !st.Status.Detached {
-		t.Fatalf("S5.5: %+v", st.Status)
+		t.Fatalf("detached: %+v", st.Status)
 	}
 	if len(st.Status.Branch) != 7 {
 		t.Errorf("branch detached = %q, want sha corto", st.Status.Branch)
 	}
 }
 
-func TestCollectCorruptS5_6(t *testing.T) {
+func TestCollectCorrupt(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	// .git corrupto: el binario git falla y el error viaja en el Snapshot.
 	testutil.BreakGit(t, dir)
 	st := Collect(t.Context(), dir, "")
 	if st.Err == "" {
-		t.Fatal("S5.6: corrupto sin error")
+		t.Fatal("corrupto sin error")
 	}
 	if st.State(true) != StateError {
 		t.Errorf("state = %v, want error", st.State(true))

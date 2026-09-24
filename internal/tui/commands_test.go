@@ -1,5 +1,5 @@
 // Tests de las acciones con handoff de terminal: tecla g (lazygit) y
-// modo comando `!` del detalle via worktrunk (0005).
+// modo comando `!` del detalle via worktrunk.
 package tui
 
 import (

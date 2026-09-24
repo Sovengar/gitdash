@@ -1,5 +1,5 @@
-// Package gitstatus recolecta el estado git de los repos vía subprocess
-// (spec 0001 R5). Un solo `git status --porcelain=v2 --branch` por repo da
+// Package gitstatus recolecta el estado git de los repos vía subprocess.
+// Un solo `git status --porcelain=v2 --branch` por repo da
 // branch, upstream, ahead/behind y ficheros cambiados; `git log` aporta
 // actividad y commits recientes. Sin librerías git: el binario git es la
 // única dependencia.
@@ -23,17 +23,16 @@ import (
 type Snapshot struct {
 	Status     Status
 	Files      []FileEntry
-	Commits    []Commit   // últimos 5 (S10.1)
+	Commits    []Commit   // últimos 5
 	LastCommit int64      // epoch del último commit (0 si sin commits)
-	Worktrees  []Worktree // worktrees del repo (0002 R15), sin el principal
-	SyncBranch string     // sync branch usada en la comparación (0002 R14)
-	SyncBehind int        // commits de sync ausentes en HEAD (0002 R14)
+	Worktrees  []Worktree // worktrees del repo, sin el principal
+	SyncBranch string     // sync branch usada en la comparación
+	SyncBehind int        // commits de sync ausentes en HEAD
 	SyncKnown  bool       // comparación vs sync calculable
-	Err        string     // "" = recolección ok (S5.6)
+	Err        string     // "" = recolección ok
 }
 
-// Worktree es un worktree registrado del repo, listo para el detalle
-// (0002 R15).
+// Worktree es un worktree registrado del repo, listo para el detalle.
 type Worktree struct {
 	Path   string // ruta absoluta del worktree
 	Branch string // refs/heads/x o "" si detached/bare
@@ -43,17 +42,17 @@ type Worktree struct {
 // State deriva el estado visible considerando errores y proyectos sin repo.
 func (s Snapshot) State(hasRepo bool) State {
 	if s.Err != "" {
-		return StateError // S5.6
+		return StateError
 	}
 	if !hasRepo {
-		return StateNoRepo // S3.3
+		return StateNoRepo
 	}
 	return s.Status.Derive()
 }
 
 // Collect recolecta el estado del repo en dir, con la desviación vs la
-// sync branch dada (R14, "" = sin comparación). Nunca falla duro: el error
-// (si lo hay) viaja dentro del Snapshot para verse en la UI (S5.6).
+// sync branch dada ("" = sin comparación). Nunca falla duro: el error
+// (si lo hay) viaja dentro del Snapshot para verse en la UI.
 func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	var snap Snapshot
 
@@ -67,14 +66,14 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	snap.Status, snap.Files = st, files
 
 	if syncBranch != "" {
-		// 0004 R23: la rama resuelta se rellena siempre (visible en UI
+		// la rama resuelta se rellena siempre (visible en UI
 		// aunque la comparación falle → "<rama> —").
 		snap.SyncBranch = syncBranch
 		if n, ok := syncBehind(ctx, dir, syncBranch); ok {
-			snap.SyncBehind = n // R14: commits de sync ausentes en HEAD
+			snap.SyncBehind = n // commits de sync ausentes en HEAD
 			snap.SyncKnown = true
 		}
-		// sync ref inexistente o error: SyncKnown=false → "<rama> —" en UI (0004 S23.4)
+		// sync ref inexistente o error: SyncKnown=false → "<rama> —" en UI
 	}
 
 	logOut, err := runGit(ctx, dir, "log", "-5", "--format=%h%x00%ct%x00%s")
@@ -86,7 +85,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	}
 	// Un repo sin commits es legítimo: el error de log se ignora.
 
-	// 0002 R15: inventario de worktrees (sin el repo principal).
+	// inventario de worktrees (sin el repo principal).
 	if wtOut, err := runGit(ctx, dir, "worktree", "list", "--porcelain"); err == nil {
 		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
 	}
@@ -94,7 +93,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 }
 
 // syncBehind cuenta los commits de sync ausentes en HEAD con
-// `git rev-list --count HEAD..<sync>` (R14): valen para ramas y detached,
+// `git rev-list --count HEAD..<sync>`: valen para ramas y detached,
 // y respectan el merge-base (no es un diff de tips). Cualquier error
 // (ref inexistente, repo roto) devuelve known=false.
 func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
@@ -112,14 +111,14 @@ func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
 // normalizeBranch completa la rama para detached con el sha corto.
 func normalizeBranch(st Status) string {
 	if st.Detached && st.Branch == "" && len(st.OID) >= 7 {
-		return st.OID[:7] // S5.5: "<sha-corto> (detached)" en UI
+		return st.OID[:7] // "<sha-corto> (detached)" en UI
 	}
 	return st.Branch
 }
 
 // StreamPool recolecta los snapshots de todos los proyectos en paralelo
 // (máximo concurrency a la vez) invocando emit por cada uno. defaultSync es
-// la sync branch global (R14): cada proyecto puede overriddenla desde el
+// la sync branch global: cada proyecto puede overriddenla desde el
 // marcador. Bloquea hasta terminar o cancelarse por contexto.
 //
 // emit se invoca concurrentemente desde hasta `concurrency` goroutines: el
@@ -145,7 +144,7 @@ func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync s
 				return
 			}
 			if !p.HasRepo {
-				emit(p.Path, Snapshot{}) // S3.3: estado no-repo inmediato
+				emit(p.Path, Snapshot{}) // estado no-repo inmediato
 				return
 			}
 			emit(p.Path, Collect(ctx, p.Path, SyncFor(p, defaultSync)))
@@ -154,7 +153,7 @@ func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync s
 	wg.Wait()
 }
 
-// SyncFor resuelve la sync branch efectiva de un proyecto (R14):
+// SyncFor resuelve la sync branch efectiva de un proyecto:
 // override del marcador > global.
 func SyncFor(p discovery.Project, defaultSync string) string {
 	if p.SyncBranch != "" {
@@ -164,7 +163,7 @@ func SyncFor(p discovery.Project, defaultSync string) string {
 }
 
 // Fetch ejecuta `git fetch` en dir con los args dados (default: --prune).
-// El caller aplica el timeout vía contexto (R8).
+// El caller aplica el timeout vía contexto.
 func Fetch(ctx context.Context, dir string, args ...string) error {
 	if len(args) == 0 {
 		args = []string{"fetch", "--prune"}
@@ -174,7 +173,7 @@ func Fetch(ctx context.Context, dir string, args ...string) error {
 }
 
 // Pull ejecuta `git pull` con los args dados (default: --ff-only) y
-// devuelve la salida combinada para el detalle (R9).
+// devuelve la salida combinada para el detalle.
 func Pull(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) == 0 {
 		args = []string{"pull", "--ff-only"}
@@ -183,7 +182,7 @@ func Pull(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 // Push ejecuta `git push` con los args dados y devuelve la salida
-// combinada (R9).
+// combinada.
 func Push(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) == 0 {
 		args = []string{"push"}
@@ -192,7 +191,7 @@ func Push(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 // Sync ejecuta `git sync` (default: pull --rebase --autostash) con los
-// args dados y devuelve la salida combinada (R9).
+// args dados y devuelve la salida combinada.
 func Sync(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) == 0 {
 		args = []string{"pull", "--rebase", "--autostash"}

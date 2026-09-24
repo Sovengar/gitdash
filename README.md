@@ -56,7 +56,7 @@ timeout     = "30s"   # timeout por fetch
 
 ## Columnas de la tabla
 
-La tabla es *quieta* (0004): las celdas quedan vacías cuando no hay nada que
+La tabla es *quieta*: las celdas quedan vacías cuando no hay nada que
 comunicar y solo se pinta lo que pide atención (el orden sigue siendo
 attention-first).
 
@@ -145,8 +145,7 @@ XDG_CONFIG_HOME=$(mktemp -d) bin/gitdash --print   # prueba headless
 Arquitectura: `internal/config` (TOML XDG), `internal/discovery` (walk por
 marcador), `internal/gitstatus` (subprocess git + parsing `porcelain=v2`),
 `internal/cache` (pintura instantánea al arrancar), `internal/tui`
-(dashboard Bubbletea v2). La spec completa con escenarios está en
-`docs/planning/0001-feature-gitdash-tui/`.
+(dashboard Bubbletea v2).
 
 ## Roadmap
 

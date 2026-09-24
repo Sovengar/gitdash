@@ -1,4 +1,4 @@
-// Vista de detalle de un repo (spec 0001 R10; 0002 R14/R15).
+// Vista de detalle de un repo.
 package tui
 
 import (
@@ -18,7 +18,7 @@ func asOrDash(s string) string {
 }
 
 // renderDetail compone el panel de detalle del repo seleccionado con datos
-// vivos del snapshot (S10.1, S10.2).
+// vivos del snapshot.
 func (m *Model) renderDetail(r row) string {
 	var b strings.Builder
 
@@ -48,7 +48,7 @@ func (m *Model) renderDetail(r row) string {
 	}
 	b.WriteString(key("branch  ") + branch + "\n")
 	b.WriteString(key("upstream") + " " + upstream + "\n")
-	// 0004 R26/R27: working tree + deriva vs upstream. El detalle SÍ es
+	// working tree + deriva vs upstream. El detalle SÍ es
 	// verboso: "clean" explícito en vez de celda vacía.
 	wtText, wtStyle := m.wtCell(r)
 	if wtText == "" {
@@ -60,13 +60,13 @@ func (m *Model) renderDetail(r row) string {
 	}
 	b.WriteString(key("state   ") + stateLine + "\n")
 
-	// sync branch vs HEAD (0002 R14; 0004 R23): la rama resuelta siempre
+	// sync branch vs HEAD: la rama resuelta siempre
 	// visible, con su desviación o el motivo de la falta.
 	syncLine := "— (sin sync branch)"
 	switch {
 	case r.snap.SyncBranch == "":
 	case !r.snap.SyncKnown:
-		syncLine = r.snap.SyncBranch + " (ref missing)" // S23.4
+		syncLine = r.snap.SyncBranch + " (ref missing)"
 	case r.snap.SyncBehind > 0:
 		syncLine = r.snap.SyncBranch + fmt.Sprintf(" (↓%d)", r.snap.SyncBehind)
 	default:
@@ -74,7 +74,7 @@ func (m *Model) renderDetail(r row) string {
 	}
 	b.WriteString(key("sync    ") + syncLine + "\n")
 
-	// worktrees del repo (0002 R15/S15.2): rama, sha y ruta (relativa al
+	// worktrees del repo: rama, sha y ruta (relativa al
 	// repo cuando sea posible, absoluta en caso contrario).
 	if n := len(r.snap.Worktrees); n > 0 {
 		b.WriteString("\n" + key(fmt.Sprintf("worktrees (%d)", n)) + "\n")
@@ -157,7 +157,7 @@ func (m *Model) renderDetail(r row) string {
 }
 
 // renderWorktreeDetail compone el detalle de una sub-fila de worktree
-// (0006 R33.6). Si el worktree fue descubierto con marcador y tiene snapshot
+// Si el worktree fue descubierto con marcador y tiene snapshot
 // vivo, se delega al detalle completo; si no, panel mínimo con los datos que
 // trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
 func (m *Model) renderWorktreeDetail(e tableEntry) string {
@@ -170,7 +170,7 @@ func (m *Model) renderWorktreeDetail(e tableEntry) string {
 }
 
 // renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
-// snapshot propio (0006 R33.6): path, rama (o `(detached)`), head. No muestra
+// snapshot propio: path, rama (o `(detached)`), head. No muestra
 // dirty/ahead/behind/sync.
 func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string) string {
 	var b strings.Builder

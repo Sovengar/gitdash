@@ -1,5 +1,5 @@
 // Package testutil construye repos git de prueba deterministicos para los
-// tests de discovery, gitstatus y tui (fixtures de la spec 0001).
+// tests de discovery, gitstatus y tui (fixtures).
 package testutil
 
 import (
@@ -48,7 +48,7 @@ func CommitFiles(t *testing.T, dir string, files map[string]string, msg string) 
 
 // Marker escribe el marcador .gitdash.toml con los metadatos dados
 // ("" como valor = clave omitida). Con malformed=true escribe TOML inválido.
-// 0003 R18: primary_group/secondary_group (la clave group ya no existe).
+// primary_group/secondary_group (la clave group ya no existe).
 func Marker(t *testing.T, dir, name, primary, secondary string, malformed bool) {
 	t.Helper()
 	var content string
@@ -146,7 +146,7 @@ func WriteUntracked(t *testing.T, dir string, files map[string]string) {
 	WriteUncommitted(t, dir, files)
 }
 
-// BreakGit corrompe el .git de un repo para probar el estado error (S5.6).
+// BreakGit corrompe el .git de un repo para probar el estado error.
 func BreakGit(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("basura"), 0o644); err != nil {

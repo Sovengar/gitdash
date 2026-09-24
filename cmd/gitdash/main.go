@@ -23,7 +23,7 @@ func main() {
 
 	cfg, warn := config.Load()
 	if warn != "" {
-		fmt.Fprintln(os.Stderr, "gitdash:", warn) // S1.3: notificar sin abortar
+		fmt.Fprintln(os.Stderr, "gitdash:", warn) // notificar sin abortar
 	}
 
 	if *printMode {

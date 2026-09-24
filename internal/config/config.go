@@ -1,8 +1,8 @@
-// Package config carga la configuración XDG de gitdash (spec 0001 R1).
+// Package config carga la configuración XDG de gitdash.
 //
 // El fichero ~/.config/gitdash/config.toml es opcional: cualquier clave que
 // falte conserva su default. Una config malformada degrada a defaults con
-// warning, sin abortar el arranque (S1.3).
+// warning, sin abortar el arranque.
 package config
 
 import (
@@ -45,8 +45,8 @@ type Config struct {
 	Roots   []string
 	Exclude []string
 	Editor  string
-	// SyncBranch es la rama de referencia global para la columna SYNC
-	// (spec 0002 R14): los marcadores pueden overridden por repo.
+	// SyncBranch es la rama de referencia global para la columna SYNC:
+	// los marcadores pueden overridden por repo.
 	SyncBranch       string
 	FetchAuto        bool
 	FetchConcurrency int
@@ -65,19 +65,19 @@ type fetchConfig struct {
 
 // fileConfig refleja el TOML crudo del disco.
 type fileConfig struct {
-	Marker     *string             `toml:"marker"`
-	Roots      []string            `toml:"roots"`
-	Exclude    []string            `toml:"exclude"`
-	Editor     *string             `toml:"editor"`
-	SyncBranch *string             `toml:"sync_branch"`
-	Fetch      *fetchConfig        `toml:"fetch"`
-	Keybindings map[string]string  `toml:"keybindings"`
-	Commands    map[string]string   `toml:"commands"`
+	Marker      *string           `toml:"marker"`
+	Roots       []string          `toml:"roots"`
+	Exclude     []string          `toml:"exclude"`
+	Editor      *string           `toml:"editor"`
+	SyncBranch  *string           `toml:"sync_branch"`
+	Fetch       *fetchConfig      `toml:"fetch"`
+	Keybindings map[string]string `toml:"keybindings"`
+	Commands    map[string]string `toml:"commands"`
 }
 
 // Load lee la config del path estándar XDG. Devuelve la config resuelta y
 // un warning (posiblemente nil) para notificar en la UI. Nunca falla:
-// ante cualquier error usa defaults (S1.3).
+// ante cualquier error usa defaults.
 func Load() (Config, string) {
 	path, err := Path()
 	if err != nil {
@@ -93,21 +93,21 @@ func LoadFrom(path string) (Config, string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, "" // S1.1: sin fichero, defaults silenciosos
+			return cfg, "" // sin fichero, defaults silenciosos
 		}
 		return cfg, fmt.Sprintf("config: %v", err)
 	}
 
 	var fc fileConfig
 	if _, err := toml.Decode(string(raw), &fc); err != nil {
-		return cfg, fmt.Sprintf("config: %v", err) // S1.3
+		return cfg, fmt.Sprintf("config: %v", err)
 	}
 
 	if fc.Marker != nil && *fc.Marker != "" {
 		cfg.Marker = *fc.Marker
 	}
 	if fc.Roots != nil {
-		cfg.Roots = expandAll(fc.Roots) // S1.4: sustituye, no añade
+		cfg.Roots = expandAll(fc.Roots) // sustituye, no añade
 	}
 	if fc.Exclude != nil {
 		cfg.Exclude = fc.Exclude
@@ -116,7 +116,7 @@ func LoadFrom(path string) (Config, string) {
 		cfg.Editor = *fc.Editor
 	}
 	if fc.SyncBranch != nil && *fc.SyncBranch != "" {
-		cfg.SyncBranch = *fc.SyncBranch // R14: override global
+		cfg.SyncBranch = *fc.SyncBranch // override global
 	}
 	if fc.Fetch != nil {
 		if fc.Fetch.Auto != nil {
@@ -178,7 +178,7 @@ func DefaultKeybindings() Keybindings {
 		"detail":    "enter",
 		"command":   "!",
 		"update":    "u",
-		"expand":    "space", // 0006 R37.1: toggle de expansión de worktrees
+		"expand":    "space", // toggle de expansión de worktrees
 	}
 }
 
@@ -192,7 +192,7 @@ func DefaultCommands() Commands {
 	}
 }
 
-// Defaults construye la config por defecto (R1).
+// Defaults construye la config por defecto.
 func Defaults() Config {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -203,7 +203,7 @@ func Defaults() Config {
 		Roots:            expandAll([]string{"~/dev"}),
 		Exclude:          append([]string(nil), DefaultExclude...),
 		Editor:           editor,
-		SyncBranch:       "main", // R14: default global de la sync branch
+		SyncBranch:       "main", // default global de la sync branch
 		FetchAuto:        true,
 		FetchConcurrency: 4,
 		FetchTimeout:     30 * time.Second,

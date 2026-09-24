@@ -54,16 +54,16 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 | `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Fetch, Pull, Push). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro |
 | `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
 | `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `styles.go` |
-| `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom R24, 0003): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
+| `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
 | `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees, ramas) |
 | `cmd/gitdash` | `main.go` (TUI) + `print.go` (modo `--print`, tabwriter, mismo orden) |
 
 ## Convenciones
 
-- Comentarios de código en **español** referenciando la spec (p. ej. `S5.2`, `R8`).
-- **SDD recortado** (contrato): `docs/planning/000X-feature-NAME/{proposal.md,spec.md}`
-  con requisitos `R#n SHALL` + escenarios `S#n.#` GIVEN/WHEN/THEN. Desviaciones
-  → sección "Revisiones" de spec.md. SIN impl-plan ni tasks.md.
+- Comentarios de código en **español**, **sin referencias a specs ni a IDs de
+  requisito/escenario**: el código es la fuente de verdad. No hay artefactos
+  SDD en el repo y no se crean (nada de `docs/planning/`, `proposal.md`,
+  `spec.md`, `R#n SHALL`, `S#n.#`).
 - Tests del modelo **directo** (construir Model, enviar msgs con Update,
   inspeccionar estado) — sin teatest. Patrón: `internal/tui/app_test.go`.
 - Estados derivados con precedencia: `diverged > dirty > ahead > behind >

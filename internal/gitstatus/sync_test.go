@@ -1,4 +1,4 @@
-// Tests de la desviación vs sync branch (spec 0002 R14).
+// Tests de la desviación vs sync branch.
 package gitstatus
 
 import (
@@ -22,44 +22,44 @@ func setupDivergedFromSync(t *testing.T) (dir string) {
 	return dir
 }
 
-// S14.1+S14.5: behind = commits de sync (m1) ausentes en la rama actual,
+// behind = commits de sync (m1) ausentes en la rama actual,
 // NO los propios de feat (merge-base, no diff de tips).
-func TestSyncBehindS14_1(t *testing.T) {
+func TestSyncBehind(t *testing.T) {
 	dir := setupDivergedFromSync(t)
 	snap := Collect(t.Context(), dir, "main")
 	if snap.Err != "" {
-		t.Fatalf("S5.6: err = %q", snap.Err)
+		t.Fatalf("err = %q", snap.Err)
 	}
 	if !snap.SyncKnown || snap.SyncBranch != "main" {
 		t.Fatalf("sync no conocida: %+v", snap)
 	}
 	if snap.SyncBehind != 1 {
-		t.Errorf("S14.5: behind = %d, want 1 (solo m1 ausente)", snap.SyncBehind)
+		t.Errorf("behind = %d, want 1 (solo m1 ausente)", snap.SyncBehind)
 	}
 }
 
-// S14.3: HEAD en la propia sync branch → ✓ (behind 0, known).
-func TestSyncOnBranchS14_3(t *testing.T) {
+// HEAD en la propia sync branch → ✓ (behind 0, known).
+func TestSyncOnBranch(t *testing.T) {
 	dir := setupDivergedFromSync(t)
 	snap := Collect(t.Context(), dir, "feat")
 	if !snap.SyncKnown || snap.SyncBehind != 0 {
-		t.Errorf("S14.3: known=%v behind=%d", snap.SyncKnown, snap.SyncBehind)
+		t.Errorf("known=%v behind=%d", snap.SyncKnown, snap.SyncBehind)
 	}
 }
 
-// S14.4 + 0004 R23: sync branch inexistente → comparación desconocida,
+// sync branch inexistente → comparación desconocida,
 // pero la rama resuelta queda rellena para verse como "<rama> —" en la UI.
-func TestSyncMissingS14_4(t *testing.T) {
+func TestSyncMissing(t *testing.T) {
 	dir := setupDivergedFromSync(t)
 	snap := Collect(t.Context(), dir, "no-existe")
 	if snap.SyncKnown {
-		t.Errorf("S14.4: known=true con ref inexistente")
+		t.Errorf("known=true con ref inexistente")
 	}
 	if snap.SyncBranch != "no-existe" {
-		t.Errorf("0004 R23: SyncBranch = %q, want no-existe (siempre rellena)", snap.SyncBranch)
+		t.Errorf("SyncBranch = %q, want no-existe (siempre rellena)", snap.SyncBranch)
 	}
 	if snap.Err != "" {
-		t.Errorf("S14.4: el error de sync no debe ensuciar Err: %q", snap.Err)
+		t.Errorf("el error de sync no debe ensuciar Err: %q", snap.Err)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestSyncDisabled(t *testing.T) {
 	}
 }
 
-// StreamPool propaga el override del marcador (R14: override > global).
+// StreamPool propaga el override del marcador (override > global).
 func TestStreamPoolSyncOverride(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	testutil.CommitFiles(t, dir, map[string]string{"m.txt": "m"}, "main 1")

@@ -1,4 +1,4 @@
-// Tests del arrangement de grupos (0002 R16, 0003 R19).
+// Tests del arrangement de grupos.
 package group
 
 import (
@@ -18,8 +18,8 @@ func entry(path, primary, secondary string) Entry {
 	}
 }
 
-// S19.1: bloques anidados contiguos; ungrouped al final.
-func TestArrangeNestedBlocksS19_1(t *testing.T) {
+// bloques anidados contiguos; ungrouped al final.
+func TestArrangeNestedBlocks(t *testing.T) {
 	in := []Entry{
 		entry("/a", "vsocial", "backend"),
 		entry("/b", "", ""),
@@ -36,18 +36,18 @@ func TestArrangeNestedBlocksS19_1(t *testing.T) {
 		{"/b", Ungrouped, ""},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("S19.1: len = %d, want %d: %+v", len(got), len(want), got)
+		t.Fatalf("len = %d, want %d: %+v", len(got), len(want), got)
 	}
 	for i, w := range want {
 		if got[i].Proj.Path != w.path || got[i].Primary != w.prim || got[i].Secondary != w.sec {
-			t.Errorf("S19.1: pos %d = %q/%q/%q, want %q/%q/%q",
+			t.Errorf("pos %d = %q/%q/%q, want %q/%q/%q",
 				i, got[i].Proj.Path, got[i].Primary, got[i].Secondary, w.path, w.prim, w.sec)
 		}
 	}
 }
 
-// S19.2: primario en posición del primer miembro; orden de primera aparición.
-func TestArrangePrimaryPositionS19_2(t *testing.T) {
+// primario en posición del primer miembro; orden de primera aparición.
+func TestArrangePrimaryPosition(t *testing.T) {
 	in := []Entry{
 		entry("/x", "otros", ""),
 		entry("/y", "vsocial", "backend"),
@@ -57,14 +57,14 @@ func TestArrangePrimaryPositionS19_2(t *testing.T) {
 	want := []string{"/x", "/z", "/y"}
 	for i, w := range want {
 		if got[i].Proj.Path != w {
-			t.Fatalf("S19.2: posición %d = %q, want %q", i, got[i].Proj.Path, w)
+			t.Fatalf("posición %d = %q, want %q", i, got[i].Proj.Path, w)
 		}
 	}
 }
 
-// S19.3: repo con primario y sin secundario conserva su posición de sort
+// repo con primario y sin secundario conserva su posición de sort
 // dentro del primario, sin bloque propio que lo reordene.
-func TestArrangeMixedSecondaryS19_3(t *testing.T) {
+func TestArrangeMixedSecondary(t *testing.T) {
 	in := []Entry{
 		entry("/a", "p", "backend"),
 		entry("/b", "p", ""), // sin secundario, aparece entre bloques
@@ -74,23 +74,23 @@ func TestArrangeMixedSecondaryS19_3(t *testing.T) {
 	want := []string{"/a", "/c", "/b"}
 	for i, w := range want {
 		if got[i].Proj.Path != w {
-			t.Fatalf("S19.3: posición %d = %q, want %q", i, got[i].Proj.Path, w)
+			t.Fatalf("posición %d = %q, want %q", i, got[i].Proj.Path, w)
 		}
 		if i < 2 && (got[i].Secondary != "backend") {
-			t.Errorf("S19.3: bloque backend roto en %d", i)
+			t.Errorf("bloque backend roto en %d", i)
 		}
 	}
 }
 
-// S16.4 aplicado a dos niveles: grupo de un solo miembro mantiene header.
-func TestArrangeSingleMemberS16_4(t *testing.T) {
+// aplicado a dos niveles: grupo de un solo miembro mantiene header.
+func TestArrangeSingleMember(t *testing.T) {
 	in := []Entry{entry("/a", "backend", ""), entry("/b", "solo", "")}
 	got := Arrange(in)
 	if len(got) != 2 || got[1].Primary != "solo" {
-		t.Errorf("S16.4: %+v", got)
+		t.Errorf("miembro único: %+v", got)
 	}
 	if !IsPrimaryHeader(got, 1) {
-		t.Errorf("S16.4: 'solo' debe tener header")
+		t.Errorf("'solo' debe tener header")
 	}
 }
 
@@ -108,16 +108,16 @@ func TestArrangeFlat(t *testing.T) {
 	}
 }
 
-// S18.3 a través del arrangement: secondary sin primary ya llega vacío de
+// a través del arrangement: secondary sin primary ya llega vacío de
 // discovery, pero Arrange también lo defiende.
-func TestArrangeSecondaryIgnoredWithoutPrimaryS18_3(t *testing.T) {
+func TestArrangeSecondaryIgnoredWithoutPrimary(t *testing.T) {
 	in := []Entry{
 		entry("/a", "p", ""),
 		entry("/b", "", "infra"), // normalizado a Ungrouped sin secundario
 	}
 	got := Arrange(in)
 	if got[1].Primary != Ungrouped || got[1].Secondary != "" {
-		t.Errorf("S18.3: %+v", got[1])
+		t.Errorf("secondary sin primary: %+v", got[1])
 	}
 }
 

@@ -1,5 +1,5 @@
 // Package discovery descubre proyectos por fichero marcador en los roots
-// configurados (spec 0001 R2-R4).
+// configurados.
 //
 // Un directorio es proyecto si contiene el marcador (default .gitdash.toml).
 // El repo git se resuelve en la MISMA carpeta del marcador: .git directorio
@@ -25,13 +25,13 @@ import (
 type Project struct {
 	Path           string // ruta absoluta (carpeta del marcador)
 	Name           string // name del marcador o nombre del directorio
-	PrimaryGroup   string // primary_group del marcador o "" (0003 R18)
-	SecondaryGroup string // secondary_group del marcador; "" = sin segundo nivel (0003 R18)
-	SyncBranch     string // sync_branch del marcador (0002 R14); "" = usar la global
+	PrimaryGroup   string // primary_group del marcador o ""
+	SecondaryGroup string // secondary_group del marcador; "" = sin segundo nivel
+	SyncBranch     string // sync_branch del marcador; "" = usar la global
 	HasRepo        bool   // existe .git (directorio o fichero)
-	IsWorktree     bool   // .git es un fichero gitdir: (R3.2)
-	MainRepo       string // 0002 R15: repo principal si IsWorktree ("" = no aplica)
-	MarkerErr      string // error de parseo del marcador (S4.3)
+	IsWorktree     bool   // .git es un fichero gitdir:
+	MainRepo       string // repo principal si IsWorktree ("" = no aplica)
+	MarkerErr      string // error de parseo del marcador
 }
 
 // MainPath es el repo al que pertenece el proyecto (sí mismo salvo worktrees).
@@ -77,7 +77,7 @@ func Scan(cfg config.Config) ([]Project, error) {
 	return projects, err
 }
 
-// scanRoot hace el walk de un root con podas (R2).
+// scanRoot hace el walk de un root con podas.
 func scanRoot(root string, cfg config.Config) ([]Project, error) {
 	exclude := make(map[string]bool, len(cfg.Exclude))
 	for _, name := range cfg.Exclude {
@@ -87,17 +87,17 @@ func scanRoot(root string, cfg config.Config) ([]Project, error) {
 	var projects []Project
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // ilegible: se salta sin abortar (R2)
+			return nil // ilegible: se salta sin abortar
 		}
 		if !d.IsDir() {
 			return nil
 		}
 		if path != root && (isHidden(d.Name()) || exclude[d.Name()]) {
-			return fs.SkipDir // S2.2
+			return fs.SkipDir
 		}
 		if hasMarker(path, cfg.Marker) {
-			projects = append(projects, inspect(path, cfg.Marker)) // S2.1
-			// seguimos descendiendo: proyectos anidados válidos (S2.4)
+			projects = append(projects, inspect(path, cfg.Marker))
+			// seguimos descendiendo: proyectos anidados válidos
 		}
 		return nil
 	})
@@ -107,7 +107,7 @@ func scanRoot(root string, cfg config.Config) ([]Project, error) {
 	return projects, nil
 }
 
-// inspect clasifica un directorio con marcador (R3, R4).
+// inspect clasifica un directorio con marcador.
 func inspect(dir, marker string) Project {
 	p := Project{
 		Path: dir,
@@ -116,13 +116,13 @@ func inspect(dir, marker string) Project {
 
 	metadata, err := parseMarker(filepath.Join(dir, marker))
 	if err != nil {
-		p.MarkerErr = err.Error() // S4.3: visible, sin excluir
+		p.MarkerErr = err.Error() // visible, sin excluir
 	} else {
 		if metadata.Name != "" {
 			p.Name = metadata.Name
 		}
 		p.PrimaryGroup = metadata.PrimaryGroup
-		// 0003 R18/S18.3: secondary sin primary se ignora (cae en ungrouped)
+		// secondary sin primary se ignora (cae en ungrouped)
 		if metadata.PrimaryGroup != "" {
 			p.SecondaryGroup = metadata.SecondaryGroup
 		}
@@ -131,28 +131,28 @@ func inspect(dir, marker string) Project {
 
 	switch k, main := classifyGit(filepath.Join(dir, ".git")); k {
 	case gitDir:
-		p.HasRepo = true // S3.1
+		p.HasRepo = true
 	case gitFile:
 		p.HasRepo = true
-		p.IsWorktree = true // S3.2
-		p.MainRepo = main   // 0002 R15: para plegar wt bajo su repo principal
+		p.IsWorktree = true
+		p.MainRepo = main // para plegar wt bajo su repo principal
 	default:
-		// S3.3: sin repo, queda visible con HasRepo=false
+		// sin repo, queda visible con HasRepo=false
 	}
 	return p
 }
 
-// markerMeta son los metadatos opcionales del marcador (R4).
-// 0003 R18: la clave `group` desaparece (cambio duro, sin fallback).
+// markerMeta son los metadatos opcionales del marcador.
+// la clave `group` desaparece (cambio duro, sin fallback).
 type markerMeta struct {
 	Name           string `toml:"name"`
 	PrimaryGroup   string `toml:"primary_group"`
 	SecondaryGroup string `toml:"secondary_group"`
-	SyncBranch     string `toml:"sync_branch"` // R14: override de la sync branch
+	SyncBranch     string `toml:"sync_branch"` // override de la sync branch
 }
 
 // parseMarker lee name/primary_group/secondary_group del marcador; campos
-// ausentes = vacío (S4.2).
+// ausentes = vacío.
 func parseMarker(path string) (markerMeta, error) {
 	var meta markerMeta
 	raw, err := os.ReadFile(path)
@@ -180,7 +180,7 @@ const (
 	gitFile
 )
 
-// classifyGit distingue repo normal de worktree (R3). Devuelve el path
+// classifyGit distingue repo normal de worktree. Devuelve el path
 // del repo principal cuando .git es un fichero gitdir: (`<main>/.git/...`).
 func classifyGit(gitPath string) (gitKind, string) {
 	info, err := os.Lstat(gitPath)

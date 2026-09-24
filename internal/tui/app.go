@@ -1,5 +1,5 @@
-// Package tui implementa el dashboard gitdash con Bubbletea v2 (spec 0001
-// R6-R10): tabla de repos con estado git vivo, filtros, fetch automático en
+// Package tui implementa el dashboard gitdash con Bubbletea v2
+// tabla de repos con estado git vivo, filtros, fetch automático en
 // batches y acciones pull/push/editor.
 package tui
 
@@ -43,24 +43,24 @@ type statusMsg struct {
 // collectDoneMsg marca el fin de la recolección del scan.
 type collectDoneMsg struct{}
 
-// fetchStateMsg cambia el estado de fetch de una fila (S6.3, S8.2).
+// fetchStateMsg cambia el estado de fetch de una fila.
 type fetchStateMsg struct {
 	path  string
 	state string // fetching | ok | failed
 	err   string
 }
 
-// fetchDoneMsg cierra un batch de fetch (R8).
+// fetchDoneMsg cierra un batch de fetch.
 type fetchDoneMsg struct{ ok, failed int }
 
-// actionMsg entrega el resultado de pull/push (R9).
+// actionMsg entrega el resultado de pull/push.
 type actionMsg struct {
 	path, kind, output string
 	err                string
 }
 
 // execDoneMsg marca la vuelta de un proceso con handoff de terminal:
-// editor (S9.4), lazygit (tecla g) o shell interactiva (tecla !, vacío).
+// editor, lazygit (tecla g) o shell interactiva (tecla !, vacío).
 type execDoneMsg struct {
 	path string
 	err  error
@@ -77,7 +77,7 @@ type notifyMsg struct{ text string }
 // tickMsg expira notificaciones y anima el spinner.
 type tickMsg struct{}
 
-// actionResult guarda la salida de la última acción por repo (S10.2).
+// actionResult guarda la salida de la última acción por repo.
 type actionResult struct {
 	kind, output, err string
 }
@@ -96,10 +96,10 @@ type Model struct {
 
 	searchActive bool
 	searchInput  textinput.Model
-	collapsed    map[string]bool // 0002 R16: grupos plegados
+	collapsed    map[string]bool // grupos plegados
 
-	// 0006 R35: expansión de worktrees por path canónico del repo principal.
-	// Ausente = plegado (R35.2). Persiste en collapsed.json bajo namespace
+	// expansión de worktrees por path canónico del repo principal.
+	// Ausente = plegado. Persiste en collapsed.json bajo namespace
 	// propio (polaridad inversa a las claves de grupo).
 	expanded map[string]bool
 
@@ -141,7 +141,7 @@ type cmdResult struct {
 const searchPlaceholder = "name/group…"
 
 // New construye el modelo con la config dada y pinta el cache si existe
-// (S11.1: pintura instantánea; el rescan corre vía Init).
+// (pintura instantánea; el rescan corre vía Init).
 func New(cfg config.Config) Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	store, _ := state.NewStore()
@@ -162,7 +162,7 @@ func New(cfg config.Config) Model {
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
 	in.Placeholder = searchPlaceholder
-	in.Prompt = "/" // el prompt pinta [/aquí][cursor], no "filter: " (S7.2)
+	in.Prompt = "/" // el prompt pinta [/aquí][cursor], no "filter: "
 
 	ci := textinput.New()
 	// El primer rune del placeholder queda bajo el cursor (bubbles v2
@@ -171,13 +171,13 @@ func New(cfg config.Config) Model {
 	ci.Prompt = "! "
 	m.cmdInput = ci
 	m.searchInput = in
-	m.scanning = true // el scan arranca en Init (R6: spinner visible desde ya)
+	m.scanning = true // el scan arranca en Init (spinner visible desde ya)
 
 	if path, err := cache.Path(); err == nil {
-		m.projects = cache.Load(path, cfg.Marker) // S11.1
+		m.projects = cache.Load(path, cfg.Marker)
 	}
-	// Restaurar el estado de plegado persistido (S20.5) y la expansión de
-	// worktrees (0006 R35). La carga separa ambos espacios por prefijo: las
+	// Restaurar el estado de plegado persistido y la expansión de
+	// worktrees. La carga separa ambos espacios por prefijo: las
 	// claves con WorktreePrefix van a `expanded` (true = expandido), el
 	// resto a `collapsed` (true = plegado).
 	if store != nil {
@@ -189,8 +189,8 @@ func New(cfg config.Config) Model {
 }
 
 // loadPersisted vuelca el mapa plano de collapsed.json en los dos espacios
-// de nombres del modelo (0006 R35): expansión de worktrees vs. plegado de
-// grupos. Fichero corrupto o ausente ya llega como nil (S35.4).
+// de nombres del modelo: expansión de worktrees vs. plegado de
+// grupos. Fichero corrupto o ausente ya llega como nil.
 func (m *Model) loadPersisted(persisted map[string]bool) {
 	for k, v := range persisted {
 		if path, ok := strings.CutPrefix(k, state.WorktreePrefix); ok {
@@ -236,8 +236,8 @@ func tickCmd() tea.Cmd {
 
 // ---- pipelines de fondo ----
 
-// startScanCmd lanza discovery + recolección streaming (R2, R5) y, si
-// procede, el fetch automático (R8) al terminar. El guard de "un scan a la
+// startScanCmd lanza discovery + recolección streaming y, si
+// procede, el fetch automático al terminar. El guard de "un scan a la
 // vez" vive en el handler de la tecla r (New ya marca scanning=true).
 func (m *Model) startScanCmd() tea.Cmd {
 	m.scanning = true
@@ -269,16 +269,16 @@ func (m *Model) startScanCmd() tea.Cmd {
 }
 
 // fetchTargets devuelve los paths con upstream pendientes de fetch,
-// excluyendo los que ya están en curso (R8).
+// excluyendo los que ya están en curso.
 func (m *Model) fetchTargets() []string {
 	var paths []string
 	for _, p := range m.projects {
 		if !p.HasRepo {
-			continue // S9.6: sin repo no hay fetch
+			continue // sin repo no hay fetch
 		}
 		snap := m.states[p.Path]
 		if !snap.Status.HasUpstream || snap.Err != "" {
-			continue // S8.4: sin upstream se saltan
+			continue // sin upstream se saltan
 		}
 		if m.fetchStates[p.Path] == "fetching" {
 			continue
@@ -289,7 +289,7 @@ func (m *Model) fetchTargets() []string {
 }
 
 // fetchBatchCmd lanza `git fetch --prune` en batches de fetch.concurrency
-// con timeout por fetch (R8); tras cada fetch re-colecciona el estado.
+// con timeout por fetch; tras cada fetch re-colecciona el estado.
 func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 	if len(paths) == 0 {
 		return nil
@@ -339,7 +339,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 	return nil
 }
 
-// startActionCmd lanza pull/push capturado sobre un repo (R9). Devuelve
+// startActionCmd lanza pull/push capturado sobre un repo. Devuelve
 // además el texto de guard si la acción está bloqueada.
 func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
@@ -374,7 +374,7 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	return nil
 }
 
-// recollectCmd re-colecciona un solo repo (R7, tecla R).
+// recollectCmd re-colecciona un solo repo (tecla R).
 func (m *Model) recollectCmd(path string) tea.Cmd {
 	if _, busy := m.running[path]; busy {
 		return nil
@@ -393,7 +393,7 @@ func (m *Model) notifyCmd(text string) tea.Cmd {
 	return func() tea.Msg { return notifyMsg{text: text} }
 }
 
-// openEditorCmd abre $EDITOR en el repo con handoff de terminal (S9.4).
+// openEditorCmd abre $EDITOR en el repo con handoff de terminal.
 func (m *Model) openEditorCmd(path string) tea.Cmd {
 	cmd := exec.Command(m.cfg.Editor)
 	cmd.Dir = path
@@ -513,7 +513,7 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 	})
 }
 
-// nameOf devuelve el nombre visible de un path (0006 R33.7): el nombre del
+// nameOf devuelve el nombre visible de un path: el nombre del
 // proyecto descubierto, el basename para un worktree (aunque tenga marcador
 // propio, la notificación usa el directorio) y el path absoluto en último
 // término si no es resoluble.
@@ -532,7 +532,7 @@ func (m *Model) nameOf(path string) string {
 	return filepath.Base(path)
 }
 
-// syncOf resuelve la sync branch efectiva de un path (R14): override del
+// syncOf resuelve la sync branch efectiva de un path: override del
 // marcador > global. Proyectos no descubiertos → global.
 func (m *Model) syncOf(path string) string {
 	for _, p := range m.projects {
@@ -545,7 +545,7 @@ func (m *Model) syncOf(path string) string {
 
 // saveCollapsed persiste el estado de plegado y de expansión a disco
 // (best-effort: no bloquear la UI). Se llama tras cada toggle. Compone los
-// dos espacios de nombres (0006 S35.3): claves de grupo tal cual y la
+// dos espacios de nombres: claves de grupo tal cual y la
 // expansión de worktrees bajo WorktreePrefix.
 func (m *Model) saveCollapsed() {
 	if m.store == nil {
@@ -571,8 +571,8 @@ func (m *Model) selectedEntry() (tableEntry, bool) {
 }
 
 // selected devuelve la fila (con path resoluble) bajo el cursor, si la hay.
-// Los headers de grupo (0002 R16) no seleccionan repo: ok=false. Una
-// sub-fila de worktree (0006 R32/R33) se resuelve a una fila sintética con
+// Los headers de grupo no seleccionan repo: ok=false. Una
+// sub-fila de worktree se resuelve a una fila sintética con
 // el path del worktree y HasRepo=true, de forma que TODAS las operaciones
 // (que leen r.project.Path/HasRepo/MarkerErr) operan sobre el worktree.
 func (m *Model) selected() (row, bool) {
@@ -590,8 +590,8 @@ func (m *Model) selected() (row, bool) {
 	}
 }
 
-// worktreeRow sintetiza la fila operable de un worktree (0006 R33). Si el
-// worktree fue descubierto con marcador (dedupe R31.3), reutiliza su
+// worktreeRow sintetiza la fila operable de un worktree. Si el
+// worktree fue descubierto con marcador (dedupe), reutiliza su
 // proyecto y su snapshot vivo; si no, un proyecto mínimo con HasRepo=true y
 // MarkerErr vacío para satisfacer los guards de las operaciones.
 func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
@@ -608,7 +608,7 @@ func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
 }
 
 // discoveredByPath busca el proyecto descubierto que corresponde a un path
-// de worktree (dedupe R31.3), comparando paths normalizados para tolerar
+// de worktree (dedupe), comparando paths normalizados para tolerar
 // symlinks o barras finales.
 func (m *Model) discoveredByPath(path string) (discovery.Project, bool) {
 	clean := filepath.Clean(path)
