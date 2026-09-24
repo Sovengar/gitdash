@@ -150,12 +150,14 @@ type Model struct {
 	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
 	// Es estado efímero de sesión: no se persiste.
 	armed *armedRemoval
-	// removeGen/removeToken correlacionan un borrado en vuelo con su resultado:
-	// removeToken es el token del intento vigente (0 = ninguno) y gen el
-	// contador monótono que lo genera. Un resultado con token distinto se
-	// descarta (cancelado con esc o sustituido).
-	removeGen   int
-	removeToken int
+	// removeGen/removeTokens correlacionan cada borrado en vuelo con su
+	// resultado. removeTokens mapea path del repo padre → token del intento
+	// vigente (el guard de "acción en curso" es por padre, así que el token
+	// también). removeGen es el contador monótono que los genera; un resultado
+	// cuyo token ya no es el vigente se descarta (cancelado con esc o
+	// sustituido).
+	removeGen    int
+	removeTokens map[string]int
 
 	detailOpen    bool
 	width, height int
@@ -196,6 +198,8 @@ func New(cfg config.Config) Model {
 		lastCmd:     map[string]cmdResult{},
 		collapsed:   map[string]bool{},
 		expanded:    map[string]bool{},
+
+		removeTokens: map[string]int{},
 	}
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()

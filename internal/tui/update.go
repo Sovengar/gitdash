@@ -90,18 +90,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withPump(nil)
 
 	case worktreeRemovedMsg:
-		// Liberar el running del padre solo si corresponde a este intento: si
-		// ya lo reemplazó otro (cancelado y reintentado, o una acción distinta)
-		// no se pisa.
-		if m.running[msg.parent] == "worktree_remove" && (m.removeToken == 0 || msg.gen == m.removeToken) {
-			delete(m.running, msg.parent)
-		}
-		if msg.gen == 0 || msg.gen != m.removeToken {
-			// Resultado obsoleto (se canceló con esc o lo sustituyó otro
-			// intento): no toca el banner ni re-arma el forzado.
+		tok, inflight := m.removeTokens[msg.parent]
+		switch {
+		case inflight && msg.gen == tok:
+			// Intento vigente de este padre: se consume el token y se libera el
+			// running si sigue siendo el del borrado.
+			delete(m.removeTokens, msg.parent)
+			if m.running[msg.parent] == "worktree_remove" {
+				delete(m.running, msg.parent)
+			}
+		case !inflight:
+			// Sin intento registrado (cancelado con esc): se libera el running
+			// residual y se descarta el resultado sin tocar banner ni toast.
+			if m.running[msg.parent] == "worktree_remove" {
+				delete(m.running, msg.parent)
+			}
+			return m.withPump(nil)
+		default:
+			// Token distinto: el intento fue sustituido; no se libera ni muta.
 			return m.withPump(nil)
 		}
-		m.removeToken = 0
 		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", output: msg.output, err: msg.err}
 		// La mutación del estado armado solo aplica si este sigue apuntando al
 		// mismo worktree (o está vacío): un armado posterior sobre otro
@@ -211,11 +219,12 @@ func (m *Model) clampCursor() {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Un borrado en vuelo se cancela de forma definitiva con esc: se invalida
-	// su token para que un resultado tardío no re-arme el forzado ni toque el
-	// banner. El esc sigue su curso normal (cerrar detalle, etc.).
-	if key == "esc" && m.removeToken != 0 {
-		m.removeToken = 0
+	// Un borrado en vuelo se cancela de forma definitiva con esc: se invalidan
+	// sus tokens para que un resultado tardío no re-arme el forzado ni toque el
+	// banner (su running residual se libera al llegar el resultado). El esc
+	// sigue su curso normal (cerrar detalle, etc.).
+	if key == "esc" && len(m.removeTokens) > 0 {
+		clear(m.removeTokens)
 	}
 
 	// Confirmación armada de borrado de worktree: tiene prioridad sobre el
@@ -476,9 +485,12 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		}
 		armed := *m.armed
 		m.removeGen++
-		m.removeToken = m.removeGen
+		if m.removeTokens == nil {
+			m.removeTokens = map[string]int{}
+		}
+		m.removeTokens[armed.parent] = m.removeGen
 		m.armed = nil
-		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeToken)
+		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
 	}
 	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
 	// un worktree distinto al que se armó.

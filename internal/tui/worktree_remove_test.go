@@ -263,7 +263,7 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	// Estado tras la 2ª D: banner limpio y token del intento en vuelo.
 	m.armed = nil
-	m.removeToken = 7
+	m.removeTokens[p.Path] = 7
 	m.running[p.Path] = "worktree_remove"
 
 	updated, _ := m.Update(worktreeRemovedMsg{
@@ -282,8 +282,8 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	if m.running[p.Path] != "" {
 		t.Error("el fallo no liberó el running del padre")
 	}
-	if m.removeToken != 0 {
-		t.Errorf("el token debe consumirse: %d", m.removeToken)
+	if _, ok := m.removeTokens[p.Path]; ok {
+		t.Errorf("el token debe consumirse: %v", m.removeTokens)
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastError || !strings.Contains(last.text, "archivos modificados") {
@@ -325,7 +325,7 @@ func TestRemoveWorktreeForceFailureDisarms(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	// Estado tras lanzar el forzado: banner limpio y token en vuelo.
 	m.armed = nil
-	m.removeToken = 9
+	m.removeTokens[p.Path] = 9
 	m.running[p.Path] = "worktree_remove"
 
 	updated, _ := m.Update(worktreeRemovedMsg{
@@ -553,14 +553,14 @@ func TestRemoveWorktreeEscDuringFlightIgnoresLateFailure(t *testing.T) {
 	if m.armed != nil {
 		t.Fatal("el banner debe limpiarse al lanzar el borrado")
 	}
-	token := m.removeToken
-	if token == 0 {
-		t.Fatal("sin token de intento en vuelo")
+	token, inflight := m.removeTokens[p.Path]
+	if !inflight || token == 0 {
+		t.Fatalf("sin token de intento en vuelo: %v", m.removeTokens)
 	}
 
 	m, _ = press(m, "esc") // cancelación definitiva
-	if m.removeToken != 0 {
-		t.Fatalf("esc no invalidó el intento en vuelo: %d", m.removeToken)
+	if len(m.removeTokens) != 0 {
+		t.Fatalf("esc no invalidó el intento en vuelo: %v", m.removeTokens)
 	}
 
 	// Llega tarde el fallo sucio del intento cancelado.
@@ -583,7 +583,7 @@ func TestRemoveWorktreeLateResultDoesNotClobberOtherArmed(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m, _ = press(m, "D") // armar A
 	m, _ = press(m, "D") // lanzar A
-	token := m.removeToken
+	token := m.removeTokens[p.Path]
 
 	// El usuario se mueve a B y lo arma mientras A está en vuelo.
 	m, _ = press(m, "down")
@@ -688,5 +688,160 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	}
 	if branches := gitOutT(t, dir, "branch", "--list", "wt-dirty"); !strings.Contains(branches, "wt-dirty") {
 		t.Errorf("la rama wt-dirty desapareció: %q", branches)
+	}
+}
+
+// twoParentModel construye un modelo con dos repos (a, b) y un worktree cada
+// uno, ambos expandidos. Las entradas navegables son [a, a-wt, b, b-wt].
+func twoParentModel(t *testing.T) Model {
+	t.Helper()
+	base := time.Now().Add(-2 * time.Hour).Unix()
+	snapA := snapClean()
+	snapA.LastCommit = base
+	snapA.Worktrees = []gitstatus.Worktree{wt("/tmp/pa-wt", "a")}
+	snapB := snapClean()
+	snapB.LastCommit = base
+	snapB.Worktrees = []gitstatus.Worktree{wt("/tmp/pb-wt", "b")}
+	pA := proj("a", "/tmp/pa", true)
+	pB := proj("b", "/tmp/pb", true)
+	m := newTestModel(t, []discovery.Project{pA, pB},
+		map[string]gitstatus.Snapshot{"/tmp/pa": snapA, "/tmp/pb": snapB})
+	m.expanded["/tmp/pa"] = true
+	m.expanded["/tmp/pb"] = true
+	return m
+}
+
+// Con dos borrados solapados en padres distintos, el resultado tardío del
+// primero libera su running (sin fuga) y se resuelve, sin tocar el intento del
+// segundo. El token es por padre, no global.
+func TestRemoveWorktreeConcurrentParentsNoLeak(t *testing.T) {
+	m := twoParentModel(t)
+
+	// Entradas: [a, a-wt, b, b-wt]; se lanza el borrado de A.
+	m.cursor = 1
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+	tokA := m.removeTokens["/tmp/pa"]
+	if tokA == 0 {
+		t.Fatalf("A no quedó en vuelo: %v", m.removeTokens)
+	}
+
+	// Se lanza el borrado de B (padre distinto, en paralelo).
+	m.cursor = 3
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+	tokB := m.removeTokens["/tmp/pb"]
+	if tokB == 0 || tokB == tokA {
+		t.Fatalf("tokens no independientes: A=%d B=%d", tokA, tokB)
+	}
+
+	// Llega tarde el fallo sucio de A.
+	updated, _ := m.Update(worktreeRemovedMsg{
+		parent: "/tmp/pa", wtPath: "/tmp/pa-wt", name: "pa-wt",
+		err: "fatal: sucio A", gen: tokA,
+	})
+	m = updated.(Model)
+
+	if m.running["/tmp/pa"] != "" {
+		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
+	}
+	if m.running["/tmp/pb"] != "worktree_remove" {
+		t.Errorf("el intento de B se alteró: %q", m.running["/tmp/pb"])
+	}
+	if _, ok := m.removeTokens["/tmp/pa"]; ok {
+		t.Errorf("token de A no consumido: %v", m.removeTokens)
+	}
+	if m.removeTokens["/tmp/pb"] != tokB {
+		t.Errorf("token de B alterado: %v", m.removeTokens)
+	}
+	// El desenlace de A se maneja: fallo sucio → armado de forzado sobre A.
+	if m.armed == nil || !m.armed.force || m.armed.name != "pa-wt" {
+		t.Errorf("desenlace de A no aplicado: %+v", m.armed)
+	}
+
+	// El resultado de B sigue resolviéndose con normalidad.
+	updated, _ = m.Update(worktreeRemovedMsg{
+		parent: "/tmp/pb", wtPath: "/tmp/pb-wt", name: "pb-wt", gen: tokB,
+	})
+	m = updated.(Model)
+	if m.running["/tmp/pb"] != "" {
+		t.Errorf("fuga de running en B tras el éxito: %q", m.running["/tmp/pb"])
+	}
+	if _, ok := m.removeTokens["/tmp/pb"]; ok {
+		t.Errorf("token de B no consumido: %v", m.removeTokens)
+	}
+}
+
+// esc cancela A y después se lanza B en otro padre: el resultado tardío de A
+// no debe fugar el running de A ni tocar el intento de B.
+func TestRemoveWorktreeEscThenOtherParentNoLeak(t *testing.T) {
+	m := twoParentModel(t)
+
+	m.cursor = 1
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+	tokA := m.removeTokens["/tmp/pa"]
+	if tokA == 0 {
+		t.Fatalf("A no quedó en vuelo: %v", m.removeTokens)
+	}
+
+	m, _ = press(m, "esc") // cancelación definitiva de A
+	if len(m.removeTokens) != 0 {
+		t.Fatalf("esc no limpió los tokens: %v", m.removeTokens)
+	}
+
+	m.cursor = 3
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+	tokB := m.removeTokens["/tmp/pb"]
+	if tokB == 0 {
+		t.Fatalf("B no quedó en vuelo: %v", m.removeTokens)
+	}
+
+	// Llega tarde el resultado de A (cancelado): libera su running y no toca B.
+	updated, _ := m.Update(worktreeRemovedMsg{
+		parent: "/tmp/pa", wtPath: "/tmp/pa-wt", name: "pa-wt",
+		err: "fatal: sucio A", gen: tokA,
+	})
+	m = updated.(Model)
+
+	if m.running["/tmp/pa"] != "" {
+		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
+	}
+	if m.running["/tmp/pb"] != "worktree_remove" {
+		t.Errorf("el intento de B se alteró: %q", m.running["/tmp/pb"])
+	}
+	if m.removeTokens["/tmp/pb"] != tokB {
+		t.Errorf("token de B alterado: %v", m.removeTokens)
+	}
+	if m.armed != nil {
+		t.Errorf("un resultado cancelado no debe armar: %+v", m.armed)
+	}
+}
+
+// matches normaliza los paths: barras finales, `./` y duplicadas no impiden
+// reconocer el mismo worktree.
+func TestRemoveWorktreeArmedMatchesNormalization(t *testing.T) {
+	a := armedRemoval{parent: "/tmp/p", wtPath: "/tmp/p/wt"}
+	cases := []struct {
+		parent, wtPath string
+		want           bool
+	}{
+		{"/tmp/p", "/tmp/p/wt", true},
+		{"/tmp/p/", "/tmp/p/wt/", true},
+		{"/tmp/p/.", "/tmp/p/./wt", true},
+		{"/tmp/p", "/tmp/p//wt", true},
+		{"/tmp/other", "/tmp/p/wt", false},
+		{"/tmp/p", "/tmp/p/otro", false},
+	}
+	for _, tc := range cases {
+		if got := a.matches(tc.parent, tc.wtPath); got != tc.want {
+			t.Errorf("matches(%q, %q) = %v, want %v", tc.parent, tc.wtPath, got, tc.want)
+		}
+	}
+	// Un worktree con el mismo basename bajo otro padre no matchea.
+	b := armedRemoval{parent: "/tmp/p2", wtPath: "/tmp/p2/wt"}
+	if b.matches("/tmp/p", "/tmp/p/wt") {
+		t.Error("matches cruzó padres distintos")
 	}
 }
