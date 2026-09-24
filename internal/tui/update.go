@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -38,6 +39,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.states[msg.path] = msg.snap
 		delete(m.running, msg.path)
+		// La sub-fila de un worktree borrado desaparece: el cursor debe
+		// quedar en rango.
+		m.clampCursor()
 		return m.withPump(nil)
 
 	case collectDoneMsg:
@@ -82,6 +86,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toasts.showError(note)
 		} else {
 			m.toasts.showSuccess(note)
+		}
+		return m.withPump(nil)
+
+	case worktreeRemovedMsg:
+		tok, inflight := m.removeTokens[msg.parent]
+		switch {
+		case inflight && msg.gen == tok:
+			// Intento vigente de este padre: se consume el token y se libera el
+			// running si sigue siendo el del borrado.
+			delete(m.removeTokens, msg.parent)
+			if m.running[msg.parent] == "worktree_remove" {
+				delete(m.running, msg.parent)
+			}
+		case !inflight:
+			// Sin intento registrado (cancelado con esc): se libera el running
+			// residual y se descarta el resultado sin tocar banner ni toast.
+			if m.running[msg.parent] == "worktree_remove" {
+				delete(m.running, msg.parent)
+			}
+			return m.withPump(nil)
+		default:
+			// Token distinto: el intento fue sustituido, así que el resultado
+			// es obsoleto. Ocurre cuando un statusMsg de fondo (scan/fetch)
+			// libera running[parent] con un borrado aún en vuelo: el usuario
+			// relanza (t2) y sobrescribe removeTokens[parent]; cuando llega el
+			// resultado de t1 hay que ignorarlo. NO se libera running[parent]
+			// porque ahora pertenece al intento nuevo (t2), ni se muta el
+			// banner.
+			return m.withPump(nil)
+		}
+		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", output: msg.output, err: msg.err}
+		// La mutación del estado armado solo aplica si este sigue apuntando al
+		// mismo worktree (o está vacío): un armado posterior sobre otro
+		// worktree no se pisa con el resultado tardío.
+		targetsArmed := m.armed == nil || m.armed.matches(msg.parent, msg.wtPath)
+		if msg.err == "" {
+			if targetsArmed {
+				m.armed = nil
+			}
+			m.toasts.showSuccess("worktree removed " + msg.name)
+			return m.withPump(nil)
+		}
+		m.toasts.showError(fmt.Sprintf("worktree remove failed %s: %s", msg.name, msg.err))
+		if !targetsArmed {
+			return m.withPump(nil)
+		}
+		if msg.force {
+			// El forzado también falló: se desarma para no entrar en bucle.
+			m.armed = nil
+		} else {
+			// Primer intento fallido (worktree sucio): se arma el forzado para
+			// la siguiente pulsación.
+			m.armed = &armedRemoval{
+				wtPath: msg.wtPath, parent: msg.parent,
+				name: msg.name, force: true,
+			}
 		}
 		return m.withPump(nil)
 
@@ -164,6 +224,31 @@ func (m *Model) clampCursor() {
 // se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// esc cancela de forma definitiva TODOS los borrados en vuelo, no solo uno:
+	// limpia el mapa completo de tokens para que cualquier resultado tardío se
+	// descarte sin re-armar el forzado ni tocar el banner (su running residual
+	// se libera al llegar el resultado). El esc sigue su curso normal (cerrar
+	// detalle, etc.).
+	if key == "esc" && len(m.removeTokens) > 0 {
+		clear(m.removeTokens)
+	}
+
+	// Confirmación armada de borrado de worktree: tiene prioridad sobre el
+	// resto (incluido el esc que cierra el detalle y los inputs de
+	// búsqueda/comando). Cualquier tecla distinta de la acción de borrado y de
+	// esc desarma y sigue su curso normal.
+	if m.armed != nil {
+		switch {
+		case m.actionForKey(key) == "worktree_remove":
+			return m.handleWorktreeRemove()
+		case key == "esc":
+			m.armed = nil
+			return m, nil
+		default:
+			m.armed = nil
+		}
+	}
 
 	if m.cmdOpen { // modo comando del detalle: prioridad sobre todo
 		switch key {
@@ -344,6 +429,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		m.saveCollapsed()
 		return m, nil
+	case "worktree_remove":
+		return m.handleWorktreeRemove()
 	case "detail":
 		entries := m.entries()
 		if len(entries) > 0 && m.cursor < len(entries) {
@@ -382,6 +469,57 @@ func (m Model) actionForKey(key string) string {
 		}
 	}
 	return ""
+}
+
+// handleWorktreeRemove gestiona la acción de borrado de worktree. Solo actúa
+// sobre una sub-fila de worktree con padre válido; si el cursor no está en una,
+// avisa y no arma nada. Sobre una sub-fila válida: si ya hay una confirmación
+// armada sobre esa misma sub-fila, ejecuta el borrado con el nivel de forzado
+// armado; si no, arma la confirmación normal. La rama del worktree nunca se
+// toca.
+func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
+	e, ok := m.selectedEntry()
+	if !ok || e.kind != kindWorktree || e.parent == "" || e.wt.Path == "" {
+		m.armed = nil
+		return m, m.toastCmd(toastInfo, "select a worktree")
+	}
+	if m.armed != nil && m.armed.matches(e.parent, e.wt.Path) {
+		// Segunda pulsación sobre la misma sub-fila: si el padre está libre, se
+		// lanza el borrado con el nivel de forzado armado; el banner se limpia
+		// mientras la acción está en vuelo y se marca el token del intento.
+		if cmd := m.busyActionCmd(m.armed.parent); cmd != nil {
+			return m, cmd // el armado no se rompe: no se toca
+		}
+		armed := *m.armed
+		m.removeGen++
+		if m.removeTokens == nil {
+			m.removeTokens = map[string]int{}
+		}
+		m.removeTokens[armed.parent] = m.removeGen
+		m.armed = nil
+		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
+	}
+	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
+	// un worktree distinto al que se armó.
+	m.armed = &armedRemoval{
+		wtPath: e.wt.Path,
+		parent: e.parent,
+		name:   filepath.Base(e.wt.Path),
+	}
+	return m, nil
+}
+
+// removePrompt compone el aviso persistente de la confirmación armada. La
+// tecla mostrada es la configurada para la acción.
+func (m Model) removePrompt() string {
+	if m.armed == nil {
+		return ""
+	}
+	key := m.cfg.KeyFor("worktree_remove")
+	if m.armed.force {
+		return fmt.Sprintf("remove worktree %s? has changes — %s to force, esc to cancel", m.armed.name, key)
+	}
+	return fmt.Sprintf("remove worktree %s? %s to confirm, esc to cancel", m.armed.name, key)
 }
 
 // View compone la pantalla: dashboard o detalle, con el overlay de toasts en

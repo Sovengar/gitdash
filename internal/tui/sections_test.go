@@ -66,7 +66,7 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 
 // Terminal baja degrada secciones en orden antes de romper el layout.
 func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
-	lay := computeLayout(40, false, false, 3)
+	lay := computeLayout(40, false, false, 3, false)
 	if !lay.showStats || !lay.showKeybinds || lay.hintLines != 3 {
 		t.Errorf("altura amplia: %+v, want todo visible", lay)
 	}
@@ -76,7 +76,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 
 	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
 	// HintBarLines)
-	pocas := computeLayout(40, false, false, 1)
+	pocas := computeLayout(40, false, false, 1, false)
 	if pocas.hintLines != 1 {
 		t.Errorf("hintBarLines=1: hintLines = %d, want 1", pocas.hintLines)
 	}
@@ -85,25 +85,36 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 
 	// altura intermedia: se recortan las hints antes de ocultar secciones
-	mid := computeLayout(10, false, false, 3)
+	mid := computeLayout(10, false, false, 3, false)
 	if mid.hintLines != 1 || !mid.showKeybinds {
 		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
 	}
 
 	// más baja: keybinds fuera, stats aún visible
-	baja := computeLayout(9, false, false, 3)
+	baja := computeLayout(9, false, false, 3, false)
 	if baja.showKeybinds || !baja.showStats {
 		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
 	}
 
 	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, 3)
+		l := computeLayout(h, false, false, 3, false)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
 		if h <= 6 && l.showStats {
 			t.Errorf("h=%d: stats visible en terminal demasiado baja: %+v", h, l)
+		}
+	}
+
+	// con keepStats (aviso persistente armado), stats nunca se oculta.
+	for h := 0; h <= 8; h++ {
+		l := computeLayout(h, false, false, 3, true)
+		if !l.showStats {
+			t.Errorf("h=%d con keepStats: stats oculta: %+v", h, l)
+		}
+		if l.bodyLines < 1 {
+			t.Errorf("h=%d con keepStats: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
 	}
 }
@@ -392,5 +403,32 @@ func TestToastsExpiranConElTick(t *testing.T) {
 	m = updated.(Model)
 	if len(m.toasts.toasts) != 0 {
 		t.Errorf("el toast no expiró con el tick: %d vivos", len(m.toasts.toasts))
+	}
+}
+
+// El trabajo en curso de borrado de worktree aparece en el indicador de
+// actividad de stats.
+func TestRemoveWorktreeRunningVisibleInStats(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	m.running[p.Path] = "worktree_remove"
+
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "worktree_remove") {
+		t.Errorf("el borrado en curso no se muestra en stats:\n%s", out)
+	}
+}
+
+// En una terminal baja, el prompt de confirmación sigue visible aunque stats se
+// ocultaría sin el estado armado.
+func TestRemoveWorktreeBannerVisibleInShortTerminal(t *testing.T) {
+	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	m.height = 6 // sin keepStats, stats se oculta a esta altura
+
+	if strings.Contains(stripANSI(m.View().Content), "remove worktree") {
+		t.Fatal("precondición: sin armado no debe verse el prompt")
+	}
+
+	m, _ = press(m, "D")
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "remove worktree wt-a? D to confirm") {
+		t.Errorf("el prompt no es visible en terminal baja:\n%s", out)
 	}
 }

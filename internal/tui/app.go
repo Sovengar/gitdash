@@ -59,6 +59,17 @@ type actionMsg struct {
 	err                string
 }
 
+// worktreeRemovedMsg entrega el resultado de borrar un worktree: el nombre
+// visible, la salida combinada y el motivo real de git si falló. gen es el
+// token del intento: los resultados cuyo token ya no es el vigente se
+// descartan (se canceló con esc o fueron sustituidos).
+type worktreeRemovedMsg struct {
+	parent, wtPath, name string
+	output, err          string
+	force                bool
+	gen                  int
+}
+
 // execDoneMsg marca la vuelta de un proceso con handoff de terminal:
 // editor, lazygit (tecla g) o shell interactiva (tecla !, vacío).
 type execDoneMsg struct {
@@ -83,6 +94,23 @@ type tickMsg struct{}
 // actionResult guarda la salida de la última acción por repo.
 type actionResult struct {
 	kind, output, err string
+}
+
+// armedRemoval es la confirmación pendiente de borrado de un worktree (nil =
+// sin confirmación). Un único nivel de estado cubre los dos escalones: normal
+// y forzado (force=true).
+type armedRemoval struct {
+	wtPath string
+	parent string
+	name   string // basename visible del worktree
+	force  bool
+}
+
+// matches reporta si la confirmación apunta al mismo worktree (parent + path),
+// comparando paths normalizados.
+func (a armedRemoval) matches(parent, wtPath string) bool {
+	return filepath.Clean(a.parent) == filepath.Clean(parent) &&
+		filepath.Clean(a.wtPath) == filepath.Clean(wtPath)
 }
 
 // Model es el modelo raíz de la TUI.
@@ -118,6 +146,18 @@ type Model struct {
 	lastAction  map[string]actionResult
 
 	toasts toastManager
+
+	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
+	// Es estado efímero de sesión: no se persiste.
+	armed *armedRemoval
+	// removeGen/removeTokens correlacionan cada borrado en vuelo con su
+	// resultado. removeTokens mapea path del repo padre → token del intento
+	// vigente (el guard de "acción en curso" es por padre, así que el token
+	// también). removeGen es el contador monótono que los genera; un resultado
+	// cuyo token ya no es el vigente se descarta (cancelado con esc o
+	// sustituido).
+	removeGen    int
+	removeTokens map[string]int
 
 	detailOpen    bool
 	width, height int
@@ -158,6 +198,8 @@ func New(cfg config.Config) Model {
 		lastCmd:     map[string]cmdResult{},
 		collapsed:   map[string]bool{},
 		expanded:    map[string]bool{},
+
+		removeTokens: map[string]int{},
 	}
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
@@ -369,6 +411,50 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		sendEvent(appCtx, events, actionMsg{path: path, kind: kind, output: out, err: errStr})
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
+		}
+	}()
+	return nil
+}
+
+// busyActionCmd devuelve el toast de "ya hay una acción en curso" en el repo,
+// o nil si está libre.
+func (m *Model) busyActionCmd(path string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	return nil
+}
+
+// removeWorktreeCmd lanza el borrado de un worktree desde el repo padre.
+// Replica el patrón de startActionCmd: guard de acción en curso por path del
+// padre, goroutine con timeout, y tras el éxito publica además el snapshot del
+// padre para que la sub-fila desaparezca. No usa recollectCmd porque su guard
+// chocaría con el flag running de esta propia acción. token correlaciona el
+// resultado con el intento que lo lanzó.
+func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, token int) tea.Cmd {
+	if cmd := m.busyActionCmd(parent); cmd != nil {
+		return cmd
+	}
+	m.running[parent] = "worktree_remove"
+	appCtx := m.ctx
+	events := m.events
+	syncBranch := m.syncOf(parent)
+	go func() {
+		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
+		defer cancel()
+		out, err := gitstatus.RemoveWorktree(ctx, parent, wtPath, withForce)
+		errStr := ""
+		if err != nil {
+			// El error del proceso es "exit status 1"; el motivo real está en
+			// la salida combinada de git.
+			errStr = gitstatus.FailureReason(out, err)
+		}
+		sendEvent(appCtx, events, worktreeRemovedMsg{
+			parent: parent, wtPath: wtPath, name: name,
+			output: out, err: errStr, force: withForce, gen: token,
+		})
+		if err == nil {
+			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch)})
 		}
 	}()
 	return nil

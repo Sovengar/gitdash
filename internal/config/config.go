@@ -179,6 +179,8 @@ func DefaultKeybindings() Keybindings {
 		"command":   "!",
 		"update":    "u",
 		"expand":    "space", // toggle de expansión de worktrees
+		// Borrado de un worktree desde su sub-fila (nunca la rama).
+		"worktree_remove": "D",
 	}
 }
 
@@ -281,6 +283,8 @@ var hintLabels = map[string]string{
 	"update":    "u update",
 	"expand":    "expand",
 	"quit":      "q quit",
+	// acción de borrado de worktree: la tecla la antepone HintBarLines.
+	"worktree_remove": "remove wt",
 }
 
 // HintBarLines devuelve las líneas de hints agrupadas por categoría,
@@ -294,7 +298,7 @@ func (c Config) HintBarLines() []string {
 	for _, action := range []string{
 		"dirty", "search", "fetch", "fetch_all", "sync",
 		"pull", "push", "lazygit", "update", "editor", "rescan", "recollect",
-		"fold", "expand", "detail", "command", "quit",
+		"fold", "expand", "detail", "command", "quit", "worktree_remove",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {

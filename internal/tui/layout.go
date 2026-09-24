@@ -26,8 +26,11 @@ type layout struct {
 // defaultHintLines→0), ocultar keybinds, ocultar stats y, por último,
 // garantizar bodyLines >= 1. hintBarLines es el número real de líneas de hints
 // (config): la reserva de keybinds nunca pide más de las que se van a pintar.
-// Seguro con height = 0 (primer render antes de WindowSizeMsg).
-func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int) layout {
+// keepStats fuerza que la sección de stats siga visible aunque el alto sea
+// mínimo (para que un aviso persistente —el prompt de confirmación de borrado—
+// no desaparezca). Seguro con height = 0 (primer render antes de
+// WindowSizeMsg).
+func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int, keepStats bool) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
@@ -58,7 +61,7 @@ func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int) lay
 	if hint == 0 {
 		showKeybinds = false
 	}
-	if height-fixed() < 1 {
+	if !keepStats && height-fixed() < 1 {
 		showStats = false
 	}
 

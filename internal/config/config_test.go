@@ -147,3 +147,30 @@ expand = "w"
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 }
+
+// El borrado de worktree tiene default `D` y es reconfigurable.
+func TestDefaultKeybindingsWorktreeRemove(t *testing.T) {
+	cfg := Defaults()
+	if cfg.KeyFor("worktree_remove") != "D" {
+		t.Errorf("default worktree_remove = %q, want D", cfg.KeyFor("worktree_remove"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "D remove wt") {
+		t.Errorf("hint de borrado ausente: %v", cfg.HintBarLines())
+	}
+
+	// Rebind via config.toml.
+	path := write(t, `
+[keybindings]
+worktree_remove = "W"
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warn inesperado: %q", warn)
+	}
+	if cfg.KeyFor("worktree_remove") != "W" {
+		t.Errorf("worktree_remove = %q, want W", cfg.KeyFor("worktree_remove"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "W remove wt") {
+		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+	}
+}

@@ -199,6 +199,21 @@ func Sync(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, args...)
 }
 
+// RemoveWorktree borra un worktree registrado ejecutando
+// `git worktree remove [--force] <path>` desde repoDir (el repo principal,
+// que es donde git admite el comando). withForce permite borrar worktrees con
+// cambios sin commitear. Devuelve la salida combinada + error, igual que
+// pull/push: el caller resume el motivo con FailureReason. La rama del worktree
+// nunca se toca.
+func RemoveWorktree(ctx context.Context, repoDir, wtPath string, withForce bool) (string, error) {
+	args := []string{"worktree", "remove"}
+	if withForce {
+		args = append(args, "--force")
+	}
+	args = append(args, wtPath)
+	return runGitCombined(ctx, repoDir, args...)
+}
+
 // gitEnv devuelve el entorno para los subprocess de git forzando mensajes en
 // inglés (LC_ALL=C). El porcelain no depende del idioma, pero los mensajes de
 // error sí: sin esto la UI no puede reconocer fallos concretos (diverged, sin

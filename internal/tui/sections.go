@@ -19,9 +19,11 @@ func (m Model) section(title, content string) string {
 	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, m.width)
 }
 
-// layout calcula el reparto de alto para el estado actual del modelo.
+// layout calcula el reparto de alto para el estado actual del modelo. Con una
+// confirmación de borrado armada se fuerza la visibilidad de stats para que el
+// prompt no desaparezca en terminales bajas.
 func (m Model) layout() layout {
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()))
+	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()), m.armed != nil)
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
@@ -46,9 +48,14 @@ func (m Model) compose(lay layout, middle string) string {
 // resumen. El propio indicador ya nombra las acciones en curso, así que no se
 // duplican aparte.
 func (m Model) statsSection() string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if activity := m.activityIndicator(); activity != "" {
 		parts = append(parts, activity)
+	}
+	if m.armed != nil {
+		// Aviso persistente de confirmación: sobrevive hasta la segunda
+		// pulsación o la cancelación (los toasts expiran a los 3 s).
+		parts = append(parts, styleWarn.Render(m.removePrompt()))
 	}
 	total, dirty, ahead, behind := m.summary()
 	summary := fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind)
@@ -84,7 +91,7 @@ func (m Model) activityIndicator() string {
 func (m Model) runningActions() []string {
 	paths := make([]string, 0, len(m.running))
 	for path, kind := range m.running {
-		if kind == "pull" || kind == "push" || kind == "sync" {
+		if kind == "pull" || kind == "push" || kind == "sync" || kind == "worktree_remove" {
 			paths = append(paths, path)
 		}
 	}
