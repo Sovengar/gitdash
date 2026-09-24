@@ -207,6 +207,71 @@ func TestOverlayToastMultilinea(t *testing.T) {
 	}
 }
 
+// En terminales estrechas el toast se re-envuelve (no se trunca): el hint
+// accionable sigue visible.
+func TestToastReEnvuelveEnAnchoEstrecho(t *testing.T) {
+	var tm toastManager
+	tm.showError("pull failed diverged-node: fatal: Not possible to fast-forward — diverged? pull --rebase manual")
+	blocks := tm.blocksFor(40)
+	for i, l := range blocks[0] {
+		if w := ansi.StringWidth(l); w > 40 {
+			t.Errorf("línea %d ancho = %d > 40", i, w)
+		}
+	}
+	plano := collapse(strings.Join(blocks[0], "\n"))
+	if !strings.Contains(plano, "pull --rebase manual") {
+		t.Errorf("el hint accionable se perdió al re-envolver:\n%s", plano)
+	}
+}
+
+// Un toast más alto que el hueco disponible dibuja sus últimas líneas en vez de
+// desaparecer.
+func TestOverlayBloqueMasAltoQueHueco(t *testing.T) {
+	base := strings.Join([]string{"l0", "l1", "l2"}, "\n")
+	block := []string{"t0", "t1", "t2", "t3", "t4"}
+	out := overlayToasts(base, [][]string{block}, 20, 3, 0)
+	lines := strings.Split(out, "\n")
+	plano := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(plano, "t4") {
+		t.Errorf("no se dibujó el cierre del toast:\n%s", plano)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w > 20 {
+			t.Errorf("línea %d ancho = %d > 20", i, w)
+		}
+	}
+}
+
+// wrapText siempre avanza, incluso con maxWidth menor que una runa ancha
+// (evita bucle infinito).
+func TestWrapTextAnchoMenorQueRuna(t *testing.T) {
+	lines := wrapText("日本語", 1)
+	if got := collapse(strings.Join(lines, "")); got != "日本語" {
+		t.Errorf("se perdió texto: %q", got)
+	}
+}
+
+// Un mensaje con saltos de línea (p.ej. err.Error() multilínea) se dibuja como
+// varias líneas del bloque sin romper el splice por líneas.
+func TestToastConSaltosDeLineaNoRompeSplice(t *testing.T) {
+	var tm toastManager
+	tm.showError("fatal: primera\r\nsegunda línea")
+	blocks := tm.blocksFor(60)
+	if len(blocks[0]) != 2 {
+		t.Fatalf("líneas = %d, want 2 (una por salto)", len(blocks[0]))
+	}
+	out := overlayToasts(strings.Join(sliceOf(pad("x", 60), 6), "\n"), blocks, 60, 6, 2)
+	for i, l := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(l); w != 60 {
+			t.Errorf("línea %d ancho = %d, want 60", i, w)
+		}
+	}
+	plano := collapse(out)
+	if !strings.Contains(plano, "primera") || !strings.Contains(plano, "segunda") {
+		t.Errorf("se perdió texto del mensaje multilínea:\n%s", plano)
+	}
+}
+
 // sliceOf repite s n veces.
 func sliceOf(s string, n int) []string {
 	out := make([]string, n)
