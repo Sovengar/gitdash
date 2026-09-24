@@ -40,25 +40,51 @@ func (m Model) compose(lay layout, middle string) string {
 	return strings.Join(sections, "\n")
 }
 
-// statsSection resume el estado global: contadores, flags, spinner de
-// scan/fetch e indicadores de acciones en curso.
+// statsSection resume el estado global. El indicador compacto de actividad va
+// primero para que sobreviva al recorte en anchos estrechos; después el
+// resumen y, por último, los nombres de las acciones en curso.
 func (m Model) statsSection() string {
+	parts := make([]string, 0, 4)
+	if activity := m.activityIndicator(); activity != "" {
+		parts = append(parts, activity)
+	}
 	total, dirty, ahead, behind := m.summary()
-	content := styleBar.Render(fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind))
+	summary := fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind)
 	if m.onlyDirty {
-		content += styleWarn.Render(" [dirty]")
+		summary += " [dirty]"
 	}
-	if m.scanning {
-		content += " " + m.spinner.View() + " scanning"
-	} else if m.fetchingAll() {
-		content += " " + m.spinner.View() + " fetching"
-	}
+	parts = append(parts, styleBar.Render(summary))
 	for path, kind := range m.running {
 		if kind == "pull" || kind == "push" || kind == "sync" {
-			content += styleFetchRun.Render(fmt.Sprintf("  %s %s…", kind, m.nameOf(path)))
+			parts = append(parts, styleFetchRun.Render(fmt.Sprintf("%s %s…", kind, m.nameOf(path))))
 		}
 	}
-	return m.section("gitdash", content)
+	return m.section("gitdash", strings.Join(parts, "  "))
+}
+
+// activityIndicator es el indicador compacto de "algo en curso": scan, fetch o
+// una acción pull/push/sync.
+func (m Model) activityIndicator() string {
+	switch {
+	case m.scanning:
+		return m.spinner.View() + " scanning"
+	case m.fetchingAll():
+		return m.spinner.View() + " fetching"
+	case m.runningAction():
+		return m.spinner.View() + " working"
+	default:
+		return ""
+	}
+}
+
+// runningAction reporta si hay algún pull/push/sync en curso.
+func (m Model) runningAction() bool {
+	for _, kind := range m.running {
+		if kind == "pull" || kind == "push" || kind == "sync" {
+			return true
+		}
+	}
+	return false
 }
 
 // filterSection muestra el input de búsqueda en vivo o el filtro confirmado.

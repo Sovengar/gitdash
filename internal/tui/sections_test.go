@@ -196,6 +196,42 @@ func TestDetalleTituloIdentificaRepo(t *testing.T) {
 	}
 }
 
+// El indicador de actividad sobrevive a anchos estrechos (va primero en stats).
+func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m.width = 40
+	m.running["/tmp/old-clean"] = "pull"
+
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "working") {
+		t.Errorf("el indicador de acción en curso no sobrevive a width=40:\n%s", out)
+	}
+	for i, l := range strings.Split(m.View().Content, "\n") {
+		if w := ansi.StringWidth(l); w != m.width {
+			t.Errorf("línea %d ancho = %d, want %d", i, w, m.width)
+		}
+	}
+}
+
+// El fallo de una acción conserva el hint accionable en el toast renderizado,
+// incluso cuando el mensaje excede el ancho máximo del toast.
+func TestToastDeFalloConHintVisible(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	updated, _ := m.Update(actionMsg{
+		path: "/tmp/old-clean", kind: "pull",
+		output: "fatal: Not possible to fast-forward, aborting.",
+		err:    "exit 1",
+	})
+	m = updated.(Model)
+
+	rendered := collapse(strings.Join(m.toasts.lines(), "\n"))
+	if !strings.Contains(rendered, "pull --rebase manual") {
+		t.Errorf("el hint no queda visible en el toast renderizado:\n%s", rendered)
+	}
+}
+
 // La línea de notificación permanente ya no existe.
 func TestSinLineaPermanenteDeNotificacion(t *testing.T) {
 	projects, states := fixtureProjects()
