@@ -1,4 +1,4 @@
-// Estilos lipgloss del dashboard (spec 0001 R6).
+// Estilos lipgloss del dashboard.
 package tui
 
 import "charm.land/lipgloss/v2"
@@ -6,7 +6,7 @@ import "charm.land/lipgloss/v2"
 // lipglossStyle alias corto para las firmas de las celdas.
 type lipglossStyle = lipgloss.Style
 
-// anchos de columna de la tabla (R6; 0004 R25: todo ancho > longitud de
+// anchos de columna de la tabla (todo ancho > longitud de
 // su header para que pad() garantice separador entre columnas).
 const (
 	colName     = 26
@@ -34,17 +34,17 @@ var (
 	styleFetchRun = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	styleFetchBad = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	styleBar        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleHint       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleBar       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleHint      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	styleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	styleSel        = lipgloss.NewStyle().Bold(true)
+	styleSel       = lipgloss.NewStyle().Bold(true)
 
-	// 0002 R16: header de grupo (vroom R24)
+	// Header de grupo (vroom)
 	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	// 0003 R20: header secundario (nivel 2, menos protagonista)
+	// Header secundario (nivel 2, menos protagonista)
 	styleSecondaryHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
-	// 0006 R34: sub-fila de worktree (indentada, distinta de repo/header)
+	// Sub-fila de worktree (indentada, distinta de repo/header)
 	styleWorktree = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
 	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))

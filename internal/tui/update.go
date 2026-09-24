@@ -45,12 +45,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case collectDoneMsg:
 		m.scanning = false
 		cmds := []tea.Cmd{}
-		// cache best-effort al final de cada rescan (R11)
+		// cache best-effort al final de cada rescan
 		if path, err := cache.Path(); err == nil {
 			projects := m.projects
 			go cache.Save(path, projects)
 		}
-		// fetch automático en batches (S8.1)
+		// fetch automático en batches
 		if m.cfg.FetchAuto {
 			if c := m.fetchBatchCmd(m.fetchTargets()); c != nil {
 				cmds = append(cmds, c)
@@ -80,17 +80,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		delete(m.running, msg.path)
 		m.lastAction[msg.path] = actionResult{kind: msg.kind, output: msg.output, err: msg.err}
-		name := m.nameOf(msg.path)
-		note := fmt.Sprintf("%s ok %s", msg.kind, name)
-		if msg.err != "" {
-			hint := ""
-			if msg.kind == "pull" &&
-				(strings.Contains(msg.err, "divergent") || strings.Contains(msg.err, "Not possible to fast-forward")) {
-				hint = " — diverged? pull --rebase manual" // S9.2
-			}
-			note = fmt.Sprintf("%s failed %s%s", msg.kind, name, hint)
-		}
-		return m.withPump(m.notifyCmd(note))
+		return m.withPump(m.notifyCmd(actionNote(msg.kind, m.nameOf(msg.path), msg.output, msg.err)))
 
 	case execDoneMsg:
 		delete(m.running, msg.path)
@@ -125,6 +115,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // (los Cmds leen UN evento cada vez: sin esto los estados nunca llegan).
 func (m Model) withPump(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, waitForEvent(m.events))
+}
+
+// actionNote compone la notificación de una acción terminada (pull/push/sync).
+// En el fallo incluye el motivo real de git (errStr, ya resumido) y, cuando se
+// reconoce, un hint accionable; la salida completa queda en el detalle.
+func actionNote(kind, name, output, errStr string) string {
+	if errStr == "" {
+		return fmt.Sprintf("%s ok %s", kind, name)
+	}
+	hint := ""
+	if kind == "pull" || kind == "sync" {
+		switch {
+		case strings.Contains(output, "Not possible to fast-forward"),
+			strings.Contains(output, "divergent"):
+			hint = " — diverged? pull --rebase manual"
+		case strings.Contains(errStr, "no tracking information"),
+			strings.Contains(errStr, "no upstream"):
+			hint = " — no upstream; set it with git branch --set-upstream-to"
+		}
+	}
+	return fmt.Sprintf("%s failed %s: %s%s", kind, name, errStr, hint)
 }
 
 // fetchingAll reporta si hay algún fetch en curso (para el spinner).
@@ -184,21 +195,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.searchActive = false
 			m.searchInput.Blur()
-			m.search = strings.TrimSpace(m.searchInput.Value()) // S7.2 confirmar
+			m.search = strings.TrimSpace(m.searchInput.Value()) // confirmar
 			m.clampCursor()
 			return m, nil
 		case "esc":
 			m.searchActive = false
 			m.searchInput.Blur()
 			if strings.TrimSpace(m.searchInput.Value()) == "" {
-				m.search = "" // S7.2: esc en input vacío limpia el filtro
+				m.search = "" // esc en input vacío limpia el filtro
 			}
 			m.clampCursor()
 			return m, nil
 		default:
 			in, cmd := m.searchInput.Update(msg)
 			m.searchInput = in
-			m.search = strings.TrimSpace(m.searchInput.Value()) // S7.2 en vivo
+			m.search = strings.TrimSpace(m.searchInput.Value()) // en vivo
 			m.clampCursor()
 			return m, cmd
 		}
@@ -211,7 +222,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		if m.detailOpen {
-			m.detailOpen = false // S10.1
+			m.detailOpen = false
 		}
 		return m, nil
 	case "up", "k":
@@ -233,7 +244,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch action {
 	case "dirty":
-		m.onlyDirty = !m.onlyDirty // S7.1
+		m.onlyDirty = !m.onlyDirty
 		m.clampCursor()
 	case "search":
 		m.searchActive = true
@@ -242,21 +253,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "fetch":
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
-				return m, m.notifyCmd("no git repo — nothing to do") // S9.6
+				return m, m.notifyCmd("no git repo — nothing to do")
 			}
-			return m, m.fetchBatchCmd([]string{r.project.Path}) // S8.5
+			return m, m.fetchBatchCmd([]string{r.project.Path})
 		}
 	case "fetch_all":
 		paths := m.fetchTargets()
 		if len(paths) == 0 {
 			return m, m.notifyCmd("no repositories with upstream to fetch")
 		}
-		return m, m.fetchBatchCmd(paths) // S8.5
+		return m, m.fetchBatchCmd(paths)
 	case "pull":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.notifyCmd("no git repo — nothing to do") // S9.6
+			return m, m.notifyCmd("no git repo — nothing to do")
 		} else if ok {
-			return m, m.startActionCmd(r.project.Path, "pull") // S9.1
+			return m, m.startActionCmd(r.project.Path, "pull")
 		}
 	case "sync":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
@@ -268,17 +279,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.notifyCmd("no git repo — nothing to do")
 		} else if ok {
-			return m, m.startActionCmd(r.project.Path, "push") // S9.3
+			return m, m.startActionCmd(r.project.Path, "push")
 		}
 	case "editor":
 		if r, ok := m.selected(); ok {
 			if r.project.MarkerErr != "" {
 				return m, m.notifyCmd("marker error — fix .gitdash.toml first")
 			}
-			return m, m.openEditorCmd(r.project.Path) // S9.4
+			return m, m.openEditorCmd(r.project.Path)
 		}
 	case "lazygit":
-		// 0005: g abre lazygit en el repo bajo el cursor.
+		// G abre lazygit en el repo bajo el cursor.
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
 				return m, m.notifyCmd("no git repo — nothing to do")
@@ -296,15 +307,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.scanning {
 			return m, m.notifyCmd("scan already running")
 		}
-		return m, m.startScanCmd() // S7.3
+		return m, m.startScanCmd()
 	case "recollect":
 		if r, ok := m.selected(); ok {
-			return m, m.recollectCmd(r.project.Path) // S7.4
+			return m, m.recollectCmd(r.project.Path)
 		}
 	case "fold":
-		// 0002 R16/S16.2, 0003 S20.3: plegar/desplegar el contenedor bajo
+		// Plegar/desplegar el contenedor bajo
 		// el cursor (secundario interno para repos, header si es header).
-		// 0006 R39: sobre una sub-fila de worktree es no-op (no debe plegar
+		// sobre una sub-fila de worktree es no-op (no debe plegar
 		// la sección (ungrouped) por accidente).
 		entries := m.entries()
 		if len(entries) == 0 || m.cursor >= len(entries) {
@@ -319,7 +330,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.saveCollapsed()
 		return m, nil
 	case "expand":
-		// 0006 R30: `space` alterna las sub-filas de worktree del repo bajo
+		// `space` alterna las sub-filas de worktree del repo bajo
 		// el cursor. No-op sobre headers de grupo (selected() false), sobre
 		// sub-filas de worktree y sobre repos sin worktrees / no-repo.
 		r, ok := m.selected()
@@ -334,7 +345,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		entries := m.entries()
 		if len(entries) > 0 && m.cursor < len(entries) {
 			switch entries[m.cursor].kind {
-			case kindPrimary, kindSecondary: // R16/R20: enter en header pliega
+			case kindPrimary, kindSecondary: // enter en header pliega
 				g := entries[m.cursor].group
 				m.collapsed[g] = !m.collapsed[g]
 				m.clampCursor()
@@ -343,7 +354,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if _, ok := m.selected(); ok {
-			m.detailOpen = true // S10.1
+			m.detailOpen = true
 		}
 	case "command":
 		// `!` abre el input de comandos del detalle ($SHELL -c capturado;
@@ -370,13 +381,13 @@ func (m Model) actionForKey(key string) string {
 	return ""
 }
 
-// View compone la pantalla: tabla o detalle (R6, R10). El detalle usa la
+// View compone la pantalla: tabla o detalle. El detalle usa la
 // fila viva bajo el cursor; si el filtro la hizo desaparecer, cae a la tabla.
 func (m Model) View() tea.View {
 	content := m.renderDashboard()
 	if m.detailOpen {
 		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
-			// 0006 R33.6: detalle dedicado del worktree (sin inventar estado).
+			// Detalle dedicado del worktree (sin inventar estado).
 			content = m.renderWorktreeDetail(e)
 		} else if r, ok := m.selected(); ok {
 			content = m.renderDetail(r)
@@ -400,7 +411,7 @@ func (m Model) renderDashboard() string {
 		flags += styleWarn.Render(" [dirty]")
 	}
 	if m.searchActive {
-		// S7.2: feedback inmediato al pulsar / — [/|] con cursor sólido y
+		// Feedback inmediato al pulsar / — [/|] con cursor sólido y
 		// placeholder estático (el typewriter animado de bubbles se queda
 		// en el primer carácter sin ticks)
 		in := m.searchInput
@@ -424,7 +435,7 @@ func (m Model) renderDashboard() string {
 		b.WriteString(styleError.Render("roots: "+m.scanNote) + "\n")
 	}
 
-	// cabecera (0004 R25: sin GROUP — los headers plegables ya lo dicen —,
+	// cabecera (sin GROUP — los headers plegables ya lo dicen —,
 	// Work Tree en vez de STATE y ↑↓up explícito; anchos > headers →
 	// siempre hay separador, nunca "ACTIVITYFETCH")
 	header := "  " + pad("NAME", colName) + pad("BRANCH", colBranch) +
@@ -432,7 +443,7 @@ func (m Model) renderDashboard() string {
 		pad("ACTIVITY", colActivity) + pad("FETCH", colFetch)
 	b.WriteString(styleHint.Render(header) + "\n")
 
-	// filas con scroll (headers de grupo incluidos, 0002 R16)
+	// filas con scroll (headers de grupo incluidos)
 	entries := m.entries()
 	// altura del bar: 1 separador + 1 notify/status + 3 hints lines
 	barLines := 4 // separator + 3 hint rows
@@ -489,7 +500,8 @@ func (m Model) renderBar() string {
 
 	left := ""
 	if m.notify != "" {
-		left = styleWarn.Render(m.notify)
+		// truncate ANTES del estilo: el ANSI rompe el cálculo de ancho.
+		left = styleWarn.Render(truncate(m.notify, max(40, m.width)))
 	} else {
 		if m.scanning || m.fetchingAll() {
 			left = m.spinner.View() + " working  "

@@ -1,4 +1,4 @@
-// Modo --print: tabla one-shot sin UI (R12), homenaje a git-statuses.
+// Modo --print: tabla one-shot sin UI, homenaje a git-statuses.
 package main
 
 import (
@@ -22,15 +22,15 @@ type printRow struct {
 	score, lastCommit                                            int
 }
 
-// runPrint ejecuta discovery + recolección (sin fetch) e imprime la tabla
-// (S12.1). Sin repos imprime un mensaje y sale 0 (S12.2).
+// runPrint ejecuta discovery + recolección (sin fetch) e imprime la tabla.
+// Sin repos imprime un mensaje y sale 0.
 func runPrint(cfg config.Config) {
 	projects, err := discovery.Scan(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gitdash:", err)
 	}
 	if len(projects) == 0 {
-		fmt.Println("no repositories found") // S12.2
+		fmt.Println("no repositories found")
 		return
 	}
 
@@ -47,7 +47,7 @@ func runPrint(cfg config.Config) {
 
 	rows := make([]printRow, 0, len(projects))
 	for _, p := range projects {
-		// 0002 R15: worktree plegado bajo su repo principal descubierto
+		// Worktree plegado bajo su repo principal descubierto
 		if p.IsWorktree && p.MainRepo != "" && hasProject(projects, p.MainRepo) {
 			continue
 		}
@@ -84,7 +84,7 @@ func runPrint(cfg config.Config) {
 		})
 	}
 
-	// mismo orden que la TUI: atención-primero, actividad, nombre (R6)
+	// mismo orden que la TUI: atención-primero, actividad, nombre
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].score != rows[j].score {
 			return rows[i].score > rows[j].score
@@ -95,9 +95,9 @@ func runPrint(cfg config.Config) {
 		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
 	})
 
-	// 0004 R25/R29: GROUP se conserva en print (tabla plana, sin headers de
+	// GROUP se conserva en print (tabla plana, sin headers de
 	// grupo); WT = working tree; WTS = contador de worktrees (renombrado
-	// desde WT para liberar la sigla, ver Revisiones); ↑↓up explícito.
+	// desde WT para liberar la sigla); ↑↓up explícito.
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tWT\t↑↓up\tSYNC\tWTS\tACTIVITY\tPATH")
 	for _, r := range rows {
@@ -117,23 +117,23 @@ func hasProject(projects []discovery.Project, path string) bool {
 	return false
 }
 
-// printSync formatea la desviación vs sync branch con la rama visible
-// (0002 R14; 0004 R23/S29.1): `<rama> ↓N`, `<rama>`, `<rama> —`, `—`.
+// printSync formatea la desviación vs sync branch con la rama visible:
+// `<rama> ↓N`, `<rama>`, `<rama> —`, `—`.
 func printSync(snap gitstatus.Snapshot) string {
 	if snap.SyncBranch == "" {
 		return "—"
 	}
 	if !snap.SyncKnown {
-		return snap.SyncBranch + " —" // S23.4: ref inexistente
+		return snap.SyncBranch + " —" // ref inexistente
 	}
 	if snap.SyncBehind == 0 {
-		return snap.SyncBranch // S23.3: rama visible sin tick
+		return snap.SyncBranch // rama visible sin tick
 	}
 	return fmt.Sprintf("%s ↓%d", snap.SyncBranch, snap.SyncBehind)
 }
 
-// printState compone la columna WT del modo print (0004 R26/S29.1): solo
-// working tree — counts o vacío (tabla quieta, R28). Los estados de ciclo
+// printState compone la columna WT del modo print: solo
+// working tree — counts o vacío (tabla quieta). Los estados de ciclo
 // de vida viven en otras columnas: detached en BRANCH, no-up en ↑↓up.
 func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	switch st {
@@ -146,7 +146,7 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	if s.Dirty() == 0 {
 		return ""
 	}
-	// mismo formato que dirtyTail de la TUI (R29): el 0 de tracked se
+	// mismo formato que dirtyTail de la TUI: el 0 de tracked se
 	// omite → solo untracked es "?1", no "0 ?1".
 	var b strings.Builder
 	if s.TrackedChanges > 0 {
@@ -158,7 +158,7 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	return b.String()
 }
 
-// printUpDown compone ↑↓up para print (0004 R27): `no-up` sin upstream
+// printUpDown compone ↑↓up para print: `no-up` sin upstream
 // trackeado, vacío en sync; errores y no-repo vacíos.
 func printUpDown(st gitstatus.State, snap gitstatus.Snapshot) string {
 	if st == gitstatus.StateNoRepo || snap.Err != "" {
@@ -205,7 +205,7 @@ func orDashPrint(s string) string {
 }
 
 // groupLabelPrint compone `primary/secondary` para la columna GROUP
-// (0003 R21/S21.1): solo primario si no hay secundario, "-" si ninguno.
+// solo primario si no hay secundario, "-" si ninguno.
 func groupLabelPrint(p discovery.Project) string {
 	switch {
 	case p.PrimaryGroup != "" && p.SecondaryGroup != "":

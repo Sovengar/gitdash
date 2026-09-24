@@ -1,4 +1,4 @@
-// Package cache persiste el descubrimiento en disco (spec 0001 R11) para
+// Package cache persiste el descubrimiento en disco para
 // pintar la tabla al instante al arrancar mientras el rescan corre en
 // background.
 package cache
@@ -18,8 +18,8 @@ const FileName = "repos.json"
 const DirName = "gitdash"
 
 // version del formato; un fichero de otra versión se ignora.
-// v2 añade sync_branch y main_repo (spec 0002).
-// v3 reemplaza group por primary_group/secondary_group (spec 0003 R22).
+// v2 añade sync_branch y main_repo.
+// v3 reemplaza group por primary_group/secondary_group.
 const version = 3
 
 // Entry es un repo persistido.
@@ -50,8 +50,8 @@ func Path() (string, error) {
 }
 
 // Load lee el cache y devuelve los proyectos aún válidos (el marcador debe
-// seguir existiendo en su carpeta; S11.2). Cache corrupto o versión
-// desconocida = lista vacía sin error (S11.3).
+// seguir existiendo en su carpeta). Cache corrupto o versión
+// desconocida = lista vacía sin error.
 func Load(path, marker string) []discovery.Project {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -67,7 +67,7 @@ func Load(path, marker string) []discovery.Project {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(e.Path, marker)); err != nil {
-			continue // S11.2: directorio/marcador borrado → descartar
+			continue // directorio/marcador borrado → descartar
 		}
 		projects = append(projects, discovery.Project{
 			Path:           e.Path,
@@ -84,7 +84,7 @@ func Load(path, marker string) []discovery.Project {
 }
 
 // Save persiste los proyectos descubiertos (se llama al final de cada
-// rescan; R11). Best-effort: los errores no son fatales.
+// rescan). Best-effort: los errores no son fatales.
 func Save(path string, projects []discovery.Project) error {
 	f := File{Version: version, Repos: make([]Entry, 0, len(projects))}
 	for _, p := range projects {

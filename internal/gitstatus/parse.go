@@ -1,5 +1,4 @@
-// Parsing puro de la salida de git — sin I/O, testeable con salidas canned
-// (spec 0001 R5).
+// Parsing puro de la salida de git — sin I/O, testeable con salidas canned.
 package gitstatus
 
 import (
@@ -11,9 +10,9 @@ import (
 // Status es el estado git derivado de `git status --porcelain=v2 --branch`.
 type Status struct {
 	Branch         string // nombre de rama o sha corto si detached
-	Detached       bool   // HEAD detached (S5.5)
+	Detached       bool   // HEAD detached
 	Upstream       string // p. ej. "origin/main"
-	HasUpstream    bool   // hay upstream trackeado (S5.4)
+	HasUpstream    bool   // hay upstream trackeado
 	OID            string // sha completo de HEAD (branch.oid)
 	Ahead          int    // commits locales sin subir (↑)
 	Behind         int    // commits del upstream sin bajar (↓)
@@ -27,20 +26,20 @@ func (s Status) Dirty() int { return s.TrackedChanges + s.Untracked }
 // HasPending reporta si hay cambios que subir o bajar.
 func (s Status) HasPending() bool { return s.Ahead > 0 || s.Behind > 0 }
 
-// FileEntry es un fichero cambiado con su código porcelain (S10.1).
+// FileEntry es un fichero cambiado con su código porcelain.
 type FileEntry struct {
 	Code string // "M ", "A ", "D ", "R ", "MM", "??"-estilo: dos chars
 	Path string
 }
 
-// Commit es un commit reciente para el detalle (S10.1).
+// Commit es un commit reciente para el detalle.
 type Commit struct {
 	Sha     string
 	When    int64 // epoch
 	Subject string
 }
 
-// State es el estado derivado del repo para UI/orden/filtros (S5).
+// State es el estado derivado del repo para UI/orden/filtros.
 type State int
 
 const (
@@ -85,24 +84,24 @@ func (st State) String() string {
 func (s Status) Derive() State {
 	switch {
 	case s.Ahead > 0 && s.Behind > 0:
-		return StateDiverged // S5.2
+		return StateDiverged
 	case s.Dirty() > 0:
-		return StateDirty // S5.3
+		return StateDirty
 	case s.Ahead > 0:
-		return StateAhead // S5.2
+		return StateAhead
 	case s.Behind > 0:
-		return StateBehind // S5.2
+		return StateBehind
 	case s.Detached:
-		return StateDetached // S5.5
+		return StateDetached
 	case !s.HasUpstream:
-		return StateNoUpstream // S5.4
+		return StateNoUpstream
 	default:
-		return StateClean // S5.1
+		return StateClean
 	}
 }
 
 // Score es la prioridad de atención para el orden del panel y el modo
-// print (R6): error > diverged > dirty > ahead/behind > info > clean.
+// print: error > diverged > dirty > ahead/behind > info > clean.
 func (st State) Score() int {
 	switch st {
 	case StateError:
@@ -135,7 +134,7 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 			val := strings.TrimPrefix(line, "# branch.head ")
 			switch {
 			case val == "(detached)":
-				st.Detached = true // S5.5
+				st.Detached = true
 			case strings.HasPrefix(val, "(") && strings.HasSuffix(val, ")"):
 				// rama no nacida: "# branch.head (main)" en repos sin commits
 				st.Branch = strings.Trim(val, "()")
@@ -150,7 +149,7 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 		case strings.HasPrefix(line, "# branch.ab "):
 			st.Ahead, st.Behind = parseAB(strings.TrimPrefix(line, "# branch.ab "))
 		case strings.HasPrefix(line, "1 "):
-			st.TrackedChanges++ // S5.3
+			st.TrackedChanges++
 			if f, ok := parseEntry(line[2:], 7); ok {
 				files = appendFile(files, f)
 			}
@@ -166,7 +165,7 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 				files = appendFile(files, f)
 			}
 		case strings.HasPrefix(line, "? "):
-			st.Untracked++ // S5.3
+			st.Untracked++
 			files = appendFile(files, FileEntry{Code: "??", Path: line[2:]})
 		}
 		// "#" restantes (branch.oid), "!" (ignored) y "": ignorados
@@ -200,7 +199,7 @@ func parseEntry(body string, fieldsBeforePath int) (FileEntry, bool) {
 	}, true
 }
 
-// parseAB interpreta "+2 -3" de la línea branch.ab (S5.2).
+// parseAB interpreta "+2 -3" de la línea branch.ab.
 func parseAB(s string) (ahead, behind int) {
 	var sign byte
 	_, err := fmt.Sscanf(s, "%c%d %c%d", &sign, &ahead, &sign, &behind)
@@ -232,7 +231,7 @@ func ParseLog(out string) []Commit {
 }
 
 // ParseWorktrees interpreta `git worktree list --porcelain` y devuelve los
-// worktrees aparte del repo principal (mainPath) (0002 R15). Bloques
+// worktrees aparte del repo principal (mainPath). Bloques
 // separados por línea en blanco; claves: worktree, HEAD, branch/bare/
 // detached. Líneas desconocidas/prunable se ignoran (tolerancia git futuro).
 func ParseWorktrees(out, mainPath string) []Worktree {

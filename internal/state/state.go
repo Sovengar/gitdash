@@ -1,5 +1,5 @@
 // Package state persiste el estado de la UI (grupos plegados) entre sesiones.
-// Las claves son el nombre del primario o "primario/secundario" (S20.5):
+// Las claves son el nombre del primario o "primario/secundario":
 // el composite key evita colisión de nombres entre primarios distintos.
 package state
 
@@ -17,7 +17,7 @@ const DirName = "gitdash"
 const FileName = "collapsed.json"
 
 // WorktreePrefix es el namespace de las claves de expansión de worktrees
-// dentro de collapsed.json (0006 R35). Convención: `wt/<path canónico>` con
+// dentro de collapsed.json. Convención: `wt/<path canónico>` con
 // valor true = expandido. La polaridad es la inversa a la de las claves de
 // grupo (donde true = plegado); la carga separa ambos espacios por prefijo.
 const WorktreePrefix = "wt/"
@@ -63,7 +63,7 @@ func (s *Store) CollapsedFile() string {
 }
 
 // SaveCollapsed persiste el mapa de grupos colapsados a disco (átomico).
-// Las claves son el nombre del primario o "primario/secundario" (S20.5).
+// Las claves son el nombre del primario o "primario/secundario".
 // Best-effort: los errores no son fatales (no bloquear la UI).
 func (s *Store) SaveCollapsed(groups map[string]bool) error {
 	data, err := json.MarshalIndent(groups, "", "  ")

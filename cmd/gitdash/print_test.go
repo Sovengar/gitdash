@@ -1,4 +1,4 @@
-// Tests del modo --print (0004 R29; 0006 R38): no incorpora sub-filas de
+// Tests del modo --print: no incorpora sub-filas de
 // worktree ni glyphs de expansión.
 package main
 
@@ -13,8 +13,8 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// S38.1: `gitdash --print` no incluye sub-filas ni glyphs de expansión.
-func TestPrintNoWorktreeSubrowsS38_1(t *testing.T) {
+// `gitdash --print` no incluye sub-filas ni glyphs de expansión.
+func TestPrintNoWorktreeSubrows(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "repo")
 	testutil.Init(t, dir)
@@ -30,15 +30,15 @@ func TestPrintNoWorktreeSubrowsS38_1(t *testing.T) {
 
 	out := captureStdout(t, func() { runPrint(cfg) })
 	if !strings.Contains(out, "repo-principal") {
-		t.Fatalf("S38.1: el repo principal no aparece:\n%s", out)
+		t.Fatalf("el repo principal no aparece:\n%s", out)
 	}
 	for _, bad := range []string{"↳", "▸", "▾"} {
 		if strings.Contains(out, bad) {
-			t.Errorf("S38.1: --print incluye el glyph %q:\n%s", bad, out)
+			t.Errorf("--print incluye el glyph %q:\n%s", bad, out)
 		}
 	}
 	if strings.Contains(out, "wt-feat") {
-		t.Errorf("S38.1: --print lista el worktree como fila:\n%s", out)
+		t.Errorf("--print lista el worktree como fila:\n%s", out)
 	}
 }
 

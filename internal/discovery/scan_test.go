@@ -15,7 +15,7 @@ func cfgRoots(roots ...string) config.Config {
 	return cfg
 }
 
-func TestDetectByMarkerS2_1(t *testing.T) {
+func TestDetectByMarker(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "projects", "api")
 	testutil.Init(t, proj)
@@ -34,7 +34,7 @@ func TestDetectByMarkerS2_1(t *testing.T) {
 	}
 }
 
-func TestPruneHiddenAndExcludedS2_2(t *testing.T) {
+func TestPruneHiddenAndExcluded(t *testing.T) {
 	root := t.TempDir()
 	hidden := filepath.Join(root, ".hidden", "proj")
 	excluded := filepath.Join(root, "api", "node_modules", "dep")
@@ -52,7 +52,7 @@ func TestPruneHiddenAndExcludedS2_2(t *testing.T) {
 	}
 }
 
-func TestUnlimitedDepthS2_3(t *testing.T) {
+func TestUnlimitedDepth(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "a", "b", "c", "d", "proj")
 	testutil.Init(t, proj)
@@ -67,7 +67,7 @@ func TestUnlimitedDepthS2_3(t *testing.T) {
 	}
 }
 
-func TestNestedValidS2_4(t *testing.T) {
+func TestNestedValid(t *testing.T) {
 	root := t.TempDir()
 	mono := filepath.Join(root, "mono")
 	sub := filepath.Join(mono, "sub")
@@ -85,7 +85,7 @@ func TestNestedValidS2_4(t *testing.T) {
 	}
 }
 
-func TestWorktreeS3_2(t *testing.T) {
+func TestWorktree(t *testing.T) {
 	root := t.TempDir()
 	main := filepath.Join(root, "main-repo")
 	testutil.Init(t, main)
@@ -117,7 +117,7 @@ func TestWorktreeS3_2(t *testing.T) {
 	}
 }
 
-func TestMarkerWithoutRepoS3_3(t *testing.T) {
+func TestMarkerWithoutRepo(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "plain")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -134,7 +134,7 @@ func TestMarkerWithoutRepoS3_3(t *testing.T) {
 	}
 }
 
-func TestMarkerMetadataS4(t *testing.T) {
+func TestMarkerMetadata(t *testing.T) {
 	root := t.TempDir()
 	withMeta := filepath.Join(root, "dirname")
 	empty := filepath.Join(root, "emptymarker")
@@ -158,19 +158,19 @@ func TestMarkerMetadataS4(t *testing.T) {
 		byPath[p.Name] = p
 	}
 	if p := byPath["api"]; p.PrimaryGroup != "vsocial" {
-		t.Errorf("S4.1: name/primary = %q/%q", p.Name, p.PrimaryGroup)
+		t.Errorf("name/primary = %q/%q", p.Name, p.PrimaryGroup)
 	}
 	if p := byPath["emptymarker"]; p.PrimaryGroup != "" {
-		t.Errorf("S4.2: primary = %q, want vacío", p.PrimaryGroup)
+		t.Errorf("primary = %q, want vacío", p.PrimaryGroup)
 	}
 	if p := byPath["badmarker"]; p.MarkerErr == "" {
-		t.Error("S4.3: marcador malformado sin error visible")
+		t.Error("marcador malformado sin error visible")
 	}
 }
 
-// S18.1/S18.2/S18.3: primary_group/secondary_group del marcador; la clave
+// Primary_group/secondary_group del marcador; la clave
 // vieja group ya no agrupa; secondary sin primary se ignora.
-func TestMarkerGroupsS18(t *testing.T) {
+func TestMarkerGroups(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
 	oldKey := filepath.Join(root, "oldkey")
@@ -193,13 +193,13 @@ func TestMarkerGroupsS18(t *testing.T) {
 		byPath[p.Name] = p
 	}
 	if p := byPath["api"]; p.PrimaryGroup != "vsocial" || p.SecondaryGroup != "backend" {
-		t.Errorf("S18.1: primary/secondary = %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+		t.Errorf("primary/secondary = %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 	if p := byPath["oldkey"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
-		t.Errorf("S18.2: group viejo agrupó: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+		t.Errorf("group viejo agrupó: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 	if p := byPath["solo"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
-		t.Errorf("S18.3: secondary sin primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+		t.Errorf("secondary sin primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 }
 

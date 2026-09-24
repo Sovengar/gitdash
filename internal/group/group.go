@@ -1,5 +1,5 @@
 // Package group agrupa proyectos por primary_group/secondary_group del
-// marcador (0003 R19), extendiendo el patrón validado de vroom R24 a dos
+// marcador, extendiendo el patrón validado de vroom a dos
 // niveles: siempre agrupado si hay primarios, bloque de cada grupo contiguo
 // desde la posición de su primer miembro (también dentro del primario) y
 // sección (ungrouped) plegable al final.
@@ -11,12 +11,12 @@ import (
 )
 
 // Ungrouped es el nombre de la sección pseudo-grupo para los proyectos sin
-// primary_group (0002 R16).
+// primary_group.
 const Ungrouped = "(ungrouped)"
 
 // Entry es una fila de la vista agrupada. Primary no vacío delimita el
 // bloque al que pertenece la entrada ("" solo en la vista plana);
-// Secondary solo es válido si Primary != "" (0003 R18: el secundario
+// Secondary solo es válido si Primary != "" (el secundario
 // únicamente existe dentro de un primario).
 type Entry struct {
 	Primary   string
@@ -27,15 +27,15 @@ type Entry struct {
 }
 
 // Arrange compone la vista agrupada a partir de filas ya ordenadas y
-// filtradas (0003 R19):
+// filtradas:
 //   - Sin ningún primario real → vista plana tal cual (Primary queda "").
 //   - El bloque de un primario se emite completo en la posición de su
 //     primer miembro tras el sort.
 //   - Dentro de un primario, el bloque de cada secundario se emite contiguo
 //     en la posición de su primer miembro; los miembros sin secundario
-//     conservan su posición de sort (S19.3).
+//     conservan su posición de sort.
 //   - Los proyectos sin primario forman el bloque final Ungrouped (el
-//     secondary se ignora: S18.3).
+//     secondary se ignora).
 func Arrange(rows []Entry) []Entry {
 	hasReal := false
 	for _, r := range rows {
@@ -48,7 +48,7 @@ func Arrange(rows []Entry) []Entry {
 		return rows
 	}
 
-	// normaliza: sin primario → sección Ungrouped sin secundario (S18.3)
+	// normaliza: sin primario → sección Ungrouped sin secundario
 	members := make(map[string][]Entry)               // primario → miembros en orden de sort
 	secMembers := make(map[string]map[string][]Entry) // primario → secundario → miembros
 	var order []string                                // orden de primera aparición tras el sort
@@ -82,7 +82,7 @@ func Arrange(rows []Entry) []Entry {
 
 // assemble emite los miembros de un primario: los de cada secundario como
 // bloque contiguo en la posición de su primer miembro; los sin secundario
-// en su propia posición (S19.3).
+// en su propia posición.
 func assemble(members []Entry, secs map[string][]Entry) []Entry {
 	emitted := make(map[string]bool)
 	var block []Entry

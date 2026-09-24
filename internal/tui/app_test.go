@@ -111,7 +111,7 @@ func fixtureProjects() ([]discovery.Project, map[string]gitstatus.Snapshot) {
 	return projects, states
 }
 
-func TestSortAttentionFirstR6(t *testing.T) {
+func TestSortAttentionFirst(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
@@ -128,7 +128,7 @@ func TestSortAttentionFirstR6(t *testing.T) {
 	}
 }
 
-func TestSortActivityTieR6(t *testing.T) {
+func TestSortActivityTie(t *testing.T) {
 	// mismo score (clean): gana el más reciente
 	recent := gitstatus.Snapshot{Status: snapClean().Status, LastCommit: time.Now().Unix()}
 	old := snapClean()
@@ -141,7 +141,7 @@ func TestSortActivityTieR6(t *testing.T) {
 	}
 }
 
-func TestFilterOnlyDirtyS7_1(t *testing.T) {
+func TestFilterOnlyDirty(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	if len(m.rows()) != 6 {
@@ -151,7 +151,7 @@ func TestFilterOnlyDirtyS7_1(t *testing.T) {
 	m, _ = press(m, "d")
 	rows := m.rows()
 	if len(rows) != 3 { // dirty-api, ahead-lib, behind-web
-		t.Fatalf("S7.1: rows = %d, want 3", len(rows))
+		t.Fatalf("rows = %d, want 3", len(rows))
 	}
 	for _, r := range rows {
 		if !pendingStates(r.state) {
@@ -165,25 +165,25 @@ func TestFilterOnlyDirtyS7_1(t *testing.T) {
 	}
 }
 
-func TestSearchS7_2(t *testing.T) {
+func TestSearch(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	m, _ = press(m, "/")
 	if !m.searchActive {
-		t.Fatal("S7.2: '/' no abrió el input")
+		t.Fatal("'/' no abrió el input")
 	}
 	for _, c := range "api" {
 		m, _ = press(m, string(c))
 	}
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].project.Name != "dirty-api" {
-		t.Errorf("S7.2 en vivo: rows = %v", rowNames(rows))
+		t.Errorf("en vivo: rows = %v", rowNames(rows))
 	}
 
 	m, _ = press(m, "enter")
 	if m.searchActive || m.search != "api" {
-		t.Errorf("S7.2 confirmar: active=%v search=%q", m.searchActive, m.search)
+		t.Errorf("confirmar: active=%v search=%q", m.searchActive, m.search)
 	}
 
 	// reabrir con el filtro activo: limpiar el input y esc limpia el filtro
@@ -193,11 +193,11 @@ func TestSearchS7_2(t *testing.T) {
 	}
 	m, _ = press(m, "esc")
 	if m.search != "" {
-		t.Errorf("S7.2: esc no limpió el filtro (search=%q)", m.search)
+		t.Errorf("esc no limpió el filtro (search=%q)", m.search)
 	}
 }
 
-// S7.2: feedback visual inmediato — al pulsar / el título pinta [/|] con el
+// Feedback visual inmediato — al pulsar / el título pinta [/|] con el
 // el cursor del input (o su placeholder) ANTES de teclear nada.
 func TestSearchImmediateFeedback(t *testing.T) {
 	projects, states := fixtureProjects()
@@ -206,11 +206,11 @@ func TestSearchImmediateFeedback(t *testing.T) {
 	m, _ = press(m, "/")
 	top := stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
 	if !strings.Contains(top, "[/") {
-		t.Errorf("S7.2: falta [/…] al entrar en filter mode: %q", top)
+		t.Errorf("falta [/…] al entrar en filter mode: %q", top)
 	}
 	// placeholder visible con input vacío (nombre/grupo…)
 	if !strings.Contains(top, "name/group") {
-		t.Errorf("S7.2: placeholder no visible al abrir: %q", top)
+		t.Errorf("placeholder no visible al abrir: %q", top)
 	}
 
 	// al confirmar el flag persiste con el texto confirmado
@@ -218,7 +218,7 @@ func TestSearchImmediateFeedback(t *testing.T) {
 	m, _ = press(m, "enter")
 	top = stripANSI(strings.SplitN(m.renderDashboard(), "\n", 2)[0])
 	if !strings.Contains(top, "[/a]") {
-		t.Errorf("S7.2: tras confirmar falta [/a]: %q", top)
+		t.Errorf("tras confirmar falta [/a]: %q", top)
 	}
 }
 
@@ -232,17 +232,17 @@ func TestSearchMatchesGroup(t *testing.T) {
 	m.search = "vsocial"
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].project.Name != "api" {
-		t.Errorf("S18.5: búsqueda por primario falló: %v", rowNames(rows))
+		t.Errorf("búsqueda por primario falló: %v", rowNames(rows))
 	}
 	m2 := newTestModel(t, projects, states)
 	m2.search = "backend"
 	rows = m2.rows()
 	if len(rows) != 1 || rows[0].project.Name != "api" {
-		t.Errorf("S18.5: búsqueda por secundario falló: %v", rowNames(rows))
+		t.Errorf("búsqueda por secundario falló: %v", rowNames(rows))
 	}
 }
 
-func TestNavigationBoundsS6_2(t *testing.T) {
+func TestNavigationBounds(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
@@ -250,17 +250,17 @@ func TestNavigationBoundsS6_2(t *testing.T) {
 		m, _ = press(m, "j")
 	}
 	if m.cursor != len(m.rows())-1 {
-		t.Errorf("S6.2: cursor = %d, want %d (límite inferior)", m.cursor, len(m.rows())-1)
+		t.Errorf("cursor = %d, want %d (límite inferior)", m.cursor, len(m.rows())-1)
 	}
 	for range 10 {
 		m, _ = press(m, "k")
 	}
 	if m.cursor != 0 {
-		t.Errorf("S6.2: cursor = %d, want 0 (límite superior)", m.cursor)
+		t.Errorf("cursor = %d, want 0 (límite superior)", m.cursor)
 	}
 }
 
-func TestDetailOpenS10_1(t *testing.T) {
+func TestDetailOpen(t *testing.T) {
 	projects, states := fixtureProjects()
 	s := states["/tmp/dirty-api"]
 	s.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
@@ -269,20 +269,20 @@ func TestDetailOpenS10_1(t *testing.T) {
 	m := newTestModel(t, projects, states)
 	m, _ = press(m, "enter")
 	if !m.detailOpen {
-		t.Fatal("S10.1: enter no abrió el detalle")
+		t.Fatal("enter no abrió el detalle")
 	}
 	r, _ := m.selected()
 	out := m.renderDetail(r)
 	if !strings.Contains(out, "main.go") || !strings.Contains(out, "dirty-api") {
-		t.Errorf("S10.1: detalle sin contenido esperado:\n%s", out)
+		t.Errorf("detalle sin contenido esperado:\n%s", out)
 	}
 	m, _ = press(m, "esc")
 	if m.detailOpen {
-		t.Error("S10.1: esc no cerró el detalle")
+		t.Error("esc no cerró el detalle")
 	}
 }
 
-func TestDetailShowsLastActionS10_2(t *testing.T) {
+func TestDetailShowsLastAction(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.lastAction["/tmp/old-clean"] = actionResult{kind: "pull", output: "error: pull diverged\n", err: "exit 1"}
@@ -290,11 +290,11 @@ func TestDetailShowsLastActionS10_2(t *testing.T) {
 	r, _ := m.selected()
 	out := m.renderDetail(r)
 	if !strings.Contains(out, "pull") || !strings.Contains(out, "failed") || !strings.Contains(out, "diverged") {
-		t.Errorf("S10.2: detalle sin última acción:\n%s", out)
+		t.Errorf("detalle sin última acción:\n%s", out)
 	}
 }
 
-func TestGuardNoRepoS9_6(t *testing.T) {
+func TestGuardNoRepo(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.search = "no-repo" // cursor sobre el proyecto sin repo
@@ -303,19 +303,19 @@ func TestGuardNoRepoS9_6(t *testing.T) {
 	for _, key := range []string{"p", "P", "f"} {
 		_, cmd := press(m, key)
 		if cmd == nil {
-			t.Errorf("S9.6: tecla %s sin guard sobre no-repo", key)
+			t.Errorf("tecla %s sin guard sobre no-repo", key)
 			continue
 		}
 		msg := cmd()
 		if nm, ok := msg.(notifyMsg); !ok || !strings.Contains(nm.text, "no git repo") {
 			if key != "f" { // f sobre no-repo: fetchTargets lo excluye, cmd nil es válido
-				t.Errorf("S9.6: tecla %s notificó %v", key, msg)
+				t.Errorf("tecla %s notificó %v", key, msg)
 			}
 		}
 	}
 }
 
-func TestBlockRunningActionS9_5(t *testing.T) {
+func TestBlockRunningAction(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.search = "old-clean"
@@ -323,14 +323,14 @@ func TestBlockRunningActionS9_5(t *testing.T) {
 
 	_, cmd := press(m, "P")
 	if cmd == nil {
-		t.Fatal("S9.5: push sin cmd de bloqueo")
+		t.Fatal("push sin cmd de bloqueo")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "already running") {
-		t.Errorf("S9.5: notificación = %v", cmd())
+		t.Errorf("notificación = %v", cmd())
 	}
 }
 
-func TestSummaryR6(t *testing.T) {
+func TestSummary(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	total, dirty, ahead, behind := m.summary()
@@ -339,13 +339,13 @@ func TestSummaryR6(t *testing.T) {
 	}
 }
 
-func TestViewContainsTableR6(t *testing.T) {
+func TestViewContainsTable(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	out := m.View().Content
 	for _, want := range []string{"gitdash", "dirty-api", "↑2", "↓3", "6 repos"} {
 		if !strings.Contains(stripANSI(out), want) {
-			t.Errorf("R6: la vista no contiene %q", want)
+			t.Errorf("la vista no contiene %q", want)
 		}
 	}
 }
