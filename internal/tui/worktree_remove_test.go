@@ -428,6 +428,25 @@ func TestRemoveWorktreeNoArmedOnMissingParent(t *testing.T) {
 	}
 }
 
+// El armado valida la selección al confirmar: si la sub-fila armada ya no es
+// la actual, se re-arma sobre la actual en vez de borrar otro worktree.
+func TestRemoveWorktreeArmedRevalidatesSelection(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m, _ = press(m, "D") // armado sobre wt-a
+
+	// La selección cambia sin pasar por el desarmado de teclas (p. ej. la
+	// sub-fila armada desaparece y el cursor cae en otro worktree).
+	m.cursor = 2
+
+	m, _ = press(m, "D")
+	if m.running[p.Path] != "" {
+		t.Errorf("borró el worktree armado pese a cambiar la selección: %v", m.running)
+	}
+	if m.armed == nil || m.armed.wtPath != "/tmp/wt-b" {
+		t.Errorf("no se re-armó sobre la sub-fila actual: %+v", m.armed)
+	}
+}
+
 // El aviso persistente aparece en la vista, cambia en el forzado y desaparece
 // al cancelar.
 func TestRemoveWorktreeBannerRender(t *testing.T) {
