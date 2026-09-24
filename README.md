@@ -1,5 +1,7 @@
 # gitdash
 
+[![CI](https://github.com/Sovengar/gitdash/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sovengar/gitdash/actions/workflows/ci.yml)
+
 Panel de estados git en TUI, estilo GitHub Desktop: todos tus repos marcados
 con `.gitdash.toml` en un dashboard, con branch, cambios pendientes
 (dirty) y **↑ahead / ↓behind** (qué hay que subir y bajar de un vistazo),

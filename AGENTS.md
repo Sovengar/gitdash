@@ -40,6 +40,38 @@ instalado (`go build -o ~/.local/bin/gitdash ./cmd/gitdash`). El usuario
 ejecuta el de `~/.local/bin`: un bin stale con cambios ya hechos causa
 síntomas falsos (ej. "no encuentra repos" por el rename del marcador).
 
+## CI y protección de `main`
+
+CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
+a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
+en pending para siempre y bloquea todos los PRs). Tres jobs:
+
+- **`Build`**: `go build ./...` y `go vet ./...`.
+- **`Lint`**: `make lint` → vet + fmt-check (gofmt) + golangci-lint
+  **v2.13.2** (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre
+  el set de linters por defecto).
+- **`Test`**: `go test -race -coverprofile=coverage.out ./...` (suite completa,
+  sin `-short`) y un resumen de cobertura en el step summary. La suite es
+  **autocontenida**: cada fixture git se crea bajo `t.TempDir()` con
+  `internal/testutil`, así que CI **no** necesita `make fixtures` ni
+  `testdata/playground`.
+
+Reglas de la rama `main` (ruleset **`protect-main`**, reproducible con
+`scripts/setup-repo-protection.sh`, idempotente y con `--dry-run`):
+
+- Merge **solo vía PR**, con los tres checks en verde; force-push y borrado de
+  `main` bloqueados.
+- Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
+  admin *podría* pushear directo, pero la intención de trabajo es siempre el
+  camino PR. Ningún actor no-admin puede hacerlo.
+- `delete_branch_on_merge=true`: GitHub borra la rama remota al mergear.
+
+Ante un merge: verificar que el workflow `push` de `main` quedó verde y que el
+badge del README reporta `passing` (el badge cachea unos segundos).
+
+`make smoke` (tmux + pty, ver Gotcha 3) queda **manual y fuera de CI**: necesita
+un terminal interactivo que el runner no garantiza.
+
 ## Arquitectura (flujo de datos)
 
 ```
