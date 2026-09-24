@@ -75,12 +75,14 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # Same suite as `make test` (`go test -race`, no `-short`), plus an
+      # atomic coverage profile. `-count=1` disables the Go test cache so every
+      # CI run executes the tests for real instead of replaying cached results.
       # The suite is self-contained: every git fixture is created under
       # t.TempDir() via internal/testutil, so no `make fixtures` / testdata
-      # checkout is needed. Same test set as `make test-race` (`go test -race`,
-      # no `-short`) plus a coverage profile for the summary below.
+      # checkout is needed.
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
       - name: Coverage summary
         if: always()
         run: |
