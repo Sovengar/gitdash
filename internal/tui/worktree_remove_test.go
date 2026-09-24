@@ -42,7 +42,8 @@ func armedOver(t *testing.T, m Model, e tableEntry, force bool) Model {
 
 // waitEvent consume eventos del canal aplicándolos al modelo hasta que uno
 // cumpla match (o expire el plazo).
-func waitEvent(t *testing.T, m *Model, match func(event) bool) {	t.Helper()
+func waitEvent(t *testing.T, m *Model, match func(event) bool) {
+	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
