@@ -238,6 +238,32 @@ func TestPrimaryCountIncludesSecondary(t *testing.T) {
 	}
 }
 
+// Un secundario plegado no debe filtrar el bloque del primario siguiente
+// cuando este no tiene secundarios (regresión: skipSec se filtraba entre
+// primarios y ocultaba proyectos bajo un header expandido).
+func TestFoldSecondaryDoesNotLeakToNextPrimary(t *testing.T) {
+	projects := []discovery.Project{
+		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
+		{Path: "/b", Name: "b", PrimaryGroup: "projects/mine", HasRepo: true},
+	}
+	states := map[string]gitstatus.Snapshot{"/a": snapClean(), "/b": snapClean()}
+	m := newTestModel(t, projects, states)
+
+	m.collapsed["vsocial/backend"] = true
+
+	entries := m.entries()
+	// primario vsocial + sec backend (plegado) + primario projects/mine + repo b = 4
+	if len(entries) != 4 {
+		t.Fatalf("entries = %s, want el repo de projects/mine visible", rowsOf(entries))
+	}
+	if entries[2].kind != kindPrimary || entries[2].group != "projects/mine" {
+		t.Errorf("entrada 2 = %+v, want header projects/mine", entries[2])
+	}
+	if entries[3].kind != kindRepo || entries[3].r.project.Name != "b" {
+		t.Errorf("entrada 3 = %+v, want repo b visible", entries[3])
+	}
+}
+
 func rowsOf(entries []tableEntry) string {
 	out := ""
 	for _, e := range entries {

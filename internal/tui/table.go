@@ -116,7 +116,10 @@ func (m *Model) entries() []tableEntry {
 				skipPrim, skipSec = e.Primary, ""
 				continue
 			}
-			skipPrim = ""
+			// reinicia TAMBIÉN skipSec: un secundario plegado del
+			// primario anterior no debe filtrar el bloque siguiente
+			// (especialmente si este primario no tiene secundarios).
+			skipPrim, skipSec = "", ""
 		}
 		if skipPrim == "" && group.IsSecondaryHeader(arranged, i) {
 			key := groupKey(e.Primary, e.Secondary)
