@@ -28,7 +28,7 @@ const DefaultMarker = ".gitdash.toml"
 // cuando la config no define exclusiones propias.
 var DefaultExclude = []string{
 	"node_modules", "target", "vendor", "dist", "build", "out", "coverage",
-	".venv", "__pycache__", ".gradle", ".terraform",
+	".venv", "__pycache__", ".gradle", ".terraform", "testdata",
 }
 
 // Keybindings mapea nombre de acción → tecla (una sola rune o nombre

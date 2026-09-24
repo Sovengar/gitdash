@@ -31,6 +31,15 @@ func TestDefaults(t *testing.T) {
 	if cfg.Editor == "" {
 		t.Error("editor default vacío")
 	}
+	found := false
+	for _, ex := range cfg.Exclude {
+		if ex == "testdata" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("exclude default sin testdata: %v", cfg.Exclude)
+	}
 }
 
 func TestPartialOverride(t *testing.T) {
