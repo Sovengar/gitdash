@@ -23,8 +23,8 @@ fork: solo comparte la idea.
 
 ```bash
 go build ./... && go vet ./... && go test ./...   # build + lint + tests
-go build -o bin/gitdash ./cmd/gitdash              # binario
-go build -o ~/.local/bin/gitdash ./cmd/gitdash     # binario instalado en PATH
+go build -o bin/gitdash ./cmd/gitdash              # binario (artefacto de build)
+make install                                       # instala bin/gitdash en ~/.local/bin (PREFIX/DESTDIR)
 go mod tidy                                        # tras añadir deps
 ```
 
@@ -35,10 +35,10 @@ bin/gitdash --print                                # modo tabla one-shot
 tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux capture-pane -t gd -p
 ```
 
-**REGLA**: al terminar cualquier cambio de código, RECOMPILAR el binario
-instalado (`go build -o ~/.local/bin/gitdash ./cmd/gitdash`). El usuario
-ejecuta el de `~/.local/bin`: un bin stale con cambios ya hechos causa
-síntomas falsos (ej. "no encuentra repos" por el rename del marcador).
+**REGLA**: al terminar cualquier cambio de código, INSTALAR el binario
+(`make install`). El usuario ejecuta el de `~/.local/bin`: un bin stale con
+cambios ya hechos causa síntomas falsos (ej. "no encuentra repos" por el
+rename del marcador).
 
 ## CI y protección de `main`
 

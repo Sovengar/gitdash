@@ -16,8 +16,8 @@ descubrimiento por **fichero marcador** en lugar de buscar `.git` suelto y
 ## Instalación
 
 ```bash
-go install gitdash/cmd/gitdash@latest   # o
-go build -o ~/.local/bin/gitdash ./cmd/gitdash
+go install gitdash/cmd/gitdash@latest   # o, desde el repo:
+make install                            # instala en ~/.local/bin (soporta PREFIX/DESTDIR)
 ```
 
 Requiere el binario `git` en el PATH (subprocess; sin cgo ni librerías git).
