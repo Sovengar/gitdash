@@ -1,10 +1,12 @@
 # Atajos de desarrollo de gitdash.
-# El binario que ejecuta el usuario vive en ~/.local/bin (ver AGENTS.md):
-# tras cualquier cambio de código hay que recompilarlo con `make install`.
+# El binario que ejecuta el usuario vive en $(PREFIX)/bin (default ~/.local/bin,
+# ver AGENTS.md): tras cualquier cambio de código hay que instalarlo con
+# `make install` (compila bin/gitdash y lo copia).
 
 SHELL := /bin/bash
 
-INSTALL_DIR := $(HOME)/.local/bin
+PREFIX      ?= $(HOME)/.local
+BINDIR      := $(PREFIX)/bin
 BIN         := bin/gitdash
 PKG         := ./cmd/gitdash
 
@@ -12,7 +14,7 @@ PKG         := ./cmd/gitdash
 GOLANGCI_LINT_VERSION := v2.13.2
 
 .DEFAULT_GOAL := help
-.PHONY: help build install fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean
+.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -21,8 +23,12 @@ help: ## Muestra esta ayuda
 build: ## Compila el binario en bin/gitdash
 	go build -o $(BIN) $(PKG)
 
-install: ## Compila e instala en ~/.local/bin (obligatorio tras cambios)
-	go build -o $(INSTALL_DIR)/gitdash $(PKG)
+install: build ## Instala bin/gitdash en PREFIX/bin (default ~/.local/bin; obligatorio tras cambios)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 0755 $(BIN) $(DESTDIR)$(BINDIR)/gitdash
+
+uninstall: ## Borra el binario instalado de PREFIX/bin (default ~/.local/bin)
+	rm -f $(DESTDIR)$(BINDIR)/gitdash
 
 fmt: ## Aplica gofmt sobre el árbol
 	gofmt -w .
