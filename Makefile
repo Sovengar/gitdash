@@ -38,7 +38,7 @@ lint: vet fmt-check ## go vet + gofmt + golangci-lint (versión pineada, siempre
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
 test: ## Ejecuta la suite de tests con -race (misma clase que CI)
-	go test -race ./...
+	go test -race -count=1 ./...
 
 test-race: test ## Alias de test: la suite ya corre con -race
 
