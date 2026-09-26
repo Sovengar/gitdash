@@ -123,6 +123,8 @@ attention-first).
 | `P` | push |
 | `e` | abrir `$EDITOR` en el directorio del repo |
 | `enter` | plegar/desplegar lo que hay bajo el cursor: los worktrees del repo, o el bloque de un header de grupo (configurable, acción `fold`) |
+| `enter` | detalle: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
+| `l` | panel del command log: qué se ejecutó de verdad, con qué resultado y por qué (ver abajo) |
 | `q` | salir |
 
 ### Pull: la política vive en tu gitconfig
@@ -153,6 +155,37 @@ con `p` `p` no hay flags que leer, la decisión la tomó tu gitconfig.
 Si un pull `--rebase` choca, el aviso **no** dice solo "falló": dice que el
 rebase quedó a medias y cómo continuar o abandonar. Decir "falló" invita a
 reintentar sobre un rebase sin resolver.
+
+## Command log: qué se ejecutó de verdad
+
+`l` abre un panel con la cronología de la sesión: qué comando se lanzó, en qué
+repo, con qué resultado y cuánto tardó. Por defecto solo se ven las acciones
+del usuario; `a` amplía la vista a las lecturas del scan (`status`, `log`,
+`worktree list`, `rev-list`) y al `fetch` automático, y `j`/`k` desplazan.
+
+```
+22:23:13.378  key p    diverged-node   pull
+22:23:14.381  key r    diverged-node   pull_rebase
+22:23:14.529  exec     diverged-node   git pull --rebase --…  rebase+autostash
+```
+
+Las líneas `key` son la tecla que pulsaste; las `exec`, el proceso que terminó.
+Las dos van porque el argv **no** dice qué política aplicó git: `p` `p` ejecuta
+`git pull` a secas, y si tu config tiene `pull.rebase=true` con
+`rebase.autostash=true` lo que integró fue un rebase con autostash. El resultado
+se deduce de la salida que git ya imprimió (con `LC_ALL=C` forzado, así que los
+mensajes no se traducen), no de leer la config: la precedencia de `pull.rebase`
+y `branch.<name>.rebase` cambia entre versiones de git, y lo que git **hizo**
+está en su output.
+
+Resultados que el panel distingue: `rebase`, `rebase+autostash`, `merge`,
+`fast-forward`, `up-to-date`, `diverged`, `conflict`, `no-upstream`, `pushed`,
+`rejected`, `failed`.
+
+El log vive **solo en memoria y por sesión** (500 entradas): no escribe ningún
+fichero. Una intención sin `exec` detrás significa que la acción se rechazó
+después (el repo ya tenía una en curso, `lazygit` no está instalado); el motivo
+está en el toast del mismo momento.
 
 ## Worktrees y grupos
 

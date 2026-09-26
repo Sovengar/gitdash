@@ -72,6 +72,13 @@ badge del README reporta `passing` (el badge cachea unos segundos).
 `make smoke` (tmux + pty, ver Gotcha 3) queda **manual y fuera de CI**: necesita
 un terminal interactivo que el runner no garantiza.
 
+**Trampa del smoke**: aísla `XDG_CONFIG_HOME`, y git lee su config global de
+`$XDG_CONFIG_HOME/git/config`. Con la config del usuario oculta, un `git pull`
+sobre un repo divergido **falla** ("divergent branches") donde en tu terminal
+rebasa, y parece un bug de gitdash. Para probar la política real del usuario,
+enlaza la config de git al directorio aislado
+(`ln -s ~/.config/git/config "$tmp/git/config"`).
+
 ## Arquitectura (flujo de datos)
 
 ```
@@ -83,9 +90,10 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 |---|---|
 | `internal/config` | TOML XDG. `Load()` nunca falla: defaults + warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude`. `MainRepo` enlaza worktree→repo principal |
-| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, Pull, Push, RebaseInProgress). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro |
+| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, Pull, Push, RebaseInProgress) + `outcome.go` (Classify: qué hizo git de verdad). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro. `runGit`/`runGitCombined` son el **único** punto por el que sale un subprocess git, y ambos dejan entrada en el command log |
 | `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
-| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `styles.go` |
+| `internal/cmdlog` | Ring acotado en memoria (500) de lo que se ejecutó: entries de `intent` (tecla) y `exec` (proceso con argv, exit, duración y resultado). Global con default no-op; solo la TUI lo instala (`tui.New`) |
+| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `cmdlogpanel.go` (panel del log), `styles.go` |
 | `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
 | `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees, ramas) |
 | `cmd/gitdash` | `main.go` (TUI) + `print.go` (modo `--print`, tabwriter, mismo orden) |
@@ -217,6 +225,76 @@ antepone `HintBarLines`. Si la etiqueta la llevara, un rebind producía hints
 como `w enter fold`. Y `config.LoadFrom` avisa (toast + stderr) de las acciones
 de `[keybindings]` que ya no existen: sin ese aviso, un `detail = "enter"` de una
 config vieja deja `enter` muerta y parece un bug de la TUI.
+## Gotcha de diseño: el command log (`l`)
+
+El argv **no** dice qué política de pull aplicó git. `commands.pull` va sin flags
+a propósito, así que `p` `p` ejecuta `git pull` y con `pull.rebase=true` en el
+gitconfig del usuario eso integró con rebase. El log resuelve el "qué pasó de
+verdad" con dos piezas:
+
+- **`gitstatus.Classify(args, out, exit)`** deduce el resultado de la salida que
+  git ya imprimió (`Successfully rebased and updated` → `rebase`,
+  `Applied autostash` → `rebase+autostash`, `Merge made by` → `merge`,
+  `Fast-forward`, `up to date`, `Not possible to fast-forward` → `diverged`,
+  `could not apply`/`CONFLICT` → `conflict`…). Subprocess extra: **cero**.
+- Las **intenciones** (tecla + acción + repo) las registra `handleKey`, porque el
+  argv no distingue "pulsé p y elegí rebase" de "el gitconfig decidió por mí".
+
+**No sondees `git config` para deducir la política**: `branch.<name>.rebase`
+pisa al `pull.rebase` global, esa precedencia cambia entre versiones de git
+(`branch.<name>.rebase` está deprecado a favor de `branch.<name>.pullrebase`) y
+gitdasharía devolviendo una respuesta plausible y equivocada. Lo que git HIZO
+está en su output, y con `LC_ALL=C` forzado en `gitEnv` los mensajes no se
+localizan.
+
+**El reflog se descartó como fuente** (comprobado con git real, no de memoria):
+`git pull` pelado deja `pull (start)/(pick)/(finish)` si rebasea,
+`pull: Merge made by the 'ort' strategy.` si hace merge y `pull: Fast-forward`
+si ff, pero **no escribe ninguna entrada** cuando ya estaba al día — justo el caso
+en que se pregunta "¿qué pasó con el pp?" — y no distingue un pull de gitdash de
+uno manual en tu terminal, ni cubre push/fetch/`!`/worktree remove. Si algún día
+se quiere como modo forense, es un `git reflog show --date=iso` **bajo demanda**
+(una llamada al abrir el detalle de un repo), no por acción.
+
+Reglas del panel (`internal/tui/cmdlogpanel.go`):
+
+- Es un **view mode**, no un overlay: `logOpen` toma el cuerpo y comparte el
+  chrome del detalle. Sus teclas se consultan **antes** del enrutado normal
+  (como los estados armados) porque `j`/`k` chocan con la navegación; el resto de
+  teclas sigue su curso normal, así la app no queda encerrada.
+- `promptLine()` (antes `armedPrompt`) es el **único** punto por el que keybinds
+  pinta un aviso: los dos armados y la leyenda del panel. `keybindsLines()` y
+  `keepKeybinds` derivan de ahí, así que añadir un aviso nuevo es añadir un
+  `case` y nada más.
+- Abrir el panel **suelta los estados armados**: el aviso queda sin sentido fuera
+  de su vista y dejarlo armado obligaría a acertar la tecla siguiente desde un
+  panel que ya no está.
+- `launchesCommand` / `actionNeedsRow` deciden qué acciones dejan intención. Las
+  de navegación pura (filtro, plegado, detalle, el propio panel) no: el log es de
+  comandos, no de teclas. Sin fila bajo el cursor tampoco (una `key p` sin repo
+  ni `exec` confunde).
+- El offset cuenta **desde la cola** (0 = lo más reciente al final): en un log se
+  mira lo último, y las entradas nuevas no te sacan de sitio si estabas
+  scrolleado arriba. Se recorta contra las líneas visibles, nunca deja huecos.
+- `computeLogColumns` degrada columnas por valor (veredicto → resultado → repo →
+  kind) y da al argv lo que sobra: por debajo de `logMinArgv` (20, lo que cabe
+  `git pull --ff-only`) el comando se lee a medias, que es lo que el panel existe
+  para evitar.
+
+## Gotchas de cableado
+
+- **Todo exec de git pasa por `runGit`/`runGitCombined`** (`gitstatus`), que miden
+  y registran. Si añades un verbo git nuevo fuera de ahí, no aparece en el log.
+  Los 4 `exec.Command` de `tui/app.go` (editor, lazygit, shell, `!`) están
+  fuera: se registran a mano, en `execDoneMsg` (handoffs, al volver) y en
+  `openCmdCmd` (el `!`, que sí mide duración). Los handoffs van con `Dur = 0`:
+  medirlo exigiría guardar el arranque en el modelo.
+- **`gitstatus.Fetch` recibe la `cmdlog.Class` del caller**: `git fetch --prune`
+  es el mismo comando lo lanzan el scan automático y la tecla `f`, y solo el
+  origen los separa. Es el único exec cuya clase no se deduce del argv.
+- `RemoveWorktreeArgv` existe para que el log, el detail y `RemoveWorktree` no
+  puedan discrepar. Si duplicas la construcción del argv en otro sitio, el log
+  puede mentir sobre lo que se ejecutó.
 
 ## Probar
 

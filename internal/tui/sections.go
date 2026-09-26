@@ -20,35 +20,58 @@ func (m Model) section(title, content string) string {
 }
 
 // layout calcula el reparto de alto para el estado actual del modelo. Con un
-// aviso armado (selector de pull o confirmación de borrado) lo que se fuerza
-// es la visibilidad de keybinds, que es donde se pinta ese aviso: si se
+// aviso en keybinds (selector de pull, confirmación de borrado o leyenda del
+// panel del log) lo que se fuerza es la visibilidad de esa sección: si se
 // degradara, la app quedaría esperando una tecla sin decir cuáles.
 func (m Model) layout() layout {
-	armed := m.armedPrompt() != ""
-	return computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), armed)
+	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "")
+	if m.logOpen {
+		// El log SUSTITUYE a la tabla y la ficha desaparece. Lo que hay que
+		// conservar es el total de líneas de la terminal, así que al alto del
+		// cuerpo se le devuelve lo que la tabla y la ficha se dejaron:
+		//
+		//   - la cabecera de columnas (1): la sección del log son sus 2
+		//     bordes + bodyLines, y la de la tabla 2 bordes + cabecera +
+		//     bodyLines. Los bordes son los mismos, así que de la tabla solo
+		//     se libera la línea de cabecera.
+		//   - la ficha entera (previewChrome + previewLines), si estaba.
+		//
+		// Sin esto el panel mide 3 líneas menos que la terminal en cuanto la
+		// ficha se dibuja, y los keybinds suben.
+		freed := 1
+		if lay.previewLines > 0 {
+			freed += previewChrome + lay.previewLines
+		}
+		lay.bodyLines += freed
+		lay.previewLines = 0
+	}
+	return lay
 }
 
 // keybindsLines dice cuántas líneas de contenido pintará la sección de
-// keybinds: las hints del config (con tope) o, si hay un aviso armado, solo la
-// del prompt. El presupuesto de alto se deriva de aquí para que la caja nunca
+// keybinds: las hints del config (con tope) o, si hay un aviso, solo la del
+// prompt. El presupuesto de alto se deriva de aquí para que la caja nunca
 // mida más que lo que lleva dentro.
 func (m Model) keybindsLines() int {
-	if m.armedPrompt() != "" {
+	if m.promptLine() != "" {
 		return 1
 	}
 	return min(defaultHintLines, max(0, len(m.cfg.HintBarLines())))
 }
 
-// armedPrompt devuelve el aviso persistente de los estados de "una tecla más":
-// el selector de pull y la confirmación de borrado de worktree. Solo puede haber
-// uno armado a la vez (la segunda pulsación desarma el anterior), pero si se
-// solaparan manda el de borrado. Vacío si no hay nada armado.
-func (m Model) armedPrompt() string {
+// promptLine devuelve el aviso persistente de la sección de keybinds: el
+// selector de pull, la confirmación de borrado de worktree o la leyenda del
+// panel del log. Solo puede haber uno a la vez (la segunda pulsación desarma el
+// anterior), pero si se solaparan mandan los armados sobre la leyenda. Vacío si
+// no hay nada que anunciar.
+func (m Model) promptLine() string {
 	switch {
 	case m.armed != nil:
 		return m.removePrompt()
 	case m.pullArmed != nil:
 		return m.pullPrompt()
+	case m.logOpen:
+		return m.logLegend()
 	}
 	return ""
 }
@@ -220,12 +243,13 @@ func (m Model) emptyTableHint() string {
 }
 
 // keybindsSection muestra hasta hintLines líneas de hints o, si hay un aviso
-// armado, el prompt en su lugar. El prompt sustituye a las hints (no se apila):
-// compite por el mismo espacio de lectura —"qué hago ahora"—, y las hints
-// vuelven intactas en cuanto se resuelve la pulsación.
+// (un estado armado o el panel del log), el prompt en su lugar. El prompt
+// sustituye a las hints (no se apila): compite por el mismo espacio de lectura
+// —"qué hago ahora"—, y las hints vuelven intactas en cuanto se resuelve la
+// pulsación.
 func (m Model) keybindsSection(hintLines int) string {
 	lines := m.cfg.HintBarLines()
-	if prompt := m.armedPrompt(); prompt != "" {
+	if prompt := m.promptLine(); prompt != "" {
 		lines = []string{styleWarn.Render(prompt)}
 	}
 	if hintLines < len(lines) {

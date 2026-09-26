@@ -6,6 +6,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"gitdash/internal/cache"
+	"gitdash/internal/cmdlog"
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
@@ -73,13 +75,20 @@ type worktreeRemovedMsg struct {
 	output, err          string
 	force                bool
 	gen                  int
+	// cmd es el argv resuelto (`git worktree remove [--force] <path>`): sin
+	// él el detail no puede enseñar qué se ejecutó, porque el kind no
+	// implica los flags.
+	cmd string
 }
 
 // execDoneMsg marca la vuelta de un proceso con handoff de terminal:
-// editor, lazygit (tecla g) o shell interactiva (tecla !, vacío).
+// editor, lazygit (tecla g) o shell interactiva (tecla !, vacío). action y
+// argv viajan para que el command log pueda registrar qué se lanzó: con el
+// handoff la salida no se captura, así que el argv es lo único que queda.
 type execDoneMsg struct {
-	path string
-	err  error
+	path, action string
+	argv         []string
+	err          error
 }
 
 // cmdResultMsg entrega la salida capturada de un comando `!`.
@@ -199,6 +208,18 @@ type Model struct {
 
 	width, height int
 
+	// Panel del command log (tecla l). Es un view mode: toma el cuerpo de la
+	// pantalla (tabla y ficha se sustituyen por el log) y se lee con j/k.
+	// logShowAll amplía el filtro a las lecturas del scan y al fetch
+	// automático; por defecto solo se ven las acciones del usuario. logCache
+	// evita re-copiar el ring en cada frame: se refresca solo cuando la
+	// última secuencia cambia.
+	logOpen     bool
+	logShowAll  bool
+	logOffset   int
+	logCache    []cmdlog.Entry
+	logCacheSeq int
+
 	// modo comando (tecla !): input de shell ejecutada en el repo con
 	// $SHELL -c; Enter con input vacío abre una shell interactiva. Se pinta al
 	// final de la ficha del panel, que es donde se leen las cosas del repo.
@@ -221,6 +242,10 @@ const searchPlaceholder = "name/group…"
 // New construye el modelo con la config dada y pinta el cache si existe
 // (pintura instantánea; el rescan corre vía Init).
 func New(cfg config.Config) Model {
+	// El command log solo existe en la TUI: es donde hay teclas que
+	// auditar. --print no lo instala (no hay nada que consultar) y los
+	// tests lo sustituyen por el suyo.
+	cmdlog.SetRecorder(cmdlog.New(cmdlog.DefaultCap))
 	ctx, cancel := context.WithCancel(context.Background())
 	store, _ := state.NewStore()
 	m := Model{
@@ -376,8 +401,10 @@ func (m *Model) fetchTargets() []string {
 }
 
 // fetchBatchCmd lanza `git fetch --prune` en batches de fetch.concurrency
-// con timeout por fetch; tras cada fetch re-colecciona el estado.
-func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
+// con timeout por fetch; tras cada fetch re-colecciona el estado. class
+// distingue el fetch que pidió una tecla del automático del scan: el argv es el
+// mismo en ambos y solo el origen los separa en el command log.
+func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -385,6 +412,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 	events := m.events
 	timeout := m.cfg.FetchTimeout
 	concurrency := m.cfg.FetchConcurrency
+	args := m.cfg.CmdArgs("fetch")
 
 	go func() {
 		defer cancel()
@@ -406,7 +434,7 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 				}
 				fctx, fcancel := context.WithTimeout(ctx, timeout)
 				defer fcancel()
-				if err := gitstatus.Fetch(fctx, p, m.cfg.CmdArgs("fetch")...); err != nil {
+				if err := gitstatus.Fetch(fctx, p, class, args...); err != nil {
 					mu.Lock()
 					failed++
 					mu.Unlock()
@@ -504,6 +532,7 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 		sendEvent(appCtx, events, worktreeRemovedMsg{
 			parent: parent, wtPath: wtPath, name: name,
 			output: out, err: errStr, force: withForce, gen: token,
+			cmd: "git " + strings.Join(gitstatus.RemoveWorktreeArgv(wtPath, withForce), " "),
 		})
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch)})
@@ -533,10 +562,11 @@ func (m *Model) toastCmd(level toastLevel, text string) tea.Cmd {
 
 // openEditorCmd abre $EDITOR en el repo con handoff de terminal.
 func (m *Model) openEditorCmd(path string) tea.Cmd {
+	argv := []string{m.cfg.Editor}
 	cmd := exec.Command(m.cfg.Editor)
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, err: err}
+		return execDoneMsg{path: path, action: "editor", argv: argv, err: err}
 	})
 }
 
@@ -551,10 +581,11 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "lazygit"
+	argv := []string{"lazygit"}
 	cmd := exec.Command("lazygit")
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, err: err}
+		return execDoneMsg{path: path, action: "lazygit", argv: argv, err: err}
 	})
 }
 
@@ -598,7 +629,19 @@ func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	appCtx := m.ctx
 	events := m.events
 	go func() {
+		start := time.Now()
 		out, code := runShellCmd(appCtx, path, shell, command)
+		// El comando `!` no se clasifica (su salida es arbitraria, no de
+		// git): en el log queda el argv y el código de salida.
+		cmdlog.RecordExec(cmdlog.Entry{
+			Repo:   m.nameOf(path),
+			Dir:    path,
+			Class:  cmdlog.ClassAction,
+			Action: "cmd",
+			Argv:   append([]string{shell, "-c"}, command),
+			Exit:   code,
+			Dur:    time.Since(start),
+		})
 		sendEvent(appCtx, events, cmdResultMsg{
 			path: path, command: command, output: out,
 			exit: fmt.Sprintf("%d", code),
@@ -625,8 +668,46 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 	cmd := exec.Command(shell)
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, err: err}
+		return execDoneMsg{path: path, action: "shell", argv: []string{shell}, err: err}
 	})
+}
+
+// execExit traduce el error de un handoff de terminal al código de salida que
+// merece el command log: el real si el proceso llegó a correr, -1 si ni
+// siquiera arrancó.
+func execExit(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+// logIntent deja en el command log la tecla que el usuario acaba de pulsar y
+// sobre qué repo. Sin esta línea el log solo diría "git pull", y no se podría
+// distinguir "pulsé p y elegí rebase" de "el gitconfig decidió por mí" — que
+// es justo la pregunta que el log responde.
+//
+// Una intención sin exec detrás significa que la acción se rechazó después
+// (el repo ya tenía una acción en curso, lazygit no está instalado, la fila no
+// es un repo): el motivo está en el toast del mismo momento.
+func (m *Model) logIntent(key, action string) {
+	if cmdlog.Active() == nil {
+		return
+	}
+	r, ok := m.selected()
+	if !ok && actionNeedsRow(action) {
+		return // sin fila no se despacha nada
+	}
+	entry := cmdlog.Entry{Class: cmdlog.ClassAction, Key: key, Action: action}
+	if ok {
+		entry.Repo = m.nameOf(r.project.Path)
+		entry.Dir = r.project.Path
+	}
+	cmdlog.RecordIntent(entry)
 }
 
 // nameOf devuelve el nombre visible de un path: el nombre del

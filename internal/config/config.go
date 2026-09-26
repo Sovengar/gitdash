@@ -195,6 +195,9 @@ func DefaultKeybindings() Keybindings {
 		// ya no hace falta para abrirla.
 		"fold":    "enter",
 		"command": "!",
+		// Panel del command log: qué se ejecutó de verdad y con qué
+		// resultado (incluida la política de pull que decidió el gitconfig).
+		"log": "l",
 		// Borrado de un worktree desde su sub-fila (nunca la rama).
 		"worktree_remove": "D",
 	}
@@ -289,21 +292,23 @@ func (c Config) KeyByAction() map[string]string {
 // Acciones internas como "quit" no aparecen (ya están hardcodeadas
 // en la UI o son universales).
 var hintLabels = map[string]string{
-	"up":              "↑/k",
-	"down":            "↓/j",
-	"dirty":           "dirty",
-	"search":          "filter",
-	"fetch":           "fetch",
-	"fetch_all":       "fetch all",
-	"pull":            "pull ▸",
-	"push":            "push",
-	"lazygit":         "lazygit",
-	"editor":          "edit",
-	"rescan":          "rescan",
-	"recollect":       "recollect",
-	"fold":            "fold",
-	"command":         "cmd",
-	"quit":            "quit",
+	"up":        "↑/k",
+	"down":      "↓/j",
+	"dirty":     "dirty",
+	"search":    "filter",
+	"fetch":     "fetch",
+	"fetch_all": "fetch all",
+	"pull":      "pull ▸",
+	"push":      "push",
+	"lazygit":   "lazygit",
+	"editor":    "edit",
+	"rescan":    "rescan",
+	"recollect": "recollect",
+	"fold":      "fold",
+	"command":   "cmd",
+	"log":       "log",
+	"quit":      "quit",
+	// acción de borrado de worktree: la tecla la antepone HintBarLines.
 	"worktree_remove": "remove wt",
 }
 
@@ -318,7 +323,7 @@ func (c Config) HintBarLines() []string {
 	for _, action := range []string{
 		"dirty", "search", "fetch", "fetch_all", "pull",
 		"push", "lazygit", "editor", "rescan", "recollect",
-		"fold", "command", "quit", "worktree_remove",
+		"fold", "command", "log", "quit", "worktree_remove",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {

@@ -46,6 +46,12 @@ var (
 
 	styleDetailKey = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 
+	// Panel del command log: la ejecución se lee normal y la intención
+	// (la tecla) queda tenue, porque es contexto y no resultado.
+	styleLogExec   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	styleLogIntent = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	styleLogOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+
 	// color del borde de las secciones (gris tenue, no compite con el contenido)
 	borderColor = lipgloss.Color("238")
 
