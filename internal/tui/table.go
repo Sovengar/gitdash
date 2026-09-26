@@ -380,14 +380,7 @@ func headerColumns(width int) string {
 // dirty/ahead/behind/sync por worktree. Respeta el contrato de celda
 // `(texto, estilo)` con pad() ANTES del estilo.
 func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
-	// En detached no hay rama; el head corto es el dato disponible.
-	branch := wt.Branch
-	if branch == "" {
-		branch = "(detached)"
-		if wt.Head != "" {
-			branch += " " + wt.Head
-		}
-	}
+	branch := worktreeBranchLabel(wt)
 	cells := []struct {
 		text  string
 		style lipglossStyle
@@ -410,6 +403,18 @@ func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
 		return styleCursor.Render("▸ ") + line
 	}
 	return "  " + line
+}
+
+// worktreeBranchLabel nombra la rama de un worktree para la sub-fila y los
+// placeholders AI: en detached el head corto es el único dato disponible.
+func worktreeBranchLabel(wt gitstatus.Worktree) string {
+	if wt.Branch != "" {
+		return wt.Branch
+	}
+	if wt.Head != "" {
+		return "(detached) " + wt.Head
+	}
+	return "(detached)"
 }
 
 // primaryHeaderLine dibuja `▾/▸ primario (n)`: expandido/colapsado con el

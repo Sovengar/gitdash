@@ -36,6 +36,9 @@ name = "api"                # nombre mostrado (default: nombre del directorio)
 primary_group = "vsocial"   # grupo primario (nivel 1 plegable)
 secondary_group = "backend" # grupo secundario (nivel 2 plegable, dentro del primario)
 sync_branch = "main"        # rama de referencia de la columna SYNC (override del global)
+
+[ai.pull]
+prompt = "arreglá el rebase que quedó a medias"   # texto que recibe tu comando AI
 ```
 
 ### Config
@@ -54,7 +57,17 @@ sync_branch = "main"     # rama de referencia para la columna SYNC
 auto        = true    # fetch automático tras cada scan/rescan
 concurrency = 4       # fetches en paralelo (batches)
 timeout     = "30s"   # timeout por fetch
+
+[ai.pull]
+command = "jcode -run {prompt}"   # ejecutable de la variante AI del selector de pull
 ```
+
+El comando AI es **opt-in y el ejecutable sale siempre de la config global**
+(el marcador va al repo y no es de fiar): el `.gitdash.toml` solo aporta el
+texto del `prompt`. Ese texto entra como **un único argumento** del proceso,
+nunca interpolado en un `sh -c`, así que espacios, comillas o `$` no se
+interpretan. Placeholders de contexto opcionales: `{prompt}`, `{branch}`,
+`{upstream}`, `{state}`, `{ahead}`, `{behind}`, `{sync}`.
 
 ## El panel de debajo de la tabla
 
@@ -137,12 +150,18 @@ attention-first).
 | `p` `r` | rebase | `git pull --rebase --autostash` |
 | `p` `f` | ff-only | `git pull --ff-only` |
 | `p` `m` | merge | `git pull --no-rebase` |
+| `p` `a` | AI | tu comando de `[ai.pull] command` (lanza directo) |
 
 La variante **default va sin flags a propósito**: la política de reconciliación
 es de tu gitconfig (`pull.rebase`, `pull.ff`, …) y los flags en la línea de
 comandos la pisan. Con `--ff-only` hardcodeado, un `pull.rebase=true` en tu
 config quedaba ignorado. Las otras tres variantes existen para pisar la política
 sin tener que editar la config de gitdash.
+
+La variante **AI** es un handoff de terminal: gitdash le presta la pantalla a tu
+comando (que corre en el directorio del repo, con el `prompt` del marcador) y al
+volver re-colecciona el estado. Sin prompt en el marcador, sin `[ai.pull]
+command` o sin el binario instalado solo avisa: nunca lanza a ciegas.
 
 Cualquier otra tecla cancela el selector y ejecuta su acción normal (`esc`
 cancela sin más). El repo objetivo se captura al pulsar `p`, así que la segunda
@@ -184,8 +203,13 @@ Resultados que el panel distingue: `rebase`, `rebase+autostash`, `merge`,
 
 El log vive **solo en memoria y por sesión** (500 entradas): no escribe ningún
 fichero. Una intención sin `exec` detrás significa que la acción se rechazó
-después (el repo ya tenía una en curso, `lazygit` no está instalado); el motivo
-está en el toast del mismo momento.
+después (el repo ya tenía una en curso, `lazygit` no está instalado, o al pull
+con IA le faltaba prompt, comando o binario); el motivo está en el toast del
+mismo momento.
+
+El **pull con IA** (`p` `a`) deja también sus dos líneas: la intención `key a` y
+el `exec` con el argv resuelto, cuyo último elemento es el prompt íntegro. El
+log es donde se audita qué se le pidió a la IA.
 
 ## Worktrees y grupos
 

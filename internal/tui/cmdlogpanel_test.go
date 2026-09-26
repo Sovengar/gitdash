@@ -271,6 +271,70 @@ func TestCerrarElPanelSueltaElSelectorArmado(t *testing.T) {
 	}
 }
 
+// Abrir el panel también suelta el selector: dentro de él `a` es "show all", no
+// la variante AI, así que un selector armado secuestraría la tecla.
+func TestAbrirElPanelSueltaElSelectorArmado(t *testing.T) {
+	m, _ := logModel(t)
+	m = cursorOn(t, m, "/tmp/dirty-api")
+	m, _ = press(m, "p")
+	if m.pullArmed == nil {
+		t.Fatal("p no armó el selector")
+	}
+	m, _ = press(m, "l") // abre el panel
+	if m.pullArmed != nil {
+		t.Error("abrir el panel dejó el selector de pull armado")
+	}
+	m, _ = press(m, "a")
+	if !m.logShowAll {
+		t.Error("a no alternó el filtro del panel")
+	}
+	if len(m.running) != 0 {
+		t.Errorf("a lanzó una acción: %v", m.running)
+	}
+}
+
+// Estando en el panel, `p` no arma el selector: el panel es un view mode y sus
+// teclas mandan, así que `a` nunca queda shadowed.
+func TestArmarPullDentroDelPanelNoArma(t *testing.T) {
+	m, _ := logModel(t)
+	m, _ = press(m, "l")
+	m, _ = press(m, "p")
+	if m.pullArmed != nil {
+		t.Error("p armó el selector dentro del panel del log")
+	}
+	m, _ = press(m, "a")
+	if !m.logShowAll {
+		t.Error("a no alternó el filtro: el selector shadoweó la tecla")
+	}
+	if len(m.running) != 0 {
+		t.Errorf("a lanzó una acción: %v", m.running)
+	}
+}
+
+// Con un input activo la guarda del panel no puede correr: la `p` es del filtro
+// y del input de `!`, no la variante del selector. Sin esto se la comía.
+func TestPanelNoSeComeLaPDeLosInputs(t *testing.T) {
+	t.Run("filtro", func(t *testing.T) {
+		m, _ := logModel(t)
+		m, _ = press(m, "l") // abre el panel
+		m, _ = press(m, "/") // activa el filtro
+		m, _ = press(m, "x")
+		m, _ = press(m, "p")
+		if got := m.searchInput.Value(); got != "xp" {
+			t.Errorf("filtro = %q, want \"xp\" (la p se perdió)", got)
+		}
+	})
+	t.Run("comando", func(t *testing.T) {
+		m, _ := logModel(t)
+		m, _ = press(m, "l")
+		m, _ = press(m, "!") // abre el input de comando
+		m, _ = press(m, "p")
+		if got := m.cmdInput.Value(); got != "p" {
+			t.Errorf("cmdInput = %q, want \"p\" (la p se perdió)", got)
+		}
+	})
+}
+
 // Abrir el panel es una acción de vista: no debe dejar intención en el log (el
 // log es de comandos, no de teclas).
 func TestAbrirElPanelNoRegistraIntencion(t *testing.T) {
@@ -534,5 +598,78 @@ func TestBorradoWorktreeRegistraElArgvResuelto(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("el command log no registró el borrado: %v", rec.Entries())
+	}
+}
+
+// El argv puede llevar texto no confiable (el prompt del marcador). El panel
+// sanea antes de pintar: fuera caracteres de control y secuencias de escape,
+// saltos de línea colapsados a un espacio.
+func TestSanitizeLogTextEliminaControlYColapsaLineas(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"osc52", "x\x1b]52;c;cGF3bmVk\x07y", "xy"},
+		{"csi", "a\x1b[31mrojo\x1b[0mb", "arojob"},
+		{"multilinea", "linea1\nlinea2\r\nlinea3", "linea1 linea2 linea3"},
+		{"tabulador", "a\tb", "a b"},
+		{"c0", "a\x01b\x7fc", "abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeLogText(tc.in); got != tc.want {
+				t.Errorf("sanitizeLogText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// El formato Unicode (bidi, zero-width) y los separadores de línea no pueden
+// sobrevivir: reordenarían o partirían visualmente una línea del log.
+func TestSanitizeLogTextQuitaFormatoYZeroWidth(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"rtl-override", "a\u202eb", "ab"},
+		{"zwsp", "a\u200bb", "ab"},
+		{"line-separator", "a\u2028b", "ab"},
+		{"para-separator", "a\u2029b", "ab"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeLogText(tc.in); got != tc.want {
+				t.Errorf("sanitizeLogText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// Una entrada siempre ocupa UNA línea y no deja pasar el payload inyectado: el
+// prompt no confiable no puede añadir líneas al panel ni emitir escapes.
+func TestPanelSaneaElArgvDeUnaEntrada(t *testing.T) {
+	for _, prompt := range []string{
+		"x\x1b]52;c;cGF3bmVk\x07y",
+		"linea1\nlinea2\nlinea3",
+		"x\u202ey\u200bz",
+	} {
+		m, rec := logModel(t)
+		sembrar(rec, cmdlog.Entry{
+			Repo: "dirty-api", Class: cmdlog.ClassAction, Action: "pull_ai",
+			Argv: []string{"jcode", "-run", prompt}, Exit: 0,
+		})
+		m.width, m.height = 200, 30
+		m, _ = press(m, "l")
+
+		raw := m.View().Content
+		if strings.Contains(raw, "]52;c;") || strings.Contains(raw, "cGF3bmVk") {
+			t.Errorf("prompt %q: el payload de escape llegó al panel", prompt)
+		}
+		if strings.ContainsRune(raw, '\u202e') || strings.ContainsRune(raw, '\u200b') {
+			t.Errorf("prompt %q: formato/zero-width llegó al panel", prompt)
+		}
+		plano := stripANSI(raw)
+		if lines := strings.Split(plano, "\n"); len(lines) != 30 {
+			t.Errorf("prompt %q: líneas = %d, want 30 (un prompt multilínea no puede romper el alto)", prompt, len(lines))
+		}
+		if log := sectionContent(t, plano, "log"); !strings.Contains(log, "jcode") {
+			t.Errorf("prompt %q: el argv saneado no se pintó:\n%s", prompt, log)
+		}
 	}
 }

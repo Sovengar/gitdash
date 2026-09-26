@@ -154,9 +154,10 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 ## Gotcha de diseño: el selector de pull
 
 `p` no ejecuta: arma `pullArmed` con el path capturado, y la **siguiente** tecla
-elige variante (`p`/`r`/`f`/`m` en `PullKinds`). Dos reglas:
+elige variante (`p`/`r`/`f`/`m` en `PullKinds`, más `a` para la variante AI, que
+no es un pull de git y se resuelve aparte). Dos reglas:
 
-- Las cuatro teclas **chocan con acciones reales** de la tabla (`p`=pull,
+- Las teclas de variante **chocan con acciones reales** de la tabla (`p`=pull,
   `r`=rescan, `f`=fetch), así que el estado armado tiene que consumir la tecla
   **antes** del enrutado normal en `handleKey`.
 - Cualquier otra tecla **cancela y sigue su curso normal** (no se consume): es
@@ -286,10 +287,50 @@ Reglas del panel (`internal/tui/cmdlogpanel.go`):
 - El offset cuenta **desde la cola** (0 = lo más reciente al final): en un log se
   mira lo último, y las entradas nuevas no te sacan de sitio si estabas
   scrolleado arriba. Se recorta contra las líneas visibles, nunca deja huecos.
+- **El argv es texto no confiable** (lleva el prompt del marcador en `pull_ai`):
+  `logLine` lo pasa por `sanitizeLogText` antes de pintarlo. Sin eso, una
+  secuencia OSC/CSI inyectada se renderiza tal cual, un carácter de formato
+  (bidi/zero-width) reordena la línea y un prompt multilínea rompe el alto del
+  panel (una entrada = una línea). El saneo quita control (C0/C1/DEL), Cf
+  (bidi, zero-width) y U+2028/U+2029, además de las secuencias ESC, y es **solo
+  de pintura**: el argv ejecutado y el registrado no se tocan.
 - `computeLogColumns` degrada columnas por valor (veredicto → resultado → repo →
   kind) y da al argv lo que sobra: por debajo de `logMinArgv` (20, lo que cabe
   `git pull --ff-only`) el comando se lee a medias, que es lo que el panel existe
   para evitar.
+
+## Gotcha de diseño: pull con IA (`p a`)
+
+El selector de `p` tiene una quinta variante, `a`, que hace handoff al comando AI
+configurado. `p a` **lanza directamente** (sin preview ni confirmación: la
+segunda tecla es la decisión). Decisiones que no son evidentes:
+
+- **El límite de confianza es el eje de la feature**: el ejecutable/argv sale
+  SOLO de la config global (`[ai.pull] command` en
+  `~/.config/gitdash/config.toml`); el marcador commiteado
+  (`.gitdash.toml`, input no fiable) aporta SOLO el texto del prompt. Ese texto
+  entra como **un único elemento de argv** (`config.BuildAIArgv`), jamás
+  interpolado en un `sh -c`. Si duplicas la sustitución en otro sitio, rompes el
+  límite.
+- **`pull_ai` NO es un `PullKind`**: `PullKinds` alimenta
+  `startActionCmd → cfg.CmdArgs → gitstatus.Run` y el guard de
+  `RebaseInProgress`, que son caminos de git. `pull_ai` se resuelve como un
+  `case` explícito de `a` dentro del bloque `pullArmed` de `update.go` (el
+  estado armado consume la tecla antes del enrutado normal, como p/r/f/m).
+- **El prompt se relee on demand** con `discovery.MarkerPrompt` y **no** se
+  guarda en `discovery.Project`: así no engorda `repos.json`, no queda obsoleto
+  tras editar el marcador y se resuelve en la pulsación, no por frame.
+- **`pullOptions` es la fuente única de variantes**: `PullKinds`, `pullPrompt()`
+  y `pullVariantLabel()` derivan de ella. El bug latente que arregla es real: el
+  prompt tenía `[]string{"p","r","f","m"}` hardcodeado y una variante nueva no
+  aparecía.
+- **Un rebase a medias no bloquea la variante AI**: sin preview no hay nada que
+  surfacear, y resolver el rebase puede ser justo la intención del prompt. No se
+  consulta `RebaseInProgress` (a diferencia de los pull de git).
+- **Handoff sin timeout ni captura**, como lazygit: la terminal es del hijo y al
+  volver `execDoneMsg` registra el exec en el command log (`Dur=0`, argv con el
+  prompt íntegro) y re-colecta el estado. Sin prompt, sin comando o sin binario
+  (`exec.LookPath`) solo hay toast.
 
 ## Gotchas de cableado
 
