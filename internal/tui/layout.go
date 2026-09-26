@@ -16,8 +16,8 @@ const (
 	// 40%), el mismo reparto que usa prdash para su ficha de ítem.
 	previewShare = 2
 	// minPreviewLines es el alto que merece la ficha: la cabecera de estado más
-	// una lista con su cabecera y la ayuda al pie. Por debajo de la cabecera
-	// (detailHeadLines) el panel no dice nada, así que entonces no entra.
+	// una lista con su cabecera. Por debajo de la cabecera (detailHeadLines) el
+	// panel no dice nada, así que entonces no entra.
 	minPreviewLines = 10
 	// minBodyLines son las filas que la tabla conserva para que el panel entre.
 	// Por debajo no hay ventana que desplazar.

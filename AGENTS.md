@@ -186,8 +186,10 @@ detalle, ni `detailSection`, ni `detailOpen`. Decisiones que no son evidentes:
 - **El panel es aditivo.** `computeLayout` busca el mayor alto de panel que
   (a) deje `minBodyLines` filas de tabla y (b) no obligue a recortar hints ni a
   ocultar stats/keybinds (`mismaChromeQue`). Si no hay ninguno, el panel no se
-  dibuja. Por debajo de ~22 líneas (config por defecto) el dashboard es
-  exactamente el que había antes de la feature.
+  dibuja. Por debajo de ~21 líneas (config por defecto) el dashboard es
+  exactamente el que había antes de la feature. Ese suelo sale de
+  `detailHeadLines`, así que `minPanelHeight` (test) lo deriva en vez de
+  mendigar el número.
 - **El share se mide sobre el alto LIBRE**, no sobre el terminal: contra el
   total, una ventana de 30 líneas se quedaba con 12 para la ficha y 3 para la
   tabla.
@@ -196,10 +198,18 @@ detalle, ni `detailSection`, ni `detailOpen`. Decisiones que no son evidentes:
   reparte el resto con `listBudget`, que reserva la línea del aviso `… N más`
   cuando la lista no cabe entera. `rows` es `lay.previewLines`. Sin eso, las
   listas se cuentan como si cupieran y luego las recorta la caja sin avisar.
+- **El path es un campo, no una línea suelta**: `path` va en la misma columna
+  clave/valor que `branch`/`upstream`/`state`/`sync`, y su valor sale atenuado
+  (es contexto, no estado). En línea propia con el hueco que la separaba se
+  llevaba una altura que las listas necesitan; al ser campo, la cabecera son
+  `detailHeadLines` = 5 líneas.
+- **La ficha no repite las teclas de la fila**: `g lazygit · ! cmd` ya están en
+  la sección de keybinds, así que la ficha no lleva pie (`fichaTail` solo añade
+  el input de `!`). Duplicarlas costaba una línea de alto útil y dos fuentes que
+  podían divergir con un rebind.
 - **El input de `!` va al FINAL de la ficha y siempre se ve** (`fichaTail`): si
   la ficha llenó la caja, se recorta la ficha por arriba. Escribir un comando sin
-  ver el prompt es escribir a ciegas. Con el input abierto sustituye a la ayuda
-  al pie.
+  ver el prompt es escribir a ciegas.
 - **La caja se rellena** (`fitLines`): el alto lo dice el layout, no la ficha. Sin
   el relleno, una ficha corta haría subir los keybinds y la vista no ocuparía la
   terminal.

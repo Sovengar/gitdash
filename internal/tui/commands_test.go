@@ -195,22 +195,28 @@ func TestBangInputVisibleEnElPanel(t *testing.T) {
 	}
 	// Lo que se recorta es la ficha por arriba, no la cabecera: el repo y su
 	// estado siguen estando.
-	if panel[0] != "/tmp/dirty-api" {
+	if !strings.HasPrefix(panel[0], "path") || !strings.Contains(panel[0], "/tmp/dirty-api") {
 		t.Errorf("la cabecera de la ficha no está: %q", panel[0])
 	}
-	// Con el input abierto la ayuda al pie se sustituye (es lo que dice enter).
-	if strings.Contains(strings.Join(panel, "\n"), "g lazygit · ! cmd") {
-		t.Errorf("con el input abierto sigue la ayuda al pie:\n%v", panel)
+	// Con el input abierto la ficha no revive los keybinds del pie.
+	if strings.Contains(strings.Join(panel, "\n"), "g lazygit") {
+		t.Errorf("con el input abierto vuelven los keybinds del pie:\n%v", panel)
 	}
 }
 
-// Sin input abierto, la ficha corta por su ayuda al pie.
-func TestFichaTerminaEnLaAyuda(t *testing.T) {
+// Sin input abierto, la ficha no lleva pie: las teclas de la fila viven en la
+// sección de keybinds, y aquí solo se pintan datos del repo.
+func TestFichaNoRepiteLosKeybinds(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/old-clean")
 	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "old-clean"))
-	if last := lastNonEmpty(panel); last != "g lazygit · ! cmd" {
-		t.Errorf("la última línea de la ficha es %q, want la ayuda al pie", last)
+	for _, dup := range []string{"g lazygit", "! cmd", "lazygit"} {
+		if last := lastNonEmpty(panel); strings.Contains(last, dup) {
+			t.Errorf("la ficha termina en %q, quiere un dato del repo", last)
+		}
+		if strings.Contains(strings.Join(panel, "\n"), dup) {
+			t.Errorf("la ficha repite %q, que ya está en keybinds:\n%v", dup, panel)
+		}
 	}
 }
 

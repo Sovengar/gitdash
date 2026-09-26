@@ -93,10 +93,12 @@ func TestPreviewEnSubFilaDeWorktree(t *testing.T) {
 	if !strings.Contains(panel, "(detached)") {
 		t.Errorf("el panel no muestra la rama del worktree:\n%s", panel)
 	}
-	// La ayuda al pie son las teclas que operan sobre la fila. Ya no hay `enter
-	// detail` que ofrecer: la ficha ES la vista.
-	if !strings.Contains(panel, "g lazygit · ! cmd") {
-		t.Errorf("el panel no ofrece las teclas de la fila:\n%s", panel)
+	// La ficha no repite las teclas de la fila: la sección de keybinds ya las
+	// tiene, y duplicarlas aquí quitaba una línea a las listas.
+	for _, dup := range []string{"g lazygit", "! cmd"} {
+		if strings.Contains(panel, dup) {
+			t.Errorf("el panel repite %q, que ya está en keybinds:\n%s", dup, panel)
+		}
 	}
 	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
 		if strings.Contains(panel, bad) {

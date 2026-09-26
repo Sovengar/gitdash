@@ -142,14 +142,16 @@ func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	if l := computeLayout(30, false, defaultHintLines, false); l.previewLines == 0 {
 		t.Errorf("h=30: sin panel: %+v", l)
 	}
-	// El panel más pequeño que entra es el de la cabecera de la ficha (6), y solo
-	// si a la tabla le quedan minBodyLines filas.
-	if l := computeLayout(22, false, defaultHintLines, false); l.previewLines != detailHeadLines {
-		t.Errorf("h=22: previewLines = %d, want %d", l.previewLines, detailHeadLines)
+	// El panel más pequeño que entra es el de la cabecera de la ficha, y solo
+	// si a la tabla le quedan minBodyLines filas. La cabecera son detailHeadLines
+	// líneas, así que el alto mínimo se deriva de ella en vez de ir a fuego.
+	first := minPanelHeight(t)
+	if l := computeLayout(first, false, defaultHintLines, false); l.previewLines != detailHeadLines {
+		t.Errorf("h=%d: previewLines = %d, want %d", first, l.previewLines, detailHeadLines)
 	}
 	// Por debajo, nada de panel y el reparto de siempre: hints y stats intactos y
 	// la tabla con lo que sobra.
-	for h := 14; h <= 21; h++ {
+	for h := 14; h < first; h++ {
 		l := computeLayout(h, false, defaultHintLines, false)
 		if l.previewLines != 0 {
 			t.Errorf("h=%d: previewLines = %d, want 0 (el panel no puede pedir más)", h, l.previewLines)
@@ -163,7 +165,7 @@ func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 		}
 	}
 	// Y con el panel presente nunca se recorta una hint ni se oculta una sección.
-	for h := 22; h <= 80; h++ {
+	for h := first; h <= 80; h++ {
 		l := computeLayout(h, false, defaultHintLines, false)
 		if l.previewLines == 0 {
 			continue
@@ -212,7 +214,21 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 	}
 }
 
-// altoTotal suma todo lo que el layout reserva (cajas y Borders incluidos) más el
+// minPanelHeight es el alto de terminal más bajo en el que el panel de preview
+// entra. Se busca en vez de estar a fuego porque depende de detailHeadLines: si
+// la cabecera de la ficha crece o encoge, el suelo se mueve solo.
+func minPanelHeight(t *testing.T) int {
+	t.Helper()
+	for h := 0; h <= 120; h++ {
+		if computeLayout(h, false, defaultHintLines, false).previewLines > 0 {
+			return h
+		}
+	}
+	t.Fatal("el panel no entra a ninguna altura")
+	return 0
+}
+
+// altoTotal suma todo lo que el layout reserva (cajas y bordes incluidos) más el
 // cuerpo central. Es la altura que la vista tiene que medir.
 func (l layout) altoTotal(hasFilter bool) int {
 	n := tableChrome

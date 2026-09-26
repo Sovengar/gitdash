@@ -10,9 +10,9 @@ import (
 )
 
 // detailHeadLines son las líneas fijas de la ficha antes de las listas: path,
-// hueco, branch, upstream, state y sync. Se reservan siempre, así que las
-// listas (worktrees, ficheros, commits) se reparten el resto del alto.
-const detailHeadLines = 6
+// branch, upstream, state y sync. Se reservan siempre, así que las listas
+// (worktrees, ficheros, commits) se reparten el resto del alto.
+const detailHeadLines = 5
 
 // minListBlockLines es lo que consume una lista antes de enseñar un solo
 // elemento: el hueco que la separa de la ficha y su cabecera. Por debajo no se
@@ -54,25 +54,19 @@ func asOrDash(s string) string {
 // escribir un comando no empuje la ficha fuera de la caja.
 const cmdInputLines = 2
 
-// detailFooter es la ayuda al pie de la ficha. Con el input de `!` abierto lo
-// relevante es qué hace enter, y eso tiene prioridad sobre el resto.
-func (m *Model) detailFooter() string {
-	if m.cmdOpen {
-		return "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
-	}
-	return "g lazygit · ! cmd"
-}
-
-// fichaTail cierra la ficha: la ayuda al pie, o el input de `!` si está abierto.
-// El input se pinta SIEMPRE al final, aunque la ficha haya llenado la caja:
-// escribir un comando sin ver dónde se escribe es peor que no ver el resto de
-// la ficha, así que lo que sobra se recorta por arriba.
+// fichaTail cierra la ficha con el input de `!` si está abierto. El input se
+// pinta SIEMPRE al final, aunque la ficha haya llenado la caja: escribir un
+// comando sin ver dónde se escribe es peor que no ver el resto de la ficha,
+// así que lo que sobra se recorta por arriba.
+//
+// Sin input no hay pie: las teclas de la fila ya están en la sección de
+// keybinds, y repetirlas aquí solo ocupaba una línea de la ficha.
 func (m *Model) fichaTail(body string, rows int) string {
-	if m.cmdOpen {
-		return clipTo(body, max(1, rows-cmdInputLines)) +
-			"\n\n" + styleDetailKey.Render(m.cmdInput.Prompt) + m.cmdInput.View()
+	if !m.cmdOpen {
+		return body
 	}
-	return body + "\n" + styleHint.Render(m.detailFooter())
+	return clipTo(body, max(1, rows-cmdInputLines)) +
+		"\n\n" + styleDetailKey.Render(m.cmdInput.Prompt) + m.cmdInput.View()
 }
 
 // renderDetail compone la ficha del repo bajo el cursor con datos vivos del
@@ -88,9 +82,14 @@ func (m *Model) renderDetail(r row, rows int) string {
 
 	p := r.project
 	rows = max(1, rows)
-	b.WriteString(styleHint.Render(truncate(p.Path, max(20, m.width-4))) + "\n\n")
 
 	key := styleDetailKey.Render
+
+	// El path es un campo más de la cabecera, no una línea suelta: en su propia
+	// línea (con el hueco que la separaba) se llevaba una altura que las listas
+	// necesitan. El valor va atenuado porque es contexto, no estado.
+	b.WriteString(key("path    ") +
+		styleHint.Render(truncate(p.Path, max(20, m.width-13))) + "\n")
 
 	branch := r.snap.Status.Branch
 	if r.snap.Status.Detached {
@@ -235,9 +234,10 @@ func (m *Model) renderWorktreeDetail(e tableEntry, rows int) string {
 func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows int) string {
 	var b strings.Builder
 
-	b.WriteString(styleHint.Render(truncate(wt.Path, max(20, m.width-4))) + "\n\n")
-
 	key := styleDetailKey.Render
+	b.WriteString(key("path    ") +
+		styleHint.Render(truncate(wt.Path, max(20, m.width-13))) + "\n")
+
 	branch := wt.Branch
 	if branch == "" {
 		branch = "(detached)"
