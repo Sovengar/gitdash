@@ -229,8 +229,11 @@ func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
 	if !strings.Contains(out, "pull old-clean") {
 		t.Errorf("el indicador de acción en curso no sobrevive a width=40:\n%s", out)
 	}
-	if n := strings.Count(out, "pull"); n != 1 {
-		t.Errorf("la acción en curso aparece %d veces, want 1 (sin duplicar):\n%s", n, out)
+	// "sin duplicar" se refiere al indicador: el hint bar menciona la tecla
+	// pull legítimamente, así que se cuenta la etiqueta del indicador, no la
+	// palabra suelta.
+	if n := strings.Count(out, "pull old-clean"); n != 1 {
+		t.Errorf("el indicador aparece %d veces, want 1 (sin duplicar):\n%s", n, out)
 	}
 	for i, l := range strings.Split(m.View().Content, "\n") {
 		if w := ansi.StringWidth(l); w != m.width {
@@ -273,7 +276,7 @@ func TestToastDeFalloConHintVisible(t *testing.T) {
 	m = updated.(Model)
 
 	rendered := collapse(strings.Join(m.toasts.lines(), "\n"))
-	if !strings.Contains(rendered, "pull --rebase manual") {
+	if !strings.Contains(rendered, "divergió") {
 		t.Errorf("el hint no queda visible en el toast renderizado:\n%s", rendered)
 	}
 }
@@ -319,7 +322,7 @@ func TestAccionGeneraToast(t *testing.T) {
 	if len(m.toasts.toasts) != 1 || m.toasts.toasts[0].level != toastError {
 		t.Fatalf("acción ko: %+v, want toast de error", m.toasts.toasts)
 	}
-	if txt := m.toasts.toasts[0].text; !strings.Contains(txt, "failed") || !strings.Contains(txt, "diverged") {
+	if txt := m.toasts.toasts[0].text; !strings.Contains(txt, "failed") || !strings.Contains(txt, "divergió") {
 		t.Errorf("el toast de error no trae motivo/hint: %q", txt)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -172,13 +173,21 @@ func Fetch(ctx context.Context, dir string, args ...string) error {
 	return err
 }
 
+// Run ejecuta un argv de git en dir y devuelve la salida combinada
+// (stdout+stderr). Es el ejecutor genérico para las acciones de la UI: el kind
+// ya viene resuelto a argv en config, así que no hace falta un wrapper por
+// acción. Los defaults por acción viven en Pull/Push.
+func Run(ctx context.Context, dir string, args ...string) (string, error) {
+	return runGitCombined(ctx, dir, args...)
+}
+
 // Pull ejecuta `git pull` con los args dados (default: --ff-only) y
 // devuelve la salida combinada para el detalle.
 func Pull(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) == 0 {
 		args = []string{"pull", "--ff-only"}
 	}
-	return runGitCombined(ctx, dir, args...)
+	return Run(ctx, dir, args...)
 }
 
 // Push ejecuta `git push` con los args dados y devuelve la salida
@@ -187,16 +196,36 @@ func Push(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) == 0 {
 		args = []string{"push"}
 	}
-	return runGitCombined(ctx, dir, args...)
+	return Run(ctx, dir, args...)
 }
 
-// Sync ejecuta `git sync` (default: pull --rebase --autostash) con los
-// args dados y devuelve la salida combinada.
-func Sync(ctx context.Context, dir string, args ...string) (string, error) {
-	if len(args) == 0 {
-		args = []string{"pull", "--rebase", "--autostash"}
+// RebaseInProgress reporta si dir tiene un rebase a medias. Un pull con
+// --rebase que choca no es un fallo limpio: deja el repo con la historia
+// reescrita a medias y el índice en conflicto, así que la UI necesita
+// distinguir "falló" de "te dejó a medias".
+//
+// Usa `git rev-parse --git-path` en vez de mirar `.git/rebase-*` a pelo porque
+// en un worktree `.git` es un fichero y el estado del rebase vive en
+// `.git/worktrees/<nombre>/`; --git-path resuelve la ruta correcta en ambos
+// casos.
+func RebaseInProgress(ctx context.Context, dir string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := runGit(ctx, dir, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(string(out))
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			return true
+		}
 	}
-	return runGitCombined(ctx, dir, args...)
+	return false
 }
 
 // RemoveWorktree borra un worktree registrado ejecutando

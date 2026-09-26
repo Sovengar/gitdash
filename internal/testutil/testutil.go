@@ -101,6 +101,20 @@ func PushUpstreamCommits(t *testing.T, bare string, n int, prefix string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 }
 
+// PushUpstreamFile crea un commit en un clone temporal del bare origin que
+// ESCRIBE name con content, y lo pushea. PushUpstreamCommits solo crea ficheros
+// nuevos, así que no puede generar un conflicto: para eso hace falta que las dos
+// partes toquen el mismo fichero con contenido distinto.
+func PushUpstreamFile(t *testing.T, bare, name, content, msg string) {
+	t.Helper()
+	clone := t.TempDir()
+	git(t, clone, "clone", "--quiet", bare, ".")
+	git(t, clone, "config", "user.email", "test@gitdash.local")
+	git(t, clone, "config", "user.name", "upstream")
+	CommitFiles(t, clone, map[string]string{name: content}, msg)
+	git(t, clone, "push", "--quiet", "origin", "main")
+}
+
 // Detach pone el repo en HEAD detached sobre el commit actual.
 func Detach(t *testing.T, dir string) {
 	t.Helper()

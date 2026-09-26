@@ -53,10 +53,15 @@ type fetchStateMsg struct {
 // fetchDoneMsg cierra un batch de fetch.
 type fetchDoneMsg struct{ ok, failed int }
 
-// actionMsg entrega el resultado de pull/push.
+// actionMsg entrega el resultado de pull/push. cmd es el argv resuelto que se
+// ejecutó (la política de pull puede venir del gitconfig, así que la UI no
+// puede asumir los flags) y rebaseInProgress marca que el pull --rebase
+// dejó el repo con un rebase a medias en vez de fallar limpio.
 type actionMsg struct {
-	path, kind, output string
-	err                string
+	path, kind, cmd  string
+	output           string
+	err              string
+	rebaseInProgress bool
 }
 
 // worktreeRemovedMsg entrega el resultado de borrar un worktree: el nombre
@@ -91,9 +96,38 @@ type notifyMsg struct {
 // tickMsg expira notificaciones y anima el spinner.
 type tickMsg struct{}
 
-// actionResult guarda la salida de la última acción por repo.
+// actionResult guarda la salida de la última acción por repo. cmd es el argv
+// resuelto: con la política de pull delegada en el gitconfig es la única forma
+// de que el usuario vea qué se ejecutó de verdad.
 type actionResult struct {
-	kind, output, err string
+	kind, cmd, output, err string
+}
+
+// PullKinds son las variantes de pull del selector de la tecla `p`. Cada una
+// existe porque la política por defecto vive en el gitconfig y hay que poder
+// pisarla sin editar la config de gitdash.
+var PullKinds = map[string]string{
+	"p": "pull",        // sin flags: decide el gitconfig
+	"r": "pull_rebase", // rebase + autostash
+	"f": "pull_ff",     // ff-only
+	"m": "pull_merge",  // merge clásico
+}
+
+// IsPullKind reporta si un kind es una variante de pull.
+func IsPullKind(kind string) bool {
+	for _, k := range PullKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// armedPull es el selector de variante de pull pendiente (nil = ninguno).
+// Captura el path al armar: la segunda tecla resuelve sobre esa fila, no sobre
+// la que esté bajo el cursor cuando llegue.
+type armedPull struct {
+	path string
 }
 
 // armedRemoval es la confirmación pendiente de borrado de un worktree (nil =
@@ -150,6 +184,10 @@ type Model struct {
 	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
 	// Es estado efímero de sesión: no se persiste.
 	armed *armedRemoval
+	// pullArmed es el selector de variante de pull pendiente (nil = ninguno).
+	// Mismo carácter efímero que armed: se resuelve o se cancela con la
+	// siguiente tecla.
+	pullArmed *armedPull
 	// removeGen/removeTokens correlacionan cada borrado en vuelo con su
 	// resultado. removeTokens mapea path del repo padre → token del intento
 	// vigente (el guard de "acción en curso" es por padre, así que el token
@@ -382,6 +420,10 @@ func (m *Model) fetchBatchCmd(paths []string) tea.Cmd {
 
 // startActionCmd lanza pull/push capturado sobre un repo. Devuelve
 // además el texto de guard si la acción está bloqueada.
+//
+// El argv se resuelve aquí y viaja en el mensaje: con la política de pull en el
+// gitconfig, la UI no puede deducir qué se ejecutó, y un pull --rebase que
+// choca deja el repo a medias en vez de fallar limpio (rebaseInProgress).
 func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -389,32 +431,34 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	m.running[path] = kind
 	appCtx := m.ctx
 	events := m.events
+	args := m.cfg.CmdArgs(kind)
+	// El argv resuelto se compone en el hilo principal (lectura de cfg) para
+	// que el mensaje sea determinista respecto a la tecla que lo disparó.
+	resolved := "git " + strings.Join(args, " ")
 	go func() {
 		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
 		defer cancel()
-		var out string
-		var err error
-		switch kind {
-		case "pull":
-			out, err = gitstatus.Pull(ctx, path, m.cfg.CmdArgs("pull")...)
-		case "sync":
-			out, err = gitstatus.Sync(ctx, path, m.cfg.CmdArgs("sync")...)
-		default:
-			out, err = gitstatus.Push(ctx, path, m.cfg.CmdArgs("push")...)
-		}
+		out, err := gitstatus.Run(ctx, path, args...)
 		errStr := ""
 		if err != nil {
 			// El error del proceso es siempre "exit status 1"; el motivo real
 			// está en la salida combinada de git.
 			errStr = gitstatus.FailureReason(out, err)
 		}
-		sendEvent(appCtx, events, actionMsg{path: path, kind: kind, output: out, err: errStr})
+		msg := actionMsg{path: path, kind: kind, cmd: resolved, output: out, err: errStr}
+		if errStr != "" && IsPullKind(kind) {
+			msg.rebaseInProgress = gitstatus.RebaseInProgress(ctx, path)
+		}
+		sendEvent(appCtx, events, msg)
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
 		}
 	}()
 	return nil
 }
+
+// runAction ya no existe: el argv llega resuelto desde config y lo ejecuta
+// gitstatus.Run.
 
 // busyActionCmd devuelve el toast de "ya hay una acción en curso" en el repo,
 // o nil si está libre.
@@ -500,28 +544,6 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	}
 	m.running[path] = "lazygit"
 	cmd := exec.Command("lazygit")
-	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, err: err}
-	})
-}
-
-// openUpdateCmd abre el binario configurado en commands.update en el
-// repo con handoff de terminal (tecla u). Al salir re-colecciona el
-// estado.
-func (m *Model) openUpdateCmd(path string) tea.Cmd {
-	bin := m.cfg.Commands["update"]
-	if bin == "" {
-		return m.toastCmd(toastWarning, "commands.update not configured")
-	}
-	if _, err := exec.LookPath(bin); err != nil {
-		return m.toastCmd(toastWarning, fmt.Sprintf("%s not installed", bin))
-	}
-	if prev, busy := m.running[path]; busy {
-		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
-	}
-	m.running[path] = "update"
-	cmd := exec.Command(bin)
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return execDoneMsg{path: path, err: err}

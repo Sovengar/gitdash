@@ -20,10 +20,11 @@ func (m Model) section(title, content string) string {
 }
 
 // layout calcula el reparto de alto para el estado actual del modelo. Con una
-// confirmación de borrado armada se fuerza la visibilidad de stats para que el
-// prompt no desaparezca en terminales bajas.
+// confirmación de borrado o un selector de pull armados se fuerza la
+// visibilidad de stats para que el prompt no desaparezca en terminales bajas.
 func (m Model) layout() layout {
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()), m.armed != nil)
+	armed := m.armed != nil || m.pullArmed != nil
+	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()), armed)
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
@@ -57,6 +58,12 @@ func (m Model) statsSection() string {
 		// pulsación o la cancelación (los toasts expiran a los 3 s).
 		parts = append(parts, styleWarn.Render(m.removePrompt()))
 	}
+	if m.pullArmed != nil {
+		// El selector de variante se anuncia en el mismo sitio y con el mismo
+		// carácter: los dos son estados de "una tecla más". La barra se apila
+		// sobre el resumen para que el prompt sea la primera línea, no la segunda.
+		parts = append([]string{styleWarn.Render(m.pullPrompt())}, parts...)
+	}
 	total, dirty, ahead, behind := m.summary()
 	summary := fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind)
 	if m.onlyDirty {
@@ -67,7 +74,7 @@ func (m Model) statsSection() string {
 }
 
 // activityIndicator es el indicador compacto de "algo en curso": scan, fetch o
-// una acción pull/push/sync (a la que añade el repo cuando hay sitio).
+// una acción pull/push (a la que añade el repo cuando hay sitio).
 func (m Model) activityIndicator() string {
 	switch {
 	case m.scanning:
@@ -91,7 +98,7 @@ func (m Model) activityIndicator() string {
 func (m Model) runningActions() []string {
 	paths := make([]string, 0, len(m.running))
 	for path, kind := range m.running {
-		if kind == "pull" || kind == "push" || kind == "sync" || kind == "worktree_remove" {
+		if IsPullKind(kind) || kind == "push" || kind == "worktree_remove" {
 			paths = append(paths, path)
 		}
 	}

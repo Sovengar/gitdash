@@ -80,8 +80,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionMsg:
 		delete(m.running, msg.path)
-		m.lastAction[msg.path] = actionResult{kind: msg.kind, output: msg.output, err: msg.err}
-		note := actionNote(msg.kind, m.nameOf(msg.path), msg.output, msg.err)
+		m.lastAction[msg.path] = actionResult{kind: msg.kind, cmd: msg.cmd, output: msg.output, err: msg.err}
+		note := actionNote(msg.kind, m.nameOf(msg.path), msg.cmd, msg.output, msg.err, msg.rebaseInProgress)
 		if msg.err != "" {
 			m.toasts.showError(note)
 		} else {
@@ -180,25 +180,39 @@ func (m Model) withPump(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, waitForEvent(m.events))
 }
 
-// actionNote compone la notificación de una acción terminada (pull/push/sync).
+// actionNote compone la notificación de una acción terminada (pull/push).
 // En el fallo incluye el motivo real de git (errStr, ya resumido) y, cuando se
 // reconoce, un hint accionable; la salida completa queda en el detalle.
-func actionNote(kind, name, output, errStr string) string {
+//
+// rebaseInProgress tiene prioridad sobre los demás hints: un pull --rebase que
+// choca no dejó el repo como estaba, lo dejó con la historia reescrita a medias
+// y el índice en conflicto. Decir solo "falló" invita a reintentar, y reintentar
+// sobre un rebase a medias es peor que no hacer nada.
+func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) string {
 	if errStr == "" {
-		return fmt.Sprintf("%s ok %s", kind, name)
+		if cmd == "" {
+			return fmt.Sprintf("%s ok %s", kind, name)
+		}
+		return fmt.Sprintf("%s ok %s (%s)", kind, name, cmd)
 	}
-	hint := ""
-	if kind == "pull" || kind == "sync" {
+	note := fmt.Sprintf("%s failed %s: %s", kind, name, errStr)
+	if cmd != "" {
+		note += " — " + cmd
+	}
+	switch {
+	case rebaseInProgress && IsPullKind(kind):
+		note += " — rebase a medias: resolvé los conflictos y `git rebase --continue` (o `--abort`)"
+	case IsPullKind(kind):
 		switch {
 		case strings.Contains(output, "Not possible to fast-forward"),
 			strings.Contains(output, "divergent"):
-			hint = " — diverged? pull --rebase manual"
+			note += " — divergió: probá el rebase del selector (p luego r)"
 		case strings.Contains(errStr, "no tracking information"),
 			strings.Contains(errStr, "no upstream"):
-			hint = " — no upstream; set it with git branch --set-upstream-to"
+			note += " — sin upstream: P la publica y configura el tracking"
 		}
 	}
-	return fmt.Sprintf("%s failed %s: %s%s", kind, name, errStr, hint)
+	return note
 }
 
 // fetchingAll reporta si hay algún fetch en curso (para el spinner).
@@ -247,6 +261,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		default:
 			m.armed = nil
+		}
+	}
+
+	// Selector de variante de pull: la tecla de pull solo arma, la segunda
+	// tecla elige. Las cuatro opciones (p/r/f/m) están-en-concurrencia con
+	// acciones reales de la tabla (pull/rescan/fetch), así que el estado
+	// armado tiene que consumir la tecla antes de que llegue al resto del
+	// enrutado. Cualquier otra tecla cancela y sigue su curso normal: es lo
+	// que evita que la app quede pegada esperando una segunda pulsación.
+	if m.pullArmed != nil {
+		armed := *m.pullArmed
+		m.pullArmed = nil
+		if kind, ok := PullKinds[key]; ok {
+			return m, m.startActionCmd(armed.path, kind)
 		}
 	}
 
@@ -352,16 +380,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetchBatchCmd(paths)
 	case "pull":
+		// La tecla de pull no ejecuta: arma el selector de variante. El
+		// guard de "no repo" se resuelve al armar, no al elegir, para no
+		// dejar un selector vivo sobre una fila donde no hay nada que hacer.
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
-			return m, m.startActionCmd(r.project.Path, "pull")
-		}
-	case "sync":
-		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
-		} else if ok {
-			return m, m.startActionCmd(r.project.Path, "sync")
+			m.pullArmed = &armedPull{path: r.project.Path}
+			return m, nil
 		}
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
@@ -383,13 +409,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
 			return m, m.openLazygitCmd(r.project.Path)
-		}
-	case "update":
-		if r, ok := m.selected(); ok {
-			if !r.project.HasRepo {
-				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
-			}
-			return m, m.openUpdateCmd(r.project.Path)
 		}
 	case "rescan":
 		if m.scanning {
@@ -507,6 +526,41 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		name:   filepath.Base(e.wt.Path),
 	}
 	return m, nil
+}
+
+// pullPrompt compone el aviso persistente del selector de variante de pull.
+// Se resolución es por tecla (p/r/f/m), no por flechas: el set es corto y
+// fijo, y una lista navegable obligaría a dos teclas extra para la variante que
+// se usa el 90% de las veces. El aviso sobrevive a los toasts porque es el
+// único sitio donde se anuncia qué hace cada tecla.
+func (m Model) pullPrompt() string {
+	if m.pullArmed == nil {
+		return ""
+	}
+	// Las etiquetas salen de pullVariantLabel, no de hardcodearlas: la tecla
+	// y el nombre de la variante tienen que ser la misma fuente que la del
+	// hint bar, o el prompt miente cuando algo se reescribe.
+	variants := make([]string, 0, len(PullKinds))
+	for _, k := range []string{"p", "r", "f", "m"} {
+		kind := PullKinds[k]
+		variants = append(variants, fmt.Sprintf("%s %s", k, pullVariantLabel(kind)))
+	}
+	return fmt.Sprintf("pull %s: %s · esc cancel", m.nameOf(m.pullArmed.path), strings.Join(variants, " · "))
+}
+
+// pullVariantLabel nombra una variante de pull para el prompt y los hints.
+func pullVariantLabel(kind string) string {
+	switch kind {
+	case "pull":
+		return "default"
+	case "pull_rebase":
+		return "rebase"
+	case "pull_ff":
+		return "ff-only"
+	case "pull_merge":
+		return "merge"
+	}
+	return kind
 }
 
 // removePrompt compone el aviso persistente de la confirmación armada. La
