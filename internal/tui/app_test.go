@@ -298,7 +298,7 @@ func TestDetailOpen(t *testing.T) {
 	}
 	r, _ := m.selected()
 	out := m.renderDetail(r)
-	if !strings.Contains(out, "main.go") || !strings.Contains(out, "dirty-api") {
+	if !strings.Contains(out, "main.go") || !strings.Contains(out, "/tmp/dirty-api") {
 		t.Errorf("detalle sin contenido esperado:\n%s", out)
 	}
 	m, _ = press(m, "esc")

@@ -18,19 +18,12 @@ func asOrDash(s string) string {
 }
 
 // renderDetail compone el panel de detalle del repo seleccionado con datos
-// vivos del snapshot.
+// vivos del snapshot. El titulo (nombre, grupo, marca de worktree) NO se pinta
+// aqui: lo lleva el borde de la seccion.
 func (m *Model) renderDetail(r row) string {
 	var b strings.Builder
 
 	p := r.project
-	title := p.Name
-	if g := groupLabel(p); g != "" {
-		title += "  ·  " + g
-	}
-	if p.IsWorktree {
-		title += "  [worktree]"
-	}
-	b.WriteString(styleDetailTitle.Render(title) + "\n")
 	b.WriteString(styleHint.Render(truncate(p.Path, max(20, m.width-4))) + "\n\n")
 
 	key := styleDetailKey.Render
@@ -176,12 +169,11 @@ func (m *Model) renderWorktreeDetail(e tableEntry) string {
 
 // renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
 // snapshot propio: path, rama (o `(detached)`), head. No muestra
-// dirty/ahead/behind/sync.
+// dirty/ahead/behind/sync. El titulo lo lleva el borde de la seccion, igual que
+// en la ficha completa.
 func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string) string {
 	var b strings.Builder
 
-	title := filepath.Base(wt.Path) + "  [worktree]"
-	b.WriteString(styleDetailTitle.Render(title) + "\n")
 	b.WriteString(styleHint.Render(truncate(wt.Path, max(20, m.width-4))) + "\n\n")
 
 	key := styleDetailKey.Render

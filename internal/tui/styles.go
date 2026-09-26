@@ -44,8 +44,7 @@ var (
 	// Sub-fila de worktree (indentada, distinta de repo/header)
 	styleWorktree = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
-	styleDetailKey   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-	styleDetailTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
+	styleDetailKey = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 
 	// color del borde de las secciones (gris tenue, no compite con el contenido)
 	borderColor = lipgloss.Color("238")
