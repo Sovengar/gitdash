@@ -54,6 +54,16 @@ type Config struct {
 	FetchTimeout     time.Duration
 	Keybindings      Keybindings
 	Commands         Commands
+	// AICommands mapea acción AI (pull, commit…) → plantilla del comando. Es
+	// un namespace abierto: el ejecutable SOLO sale de la config global, nunca
+	// del marcador commiteado (input no confiable). Sin plantilla, la acción
+	// AI no se puede lanzar.
+	AICommands map[string]string
+}
+
+// aiActionConfig es la sección [ai.<acción>] del config.toml crudo.
+type aiActionConfig struct {
+	Command string `toml:"command"`
 }
 
 // fetchConfig refleja la sección [fetch] del TOML, con punteros para
@@ -66,14 +76,15 @@ type fetchConfig struct {
 
 // fileConfig refleja el TOML crudo del disco.
 type fileConfig struct {
-	Marker      *string           `toml:"marker"`
-	Roots       []string          `toml:"roots"`
-	Exclude     []string          `toml:"exclude"`
-	Editor      *string           `toml:"editor"`
-	SyncBranch  *string           `toml:"sync_branch"`
-	Fetch       *fetchConfig      `toml:"fetch"`
-	Keybindings map[string]string `toml:"keybindings"`
-	Commands    map[string]string `toml:"commands"`
+	Marker      *string                   `toml:"marker"`
+	Roots       []string                  `toml:"roots"`
+	Exclude     []string                  `toml:"exclude"`
+	Editor      *string                   `toml:"editor"`
+	SyncBranch  *string                   `toml:"sync_branch"`
+	Fetch       *fetchConfig              `toml:"fetch"`
+	Keybindings map[string]string         `toml:"keybindings"`
+	Commands    map[string]string         `toml:"commands"`
+	AI          map[string]aiActionConfig `toml:"ai"`
 }
 
 // Load lee la config del path estándar XDG. Devuelve la config resuelta y
@@ -161,6 +172,13 @@ func LoadFrom(path string) (Config, string) {
 			cfg.Commands[k] = v
 		}
 	}
+	// AI: merge key por key. No hay lista de acciones válidas (el namespace es
+	// abierto por diseño): una acción desconocida simplemente nunca se usa.
+	for k, v := range fc.AI {
+		if v.Command != "" {
+			cfg.AICommands[k] = v.Command
+		}
+	}
 	return cfg, strings.Join(warns, "; ")
 }
 
@@ -237,6 +255,9 @@ func Defaults() Config {
 		FetchTimeout:     30 * time.Second,
 		Keybindings:      DefaultKeybindings(),
 		Commands:         DefaultCommands(),
+		// Sin binario AI por defecto: la feature es opt-in; sin `command` la
+		// acción AI solo puede avisar.
+		AICommands: map[string]string{},
 	}
 }
 
@@ -274,6 +295,12 @@ func (c Config) CmdArgs(action string) []string {
 		raw = DefaultCommands()[action]
 	}
 	return strings.Fields(raw)
+}
+
+// AICommand devuelve la plantilla del comando AI para una acción, o "" si no
+// está configurada. No hay default: sin plantilla la acción AI no se lanza.
+func (c Config) AICommand(action string) string {
+	return c.AICommands[action]
 }
 
 // KeyByAction devuelve un mapa invertido tecla → acción para el
