@@ -297,7 +297,7 @@ func TestDetailOpen(t *testing.T) {
 		t.Fatal("enter no abrió el detalle")
 	}
 	r, _ := m.selected()
-	out := m.renderDetail(r)
+	out := m.renderDetail(r, detailFull(m.height))
 	if !strings.Contains(out, "main.go") || !strings.Contains(out, "/tmp/dirty-api") {
 		t.Errorf("detalle sin contenido esperado:\n%s", out)
 	}
@@ -313,7 +313,7 @@ func TestDetailShowsLastAction(t *testing.T) {
 	m.lastAction["/tmp/old-clean"] = actionResult{kind: "pull", output: "error: pull diverged\n", err: "exit 1"}
 	m.search = "old-clean"
 	r, _ := m.selected()
-	out := m.renderDetail(r)
+	out := m.renderDetail(r, detailFull(m.height))
 	if !strings.Contains(out, "pull") || !strings.Contains(out, "failed") || !strings.Contains(out, "diverged") {
 		t.Errorf("detalle sin última acción:\n%s", out)
 	}

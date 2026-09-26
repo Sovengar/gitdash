@@ -56,6 +56,28 @@ concurrency = 4       # fetches en paralelo (batches)
 timeout     = "30s"   # timeout por fetch
 ```
 
+## El panel de debajo de la tabla
+
+Entre el listado de repos y los atajos hay una **ficha del repo bajo el cursor**
+(estilo prdash): la misma que se abre con `enter`, sin abrirla. Se mueve con el
+cursor, así que `j`/`k` van leyendo los repos al pasar por encima.
+
+- Es exactamente la ficha del detalle (mismos datos, mismo título en el borde),
+  recortada a la altura que le toca. `enter` sigue abriendo la vista completa.
+- Con el cursor sobre un **header de grupo** no hay repo que describir, así que
+  muestra el agregado del grupo: cuántos repos tiene y cuántos están dirty,
+  ahead, behind o con error (solo los que hay: la tabla es quieta por el mismo
+  motivo).
+- Con el cursor sobre una **sub-fila de worktree** muestra su ficha mínima
+  (path, rama, head), sin inventar estado git.
+- Las listas que no caben se anuncian (`… N más`) en vez de cortarse a medias.
+
+El panel es **aditivo**: se queda con su parte del alto libre solo si no le
+cuesta nada a lo que ya había. En una terminal donde no cabe (por debajo de ~22
+líneas con la config por defecto) no se dibuja y el dashboard es el de siempre;
+`enter` sigue estando para la ficha. Con el detalle abierto tampoco se dibuja:
+ahí ya es el cuerpo central.
+
 ## Columnas de la tabla
 
 La tabla es *quieta*: las celdas quedan vacías cuando no hay nada que
@@ -99,7 +121,7 @@ attention-first).
 | `p` | selector de pull (ver abajo) |
 | `P` | push |
 | `e` | abrir `$EDITOR` en el directorio del repo |
-| `enter` | detalle: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
+| `enter` | detalle completo: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
 | `q` | salir |
 
 ### Pull: la política vive en tu gitconfig

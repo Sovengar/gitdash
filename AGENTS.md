@@ -166,6 +166,35 @@ contenido. Con un aviso armado, `computeLayout` degrada **stats antes que
 keybinds** (`keepKeybinds`): si la caja del aviso cayera, la app quedaría
 esperando una tecla sin decir cuáles.
 
+## Gotcha de diseño: el panel de preview
+
+Debajo de la tabla hay una ficha del repo bajo el cursor (estilo prdash), entre
+el listado y los keybinds. Cuatro decisiones que no son evidentes:
+
+- **El título va solo en el borde.** `detailTitle`/`worktreeTitle` componen el
+  título de la caja y `renderDetail` NO lo repite como primera línea: pintado en
+  los dos sitios, el mismo texto salía duplicado justo bajo el borde.
+- **El panel es aditivo.** `computeLayout` busca el mayor alto de panel que
+  (a) deje `minBodyLines` filas de tabla y (b) no obligue a recortar hints ni a
+  ocultar stats/keybinds (`mismaChromeQue`). Si no hay ninguno, el panel no se
+  dibuja. Por debajo de ~22 líneas (config por defecto) el dashboard es
+  exactamente el que había antes de la feature.
+- **El share se mide sobre el alto LIBRE**, no sobre el terminal: contra el
+  total, una ventana de 30 líneas se quedaba con 12 para la ficha y 3 para la
+  tabla. Con el detalle abierto el panel no existe (su contenido ya es el
+  cuerpo central).
+- **El presupuesto de la ficha son sus líneas, no las de la terminal.**
+  `detailView{rows, full}`: `renderDetail` reserva `detailHeadLines` para la
+  cabecera de estado y reparte el resto con `listBudget`, que reserva la línea
+  del aviso `… N más` cuando la lista no cabe entera. `rows` es
+  `lay.previewLines` en el panel y `lay.bodyLines` en el detalle abierto; sin
+  eso, las listas se cuentan como si cupieran y luego las recorta la caja sin
+  avisar.
+
+Con el cursor sobre un **header de grupo** el panel no tiene ficha que enseñar:
+muestra el agregado del grupo (`groupStats`, sobre `rows()` y antes del
+plegado, que es lo mismo que cuenta su header). Los estados a cero no se pintan.
+
 ## Probar
 
 ```bash

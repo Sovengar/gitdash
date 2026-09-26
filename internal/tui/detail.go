@@ -9,6 +9,38 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
+// detailHeadLines son las líneas fijas de la ficha antes de las listas: path,
+// hueco, branch, upstream, state y sync. Se reservan siempre, así que las
+// listas (worktrees, ficheros, commits) se reparten el resto del alto.
+const detailHeadLines = 6
+
+// minListBlockLines es lo que consume una lista antes de enseñar un solo
+// elemento: el hueco que la separa de la ficha y su cabecera. Por debajo no se
+// pinta la lista (ni la cabecera, que sin elementos no dice nada).
+const minListBlockLines = 2
+
+// listBudget reparte las líneas disponibles (avail) entre una lista de n
+// elementos, contando el hueco y la cabecera. Devuelve cuántos se pintan y si
+// hay que avisar de los que quedan fuera.
+//
+// El aviso se reserva una línea cuando la lista no cabe entera: sin él, un
+// corte al final de la caja parecería que la lista se acababa ahí. Cuando solo
+// hay sitio para un elemento, el elemento gana y el aviso se cae — la cabecera
+// de la lista ya dice cuántos hay.
+func listBudget(avail, n int) (shown int, rest bool) {
+	if avail < minListBlockLines {
+		return 0, false
+	}
+	room := avail - minListBlockLines // hueco + cabecera
+	if n <= room {
+		return n, false
+	}
+	if room < 1 {
+		return 0, false
+	}
+	return room - 1, true
+}
+
 // asOrDash devuelva el texto o "-" si vacío.
 func asOrDash(s string) string {
 	if s == "" {
@@ -17,13 +49,47 @@ func asOrDash(s string) string {
 	return s
 }
 
+// detailView es el contexto de pintado de una ficha: cuántas líneas hay y si es
+// la vista completa (enter) o el panel de preview. El presupuesto interno
+// (cuántos worktrees/ficheros/tails se listan) sale de rows y no de la altura
+// de la terminal: en un panel de 8 líneas, un tope calculado con el alto
+// completo pintaría una lista entera que luego se recorta sin decir cuántas
+// filas faltaron.
+type detailView struct {
+	rows int
+	full bool
+}
+
+// detailFull es la ficha a pantalla completa: su presupuesto son las líneas de
+// contenido que le da el layout, no la terminal entera (si no, las listas se
+// cuentan como si cupieran cuando luego las recorta la caja).
+func detailFull(rows int) detailView { return detailView{rows: rows, full: true} }
+
+// detailPreview es la ficha del panel de preview, que vive en rows líneas.
+func detailPreview(rows int) detailView { return detailView{rows: rows} }
+
+// detailFooter es la ayuda al pie de la ficha. Cambia con el modo porque lo que
+// hay que leer es distinto: en la vista completa `esc` es la salida; en el
+// panel, `enter` es lo que amplía la ficha. Con el input de `!` abierto lo
+// relevante es qué hace enter, y eso vale en los dos modos.
+func (v detailView) detailFooter(cmdOpen bool) string {
+	if cmdOpen {
+		return "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
+	}
+	if v.full {
+		return "esc back · g lazygit · ! cmd"
+	}
+	return "enter detail · g lazygit · ! cmd"
+}
+
 // renderDetail compone el panel de detalle del repo seleccionado con datos
-// vivos del snapshot. El titulo (nombre, grupo, marca de worktree) NO se pinta
-// aqui: lo lleva el borde de la seccion.
-func (m *Model) renderDetail(r row) string {
+// vivos del snapshot. El título (nombre, grupo, marca de worktree) NO se pinta
+// aquí: lo lleva el borde de la sección, que es donde está en las dos vistas.
+func (m *Model) renderDetail(r row, v detailView) string {
 	var b strings.Builder
 
 	p := r.project
+	rows := max(1, v.rows)
 	b.WriteString(styleHint.Render(truncate(p.Path, max(20, m.width-4))) + "\n\n")
 
 	key := styleDetailKey.Render
@@ -67,16 +133,17 @@ func (m *Model) renderDetail(r row) string {
 	}
 	b.WriteString(key("sync    ") + syncLine + "\n")
 
+	// Cuántas filas de listas caben en lo que queda tras la cabecera de estado.
+	// Es lo que permite que el panel enseñe "… N más" en vez de cortar la lista
+	// a media: el presupuesto se reparte entre las listas que sí quepan.
+	avail := max(0, rows-detailHeadLines)
+
 	// worktrees del repo: rama, sha y ruta (relativa al
 	// repo cuando sea posible, absoluta en caso contrario).
-	if n := len(r.snap.Worktrees); n > 0 {
+	if n := len(r.snap.Worktrees); n > 0 && avail >= minListBlockLines {
+		shown, rest := listBudget(avail, n)
 		b.WriteString("\n" + key(fmt.Sprintf("worktrees (%d)", n)) + "\n")
-		maxWTs := max(1, m.height-18)
-		for i, wt := range r.snap.Worktrees {
-			if i >= maxWTs {
-				b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-maxWTs)) + "\n")
-				break
-			}
+		for _, wt := range r.snap.Worktrees[:shown] {
 			rel, err := filepath.Rel(r.project.Path, wt.Path)
 			if err != nil {
 				rel = wt.Path
@@ -84,6 +151,9 @@ func (m *Model) renderDetail(r row) string {
 			b.WriteString("  " + styleDim.Render(pad(wt.Branch, 24)) +
 				styleWarn.Render(pad(asOrDash(wt.Head), 12)) +
 				truncate(rel, max(20, m.width-16)) + "\n")
+		}
+		if rest {
+			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
 		}
 	}
 
@@ -94,21 +164,21 @@ func (m *Model) renderDetail(r row) string {
 		b.WriteString("\n" + styleError.Render("git: "+r.snap.Err) + "\n")
 	}
 
-	if len(r.snap.Files) > 0 {
-		b.WriteString("\n" + key(fmt.Sprintf("files (%d)", len(r.snap.Files))) + "\n")
-		maxFiles := max(3, m.height-16)
-		for i, f := range r.snap.Files {
-			if i >= maxFiles {
-				b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", len(r.snap.Files)-maxFiles)) + "\n")
-				break
-			}
+	if n := len(r.snap.Files); n > 0 && avail >= minListBlockLines {
+		shown, rest := listBudget(avail, n)
+		b.WriteString("\n" + key(fmt.Sprintf("files (%d)", n)) + "\n")
+		for _, f := range r.snap.Files[:shown] {
 			b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) + truncate(f.Path, max(20, m.width-8)) + "\n")
+		}
+		if rest {
+			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
 		}
 	}
 
-	if len(r.snap.Commits) > 0 {
+	if n := len(r.snap.Commits); n > 0 && avail >= minListBlockLines {
+		shown, _ := listBudget(avail, n)
 		b.WriteString("\n" + key("commits") + "\n")
-		for _, c := range r.snap.Commits {
+		for _, c := range r.snap.Commits[:shown] {
 			fmt.Fprintf(&b, "  %s %s %s\n",
 				styleDim.Render(pad(c.Sha, 8)),
 				pad(relativeTime(c.When), 6),
@@ -128,19 +198,18 @@ func (m *Model) renderDetail(r row) string {
 		if act.cmd != "" {
 			b.WriteString(styleHint.Render(indent(truncate(act.cmd, max(20, m.width-30)), "  ")) + "\n")
 		}
-		if tail := actionTail(act.output, max(3, m.height-20)); tail != "" {
+		if tail := actionTail(act.output, max(3, rows-20)); tail != "" {
 			b.WriteString(styleHint.Render(indent(tail, "  ")) + "\n")
 		}
 	}
 
-	footer := "esc back · g lazygit · ! cmd"
 	if cr, ok := m.lastCmd[p.Path]; ok {
 		verdict := styleClean.Render("exit 0")
 		if cr.exit != "0" {
 			verdict = styleError.Render("exit " + cr.exit)
 		}
 		b.WriteString("\n" + key("$ "+truncate(cr.command, max(20, m.width-30))) + " " + verdict + "\n")
-		if tail := actionTail(cr.output, max(3, m.height-12)); tail != "" {
+		if tail := actionTail(cr.output, max(3, rows-12)); tail != "" {
 			b.WriteString(styleHint.Render(indent(tail, "  ")) + "\n")
 		}
 	}
@@ -148,9 +217,8 @@ func (m *Model) renderDetail(r row) string {
 	if m.cmdOpen {
 		b.WriteString("\n" + styleDetailKey.Render(m.cmdInput.Prompt) +
 			m.cmdInput.View() + "\n")
-		footer = "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
 	}
-	b.WriteString("\n" + styleHint.Render(footer))
+	b.WriteString("\n" + styleHint.Render(v.detailFooter(m.cmdOpen)))
 	return b.String()
 }
 
@@ -158,20 +226,20 @@ func (m *Model) renderDetail(r row) string {
 // Si el worktree fue descubierto con marcador y tiene snapshot
 // vivo, se delega al detalle completo; si no, panel mínimo con los datos que
 // trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
-func (m *Model) renderWorktreeDetail(e tableEntry) string {
+func (m *Model) renderWorktreeDetail(e tableEntry, v detailView) string {
 	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
-			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)})
+			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)}, v)
 		}
 	}
-	return m.renderWorktreeMinimal(e.wt, e.parent)
+	return m.renderWorktreeMinimal(e.wt, e.parent, v)
 }
 
 // renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
 // snapshot propio: path, rama (o `(detached)`), head. No muestra
-// dirty/ahead/behind/sync. El titulo lo lleva el borde de la seccion, igual que
+// dirty/ahead/behind/sync. El título lo lleva el borde de la sección, igual que
 // en la ficha completa.
-func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string) string {
+func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, v detailView) string {
 	var b strings.Builder
 
 	b.WriteString(styleHint.Render(truncate(wt.Path, max(20, m.width-4))) + "\n\n")
@@ -187,7 +255,7 @@ func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string) stri
 		b.WriteString(key("repo    ") + filepath.Base(parent) + "\n")
 	}
 
-	b.WriteString("\n" + styleHint.Render("esc back · g lazygit · ! cmd"))
+	b.WriteString("\n" + styleHint.Render(v.detailFooter(false)))
 	return b.String()
 }
 

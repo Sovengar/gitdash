@@ -66,7 +66,7 @@ func TestDetailWorktrees(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{"/tmp/multi-wt": s})
 	m.cursor = 0
 	r, _ := m.selected()
-	out := stripANSI(m.renderDetail(r))
+	out := stripANSI(m.renderDetail(r, detailFull(m.height)))
 	if !strings.Contains(out, "worktrees (1)") || !strings.Contains(out, "feat") ||
 		!strings.Contains(out, "abc1234") {
 		t.Errorf("detalle sin worktrees:\n%s", out)
@@ -568,7 +568,7 @@ func TestWorktreeDetail(t *testing.T) {
 	if !ok {
 		t.Fatal("sin entrada seleccionada")
 	}
-	panel := stripANSI(m.renderWorktreeDetail(e))
+	panel := stripANSI(m.renderWorktreeDetail(e, detailFull(m.height)))
 	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
 		if strings.Contains(panel, bad) {
 			t.Errorf("detalle inventa estado %q:\n%s", bad, panel)
@@ -592,7 +592,7 @@ func TestWorktreeDetailDiscovered(t *testing.T) {
 	m, _ = press(m, "enter")
 
 	e, _ := m.selectedEntry()
-	out := stripANSI(m.renderWorktreeDetail(e))
+	out := stripANSI(m.renderWorktreeDetail(e, detailFull(m.height)))
 	// El snapshot vivo del worktree descubierto se muestra (estado derivado
 	// real: "2 ?1" dirty), no el panel mínimo path/rama/head.
 	if !strings.Contains(out, "wt-marcado") || !strings.Contains(out, "state") {

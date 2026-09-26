@@ -584,11 +584,12 @@ func (m Model) View() tea.View {
 	var content string
 	if m.detailOpen {
 		lay := m.layout()
+		v := detailFull(lay.bodyLines)
 		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
 			// Detalle dedicado del worktree (sin inventar estado).
-			content = m.compose(lay, m.detailSection(worktreeTitle(e), m.renderWorktreeDetail(e), lay.bodyLines))
+			content = m.compose(lay, m.detailSection(worktreeTitle(e), m.renderWorktreeDetail(e, v), lay.bodyLines), "")
 		} else if r, ok := m.selected(); ok {
-			content = m.compose(lay, m.detailSection(detailTitle(r), m.renderDetail(r), lay.bodyLines))
+			content = m.compose(lay, m.detailSection(detailTitle(r), m.renderDetail(r, v), lay.bodyLines), "")
 		}
 	}
 	if content == "" {
@@ -602,10 +603,13 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// renderDashboard apila las secciones bordadas del dashboard.
+// renderDashboard apila las secciones bordadas del dashboard: stats, filtro,
+// tabla, panel de preview del repo bajo el cursor y keybinds. Las entradas se
+// calculan una vez y se comparten entre la tabla y el panel.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
-	return m.compose(lay, m.tableSection(lay.bodyLines))
+	entries := m.entries()
+	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))
 }
 
 // toastReserve es el alto de la sección de keybinds visible, para que el

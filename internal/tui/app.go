@@ -671,11 +671,7 @@ func (m *Model) saveCollapsed() {
 
 // selectedEntry devuelve la entrada navegable bajo el cursor, si la hay.
 func (m *Model) selectedEntry() (tableEntry, bool) {
-	entries := m.entries()
-	if len(entries) == 0 || m.cursor >= len(entries) {
-		return tableEntry{}, false
-	}
-	return entries[m.cursor], true
+	return entryAt(m.entries(), m.cursor)
 }
 
 // selected devuelve la fila (con path resoluble) bajo el cursor, si la hay.

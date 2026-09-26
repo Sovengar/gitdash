@@ -475,6 +475,66 @@ func (m *Model) countSecondary(key string) int {
 	return n
 }
 
+// groupStats es el agregado de estado de los repos de un grupo.
+type groupStats struct {
+	repos, errors, dirty, ahead, behind int
+	worktrees                           int
+}
+
+// groupStats agrega el estado de los repos del grupo `key`. Usa las mismas
+// filas que la tabla (filtros aplicados) pero ANTES del plegado: un grupo
+// plegado sigue teniendo repos que contar, que es justo lo que muestra su
+// header, y el agregado tiene que decir lo mismo que el header.
+func (m *Model) groupStats(key string) groupStats {
+	var st groupStats
+	for _, r := range m.rows() {
+		if !inGroup(r.project, key) {
+			continue
+		}
+		st.repos++
+		switch r.state {
+		case gitstatus.StateError:
+			st.errors++
+		case gitstatus.StateDirty, gitstatus.StateDiverged:
+			st.dirty++
+		}
+		if r.snap.Status.Ahead > 0 {
+			st.ahead++
+		}
+		if r.snap.Status.Behind > 0 {
+			st.behind++
+		}
+		if n := len(r.snap.Worktrees); n > 0 {
+			st.worktrees += n
+		}
+	}
+	return st
+}
+
+// inGroup reporta si el proyecto pertenece al grupo `key`: un primario
+// ("backend"), un secundario ("backend/api") o la sección sin grupo
+// ((ungrouped)). Ese último no es un primario cualquiera sino un literal del
+// package group, así que se comprueba aparte: sin este caso, un primario
+// llamado "(ungrouped)" se contaría dos veces.
+func inGroup(p discovery.Project, key string) bool {
+	if key == group.Ungrouped {
+		return p.PrimaryGroup == ""
+	}
+	primary, secondary, nested := strings.Cut(key, "/")
+	if !nested {
+		return p.PrimaryGroup == primary
+	}
+	return p.PrimaryGroup == primary && p.SecondaryGroup == secondary
+}
+
+// entryAt devuelve la entrada navegable de la posición i, si existe.
+func entryAt(entries []tableEntry, i int) (tableEntry, bool) {
+	if i < 0 || i >= len(entries) {
+		return tableEntry{}, false
+	}
+	return entries[i], true
+}
+
 // renderRow compone una línea de la tabla con cursor opcional, sin
 // columna GROUP (los headers plegables ya identifican el
 // grupo); Work Tree sustituye a STATE.

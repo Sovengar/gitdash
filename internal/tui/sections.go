@@ -54,9 +54,11 @@ func (m Model) armedPrompt() string {
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
-// (tabla o detalle) y keybinds, sin líneas en blanco entre ellas.
-func (m Model) compose(lay layout, middle string) string {
-	sections := make([]string, 0, 4)
+// (tabla o detalle), el panel de preview y keybinds, sin líneas en blanco entre
+// ellas. preview es "" cuando el panel no tiene alto (terminal baja o detalle
+// abierto).
+func (m Model) compose(lay layout, middle, preview string) string {
+	sections := make([]string, 0, 5)
 	if lay.showStats {
 		sections = append(sections, m.statsSection())
 	}
@@ -64,6 +66,9 @@ func (m Model) compose(lay layout, middle string) string {
 		sections = append(sections, m.filterSection())
 	}
 	sections = append(sections, middle)
+	if preview != "" {
+		sections = append(sections, preview)
+	}
 	if lay.showKeybinds {
 		sections = append(sections, m.keybindsSection(lay.hintLines))
 	}
@@ -144,18 +149,15 @@ func (m Model) filterSection() string {
 }
 
 // tableSection dibuja la cabecera y las filas visibles con scroll, rellenando
-// hasta el alto del presupuesto para mantener estable el alto de la caja.
-func (m Model) tableSection(bodyLines int) string {
-	entries := m.entries()
+// hasta el alto del presupuesto para mantener estable el alto de la caja. Las
+// entradas se reciben ya calculadas: el panel de preview necesita las mismas y
+// recomponerlas aquí duplicaría el Arrange en cada render.
+func (m Model) tableSection(bodyLines int, entries []tableEntry) string {
 	m.syncOffset(len(entries), bodyLines)
 
 	var rows []string
 	if len(entries) == 0 && !m.scanning {
-		hint := "no repositories — create a .gitdash.toml in your projects"
-		if m.search != "" || m.onlyDirty {
-			hint = "no repositories match the current filter"
-		}
-		rows = append(rows, "  "+hint)
+		rows = append(rows, "  "+m.emptyTableHint())
 	} else {
 		for i := m.offset; i < min(len(entries), m.offset+bodyLines); i++ {
 			rows = append(rows, m.renderEntry(entries[i], i == m.cursor))
@@ -167,6 +169,55 @@ func (m Model) tableSection(bodyLines int) string {
 
 	header := "  " + headerColumns(m.width)
 	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"))
+}
+
+// previewSection es la ficha del repo bajo el cursor, sin tener que abrir el
+// detalle: va entre la tabla y los keybinds, con el reparto de alto que fija
+// computeLayout (prdash hace lo mismo con su panel de ítem).
+//
+// Pinta exactamente la misma ficha que `enter` —mismo render, mismo título en el
+// borde— recortada a su alto y rellenada con líneas vacías. Rellenar importa:
+// el alto lo decide el layout, no lo larga que sea la ficha, así que la caja no
+// puede encogerse al mover el cursor de un repo limpio a uno con 30 ficheros.
+//
+// Tres casos, porque el cursor no solo puede estar sobre un repo: un header de
+// grupo no tiene ficha (muestra el agregado del grupo) y una tabla vacía no
+// tiene nada que enseñar.
+func (m *Model) previewSection(lay layout, entries []tableEntry) string {
+	if lay.previewLines <= 0 {
+		return ""
+	}
+	v := detailPreview(lay.previewLines)
+	e, ok := entryAt(entries, m.cursor)
+	var title, content string
+	switch {
+	case !ok:
+		title, content = "detail", m.previewEmpty()
+	case e.kind == kindRepo:
+		title, content = detailTitle(e.r), m.renderDetail(e.r, v)
+	case e.kind == kindWorktree:
+		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, v)
+	default: // header primario o secundario
+		title, content = e.group, m.renderGroupSummary(e)
+	}
+	return m.section(title, fitLines(content, lay.previewLines))
+}
+
+// previewEmpty es lo que dice el panel cuando no hay fila bajo el cursor: la
+// tabla vacía por filtro/dirty no es un fallo del panel, y su texto es el mismo
+// que ya se ve en la tabla de arriba.
+func (m Model) previewEmpty() string {
+	return styleDim.Render("  " + m.emptyTableHint())
+}
+
+// emptyTableHint explica por qué no hay repos: sin filtro es que no hay
+// marcadores, y con filtro es que el filtro no casa con ninguno. Lo comparten la
+// tabla y el panel de preview (no pueden contradecirse: se leen a la vez).
+func (m Model) emptyTableHint() string {
+	if m.search != "" || m.onlyDirty {
+		return "no repositories match the current filter"
+	}
+	return "no repositories — create a .gitdash.toml in your projects"
 }
 
 // keybindsSection muestra hasta hintLines líneas de hints o, si hay un aviso
@@ -188,9 +239,11 @@ func (m Model) keybindsSection(hintLines int) string {
 	return m.section("keybinds", strings.Join(rendered, "\n"))
 }
 
-// detailSection envuelve el contenido del detalle, recortado a bodyLines.
+// detailSection envuelve el contenido del detalle a pantalla completa. Rellena
+// también: si la ficha es más corta que el presupuesto, sin el relleno las
+// secciones de abajo (keybinds) subirían y la vista no ocuparía la terminal.
 func (m Model) detailSection(title, content string, bodyLines int) string {
-	return m.section(title, clipLines(content, bodyLines))
+	return m.section(title, fitLines(content, bodyLines))
 }
 
 // detailTitle compone el título del borde para un repo (nombre + grupo y
@@ -211,11 +264,46 @@ func worktreeTitle(e tableEntry) string {
 	return filepath.Base(e.wt.Path) + " [worktree]"
 }
 
-// clipLines limita el contenido a n líneas (el detalle puede exceder el alto).
-func clipLines(content string, n int) string {
+// renderGroupSummary es la ficha del header de grupo bajo el cursor. El header
+// ya dice cuántos repos tiene; lo que no dice es cómo están, y eso es lo que
+// hace falta al pasar el cursor por encima para decidir si hay que abrir el
+// grupo. Solo se pintan los estados que hay: un grupo limpio no merece cuatro
+// líneas a cero (la tabla es quieta por el mismo motivo).
+func (m *Model) renderGroupSummary(e tableEntry) string {
+	st := m.groupStats(e.group)
+	key := styleDetailKey.Render
+
+	var b strings.Builder
+	b.WriteString(key("repos    ") + fmt.Sprint(st.repos) + "\n")
+	if st.errors > 0 {
+		b.WriteString(key("errors   ") + styleError.Render(fmt.Sprint(st.errors)) + "\n")
+	}
+	if st.dirty > 0 {
+		b.WriteString(key("dirty    ") + styleDirty.Render(fmt.Sprint(st.dirty)) + "\n")
+	}
+	if st.ahead > 0 {
+		b.WriteString(key("ahead    ") + styleAhead.Render(fmt.Sprint(st.ahead)) + "\n")
+	}
+	if st.behind > 0 {
+		b.WriteString(key("behind   ") + styleBehind.Render(fmt.Sprint(st.behind)) + "\n")
+	}
+	if st.worktrees > 0 {
+		b.WriteString(key("wt       ") + fmt.Sprint(st.worktrees) + "\n")
+	}
+	b.WriteString("\n" + styleHint.Render("tab fold · j/k into a repo"))
+	return b.String()
+}
+
+// fitLines ajusta el contenido a exactamente n líneas: recorta por arriba lo que
+// sobra y rellena con líneas vacías lo que falta. La caja mide lo que dice el
+// layout, no lo que mida la ficha.
+func fitLines(content string, n int) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) > n {
-		lines = lines[:n]
+		lines = lines[:max(0, n)]
+	}
+	for len(lines) < n {
+		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
 }
