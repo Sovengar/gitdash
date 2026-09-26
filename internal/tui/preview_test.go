@@ -43,10 +43,6 @@ func previewModel(t *testing.T) Model {
 // sigue al cursor al moverse.
 func TestPreviewMuestraElRepoDelCursor(t *testing.T) {
 	m := cursorOn(t, previewModel(t), "/tmp/api")
-	if m.detailOpen {
-		t.Fatal("precondición: el detalle no debería estar abierto")
-	}
-
 	out := stripANSI(m.View().Content)
 	panel := sectionContent(t, out, "api · vsocial/backend")
 	for _, want := range []string{"/tmp/api", "branch", "state", "sync"} {
@@ -58,14 +54,11 @@ func TestPreviewMuestraElRepoDelCursor(t *testing.T) {
 		t.Errorf("el panel no lista los ficheros del repo:\n%s", panel)
 	}
 
-	// mover el cursor cambia la ficha sin abrir nada
+	// mover el cursor cambia la ficha
 	m, _ = press(m, "down")
 	moved := stripANSI(m.View().Content)
 	if got := sectionContent(t, moved, "web · vsocial/backend"); !strings.Contains(got, "↓3") {
 		t.Errorf("el panel no siguió al cursor:\n%s", got)
-	}
-	if m.detailOpen {
-		t.Error("mover el cursor abrió el detalle")
 	}
 }
 
@@ -83,26 +76,13 @@ func TestPreviewTituloSoloEnElBorde(t *testing.T) {
 	}
 }
 
-// Lo mismo en la vista completa: el detalle abierto tampoco duplica su título.
-func TestDetalleTituloSoloEnElBorde(t *testing.T) {
-	m := cursorOn(t, previewModel(t), "/tmp/api")
-	m, _ = press(m, "enter")
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
-	}
-	out := stripANSI(m.View().Content)
-	if n := strings.Count(out, "api · vsocial/backend"); n != 1 {
-		t.Errorf("el título aparece %d veces, want 1 (solo en el borde):\n%s", n, out)
-	}
-}
-
 // En una sub-fila de worktree el panel muestra la ficha mínima (path, rama,
 // head) sin inventar estado git derivado.
 func TestPreviewEnSubFilaDeWorktree(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-detached", ""))
 	m := newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, " ") // expande los worktrees
-	m, _ = press(m, "down")
+	m, _ = press(m, "enter") // despliega los worktrees
+	m, _ = press(m, "down")  // cursor en la sub-fila
 	e, ok := m.selectedEntry()
 	if !ok || e.kind != kindWorktree {
 		t.Fatalf("el cursor no está en la sub-fila: %+v", e)
@@ -113,11 +93,10 @@ func TestPreviewEnSubFilaDeWorktree(t *testing.T) {
 	if !strings.Contains(panel, "(detached)") {
 		t.Errorf("el panel no muestra la rama del worktree:\n%s", panel)
 	}
-	// Una ficha corta deja sitio para la ayuda al pie: el panel es el atajo a la
-	// vista completa (`enter`), y ahí no hay `esc back` porque no hay nada que
-	// cerrar.
-	if !strings.Contains(panel, "enter detail") {
-		t.Errorf("el panel no ofrece `enter` para el detalle completo:\n%s", panel)
+	// La ayuda al pie son las teclas que operan sobre la fila. Ya no hay `enter
+	// detail` que ofrecer: la ficha ES la vista.
+	if !strings.Contains(panel, "g lazygit · ! cmd") {
+		t.Errorf("el panel no ofrece las teclas de la fila:\n%s", panel)
 	}
 	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
 		if strings.Contains(panel, bad) {
@@ -172,7 +151,7 @@ func TestPreviewSinFilas(t *testing.T) {
 	m.clampCursor()
 
 	out := stripANSI(m.View().Content)
-	panel := sectionContent(t, out, "detail")
+	panel := sectionContent(t, out, "repos")
 	if !strings.Contains(panel, "no repositories match") {
 		t.Errorf("el panel no explica por qué está vacío:\n%s", panel)
 	}
@@ -247,27 +226,6 @@ func TestPreviewAnunciaLasListasQueNoCaben(t *testing.T) {
 	}
 	if !strings.Contains(panel, "más") {
 		t.Errorf("una lista truncada no se anuncia:\n%s", panel)
-	}
-}
-
-// El panel desaparece con el detalle abierto (ahí ya es el cuerpo central) y en
-// terminales donde no cabe, sin que la tabla pierda filas por su culpa.
-func TestPreviewNoComeFilasDeLaTabla(t *testing.T) {
-	m := cursorOn(t, previewModel(t), "/tmp/api")
-	conPanel := m.layout()
-	if conPanel.previewLines == 0 {
-		t.Fatalf("precondición: a h=%d debería haber panel: %+v", m.height, conPanel)
-	}
-
-	m, _ = press(m, "enter")
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
-	}
-	if got := m.layout().previewLines; got != 0 {
-		t.Errorf("con el detalle abierto previewLines = %d, want 0", got)
-	}
-	if got := m.layout().bodyLines; got <= conPanel.bodyLines {
-		t.Errorf("el detalle no recuperó alto: bodyLines = %d, antes %d", got, conPanel.bodyLines)
 	}
 }
 

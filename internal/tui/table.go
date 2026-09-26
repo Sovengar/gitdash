@@ -188,25 +188,6 @@ func (m *Model) repoExpanded(r row) bool {
 	return false
 }
 
-// groupOfEntry devuelve la clave de plegado de la entrada: el contenedor más
-// interno para repos (secundario si tiene, si no primario) o la clave
-// del propio header.
-func groupOfEntry(e tableEntry) string {
-	switch e.kind {
-	case kindPrimary, kindSecondary:
-		return e.group
-	default:
-		p := e.r.project
-		if p.PrimaryGroup == "" {
-			return group.Ungrouped // sección final plegable
-		}
-		if p.SecondaryGroup != "" {
-			return groupKey(p.PrimaryGroup, p.SecondaryGroup)
-		}
-		return p.PrimaryGroup
-	}
-}
-
 // toEntries adapta las filas base a las Entry del package group.
 func toEntries(rs []row) []group.Entry {
 	out := make([]group.Entry, 0, len(rs))

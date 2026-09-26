@@ -337,9 +337,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cancel()
 		return m, tea.Quit
 	case "esc":
-		if m.detailOpen {
-			m.detailOpen = false
-		}
+		// El dashboard no tiene vista que cerrar: esc cancela el aviso armado o
+		// el filtro, y el resto de estados se resuelven en sus propios handlers.
 		return m, nil
 	case "up", "k":
 		m.cursor = max(0, m.cursor-1)
@@ -420,62 +419,50 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.recollectCmd(r.project.Path)
 		}
 	case "fold":
-		// Plegar/desplegar el contenedor bajo
-		// el cursor (secundario interno para repos, header si es header).
-		// sobre una sub-fila de worktree es no-op (no debe plegar
-		// la sección (ungrouped) por accidente).
-		entries := m.entries()
-		if len(entries) == 0 || m.cursor >= len(entries) {
-			return m, nil
-		}
-		if entries[m.cursor].kind == kindWorktree {
-			return m, nil
-		}
-		g := groupOfEntry(entries[m.cursor])
-		m.collapsed[g] = !m.collapsed[g]
-		m.clampCursor()
-		m.saveCollapsed()
-		return m, nil
-	case "expand":
-		// `space` alterna las sub-filas de worktree del repo bajo
-		// el cursor. No-op sobre headers de grupo (selected() false), sobre
-		// sub-filas de worktree y sobre repos sin worktrees / no-repo.
-		r, ok := m.selected()
-		if !ok || !m.expandable(r) {
-			return m, nil
-		}
-		m.expanded[r.project.Path] = !m.expanded[r.project.Path]
-		m.clampCursor()
-		m.saveCollapsed()
-		return m, nil
+		return m.toggleFold()
 	case "worktree_remove":
 		return m.handleWorktreeRemove()
-	case "detail":
-		entries := m.entries()
-		if len(entries) > 0 && m.cursor < len(entries) {
-			switch entries[m.cursor].kind {
-			case kindPrimary, kindSecondary: // enter en header pliega
-				g := entries[m.cursor].group
-				m.collapsed[g] = !m.collapsed[g]
-				m.clampCursor()
-				m.saveCollapsed()
-				return m, nil
-			}
-		}
-		if _, ok := m.selected(); ok {
-			m.detailOpen = true
-		}
 	case "command":
-		// `!` abre el input de comandos del detalle ($SHELL -c capturado;
-		// enter vacío = shell interactiva).
-		if m.detailOpen {
-			if r, ok := m.selected(); !ok || !r.project.HasRepo {
-				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
-			}
-			m.cmdOpen = true
-			return m, m.cmdInput.Focus()
+		// `!` abre el input de comandos en el panel de la fila del cursor
+		// ($SHELL -c capturado; enter vacío = shell interactiva).
+		if r, ok := m.selected(); !ok || !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		}
+		m.cmdOpen = true
+		return m, m.cmdInput.Focus()
 	}
+	return m, nil
+}
+
+// toggleFold pliega o despliega lo que haya bajo el cursor. Es la única tecla de
+// plegado (`enter`) y cubre los tres niveles, cada uno con lo que le toca:
+//
+//   - header primario o secundario → su bloque de repos.
+//   - fila de repo → sus sub-filas de worktree.
+//   - sub-fila de worktree, o repo sin worktrees → no-op: no hay nada que
+//     plegar, y plegar el grupo del padre desde la sub-fila sería una sorpresa.
+//
+// Los dos estados se persisten en el mismo `collapsed.json` (el de worktrees bajo
+// su propio prefijo), así que el plegado sobrevive entre sesiones igual que
+// antes.
+func (m Model) toggleFold() (tea.Model, tea.Cmd) {
+	e, ok := entryAt(m.entries(), m.cursor)
+	if !ok {
+		return m, nil
+	}
+	switch e.kind {
+	case kindPrimary, kindSecondary:
+		m.collapsed[e.group] = !m.collapsed[e.group]
+	case kindRepo:
+		if !m.expandable(e.r) {
+			return m, nil
+		}
+		m.expanded[e.r.project.Path] = !m.expanded[e.r.project.Path]
+	default: // sub-fila de worktree
+		return m, nil
+	}
+	m.clampCursor()
+	m.saveCollapsed()
 	return m, nil
 }
 
@@ -577,24 +564,11 @@ func (m Model) removePrompt() string {
 	return fmt.Sprintf("remove worktree %s? %s to confirm, esc to cancel", m.armed.name, key)
 }
 
-// View compone la pantalla: dashboard o detalle, con el overlay de toasts en
-// la esquina inferior derecha. El detalle usa la fila viva bajo el cursor; si
-// el filtro la hizo desaparecer, cae al dashboard.
+// View compone la pantalla del dashboard con el overlay de toasts en la esquina
+// inferior derecha. La ficha del repo bajo el cursor va en su propia sección, así
+// que aquí no hay una vista alternativa que componer.
 func (m Model) View() tea.View {
-	var content string
-	if m.detailOpen {
-		lay := m.layout()
-		v := detailFull(lay.bodyLines)
-		if e, ok := m.selectedEntry(); ok && e.kind == kindWorktree {
-			// Detalle dedicado del worktree (sin inventar estado).
-			content = m.compose(lay, m.detailSection(worktreeTitle(e), m.renderWorktreeDetail(e, v), lay.bodyLines), "")
-		} else if r, ok := m.selected(); ok {
-			content = m.compose(lay, m.detailSection(detailTitle(r), m.renderDetail(r, v), lay.bodyLines), "")
-		}
-	}
-	if content == "" {
-		content = m.renderDashboard()
-	}
+	content := m.renderDashboard()
 	if toasts := m.toasts.blocksFor(m.width); len(toasts) > 0 {
 		content = overlayToasts(content, toasts, m.width, m.height, m.toastReserve())
 	}
@@ -604,7 +578,7 @@ func (m Model) View() tea.View {
 }
 
 // renderDashboard apila las secciones bordadas del dashboard: stats, filtro,
-// tabla, panel de preview del repo bajo el cursor y keybinds. Las entradas se
+// tabla, panel con la ficha del repo bajo el cursor y keybinds. Las entradas se
 // calculan una vez y se comparten entre la tabla y el panel.
 func (m Model) renderDashboard() string {
 	lay := m.layout()

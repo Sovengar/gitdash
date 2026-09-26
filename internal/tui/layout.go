@@ -9,7 +9,6 @@ const (
 	filterSectionLines = 3 // 2 bordes + 1 línea de contenido
 	keybindsChrome     = 2 // solo los bordes (las hints van dentro)
 	tableChrome        = 3 // 2 bordes + cabecera de columnas
-	detailChrome       = 2 // 2 bordes (el detalle no tiene cabecera de tabla)
 	defaultHintLines   = 3
 
 	previewChrome = 2 // solo los bordes (la ficha va dentro)
@@ -37,43 +36,34 @@ type layout struct {
 	previewLines int
 }
 
-// computeLayout reparte el alto de la terminal entre las secciones.
+// computeLayout reparte el alto de la terminal entre las secciones del dashboard.
 //
 // El panel de preview es ADITIVO: entra con su share del alto libre (el que no
 // ocupan las secciones de alto fijo) y solo se queda si no le cuesta nada a lo
 // que ya había. Concretamente se busca el mayor alto de panel que (a) deje
 // minBodyLines filas de tabla y (b) no obligue a recortar hints ni a ocultar
 // stats o keybinds. Si no hay ningún alto que cumpla las dos, el panel no se
-// dibuja: media ficha por perder media pantalla es peor que no tener panel, y
-// `enter` sigue dando la ficha completa.
+// dibuja: media ficha por perder media pantalla es peor que no tener panel.
 //
 // Sin panel el reparto es el de siempre (hints → 0, keybinds fuera, stats
-// fuera), así que en terminales bajas esta feature no cambia nada de lo que se
-// veía antes. keepKeybinds impide degradar keybinds: con un aviso armado es la
+// fuera), así que en terminales bajas esto no cambia nada de lo que se veía
+// antes. keepKeybinds impide degradar keybinds: con un aviso armado es la
 // única fuente de las teclas que espera la app.
-//
-// El panel solo existe en el dashboard: con el detalle abierto su contenido ya
-// es el cuerpo central, y una segunda copia de la misma ficha solo robaría alto.
-func computeLayout(height int, hasFilter, detailOpen bool, keybindsLines int, keepKeybinds bool) layout {
+func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds bool) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
 	}
 	chrome := tableChrome
-	if detailOpen {
-		chrome = detailChrome
-	}
 
 	sinPanel := fitLayout(height, chrome, filterH, 0, keybindsLines, keepKeybinds)
 	lay := sinPanel
-	if !detailOpen {
-		for preview := panelHeight(height, chrome, filterH, keybindsLines); preview >= detailHeadLines; preview-- {
-			l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
-			if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
-				l.previewLines = preview
-				lay = l
-				break
-			}
+	for preview := panelHeight(height, chrome, filterH, keybindsLines); preview >= detailHeadLines; preview-- {
+		l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
+		if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
+			l.previewLines = preview
+			lay = l
+			break
 		}
 	}
 	// El filtro es la única sección cuya visibilidad no se degrada: se pinta

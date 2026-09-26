@@ -120,31 +120,35 @@ timeout = "nope"
 	}
 }
 
-// La expansión de worktrees tiene default `space` y es
-// configurable como el resto de keybindings.
-func TestExpandKeybinding(t *testing.T) {
+// El plegado tiene default `enter` (cubre worktrees y grupos) y es configurable
+// como el resto de keybindings. Su hint lleva la tecla configurada y solo una vez.
+func TestFoldKeybinding(t *testing.T) {
 	cfg := Defaults()
-	if cfg.KeyFor("expand") != "space" {
-		t.Errorf("default expand = %q, want space", cfg.KeyFor("expand"))
+	if cfg.KeyFor("fold") != "enter" {
+		t.Errorf("default fold = %q, want enter", cfg.KeyFor("fold"))
 	}
-	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "space expand") {
-		t.Errorf("hint de expansión ausente: %v", cfg.HintBarLines())
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "enter fold") {
+		t.Errorf("hint de plegado ausente: %v", cfg.HintBarLines())
 	}
 
 	// Rebind via config.toml.
 	path := write(t, `
 [keybindings]
-expand = "w"
+fold = "w"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
 		t.Fatalf("warn inesperado: %q", warn)
 	}
-	if cfg.KeyFor("expand") != "w" {
-		t.Errorf("expand = %q, want w", cfg.KeyFor("expand"))
+	if cfg.KeyFor("fold") != "w" {
+		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
 	}
-	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "w expand") {
+	hints := strings.Join(cfg.HintBarLines(), "\n")
+	if !strings.Contains(hints, "w fold") {
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+	}
+	if strings.Contains(hints, "enter fold") {
+		t.Errorf("el hint sigue con la tecla anterior: %v", cfg.HintBarLines())
 	}
 }
 
@@ -172,5 +176,32 @@ worktree_remove = "W"
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "W remove wt") {
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+	}
+}
+
+// Una config vieja con acciones que ya no existen (detail, expand) avisa en vez
+// de dejar la tecla muerta: sin aviso, `detail = "enter"` hace que enter no haga
+// nada y parece un bug de la TUI.
+func TestKeybindingsObsoletosAvisan(t *testing.T) {
+	path := write(t, `
+[keybindings]
+detail = "enter"
+expand = "space"
+fold   = "w"
+`)
+	cfg, warn := LoadFrom(path)
+	if !strings.Contains(warn, "detail") || !strings.Contains(warn, "expand") {
+		t.Errorf("aviso sin las acciones obsoletas: %q", warn)
+	}
+	if strings.Contains(warn, "fold") {
+		t.Errorf("avisa de una acción válida: %q", warn)
+	}
+	// Las obsoletas no se cuelan en el mapa (su tecla queda libre) y las
+	// válidas sí se aplican.
+	if _, ok := cfg.Keybindings["detail"]; ok {
+		t.Error("la acción obsoleta quedó en el mapa de teclas")
+	}
+	if cfg.KeyFor("fold") != "w" {
+		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
 	}
 }

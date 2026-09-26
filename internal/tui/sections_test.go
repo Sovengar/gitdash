@@ -69,7 +69,7 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 // entero), y mientras está la tabla no baja de minBodyLines.
 func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	// Altura amplia: todo visible y el panel con su share del alto libre.
-	wide := computeLayout(40, false, false, defaultHintLines, false)
+	wide := computeLayout(40, false, defaultHintLines, false)
 	if !wide.showStats || !wide.showKeybinds || wide.hintLines != defaultHintLines {
 		t.Errorf("altura amplia: %+v, want todo visible", wide)
 	}
@@ -83,7 +83,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 
 	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
 	// HintBarLines): el panel crece con el hueco que dejan.
-	pocas := computeLayout(40, false, false, 1, false)
+	pocas := computeLayout(40, false, 1, false)
 	if pocas.hintLines != 1 {
 		t.Errorf("keybindsLines=1: hintLines = %d, want 1", pocas.hintLines)
 	}
@@ -93,20 +93,20 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 
 	// altura intermedia: se recortan las hints antes de ocultar secciones
-	mid := computeLayout(10, false, false, defaultHintLines, false)
+	mid := computeLayout(10, false, defaultHintLines, false)
 	if mid.hintLines != 1 || !mid.showKeybinds {
 		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
 	}
 
 	// más baja: keybinds fuera, stats aún visible
-	baja := computeLayout(9, false, false, defaultHintLines, false)
+	baja := computeLayout(9, false, defaultHintLines, false)
 	if baja.showKeybinds || !baja.showStats {
 		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
 	}
 
 	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, defaultHintLines, false)
+		l := computeLayout(h, false, defaultHintLines, false)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
@@ -118,7 +118,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	// con keepKeybinds (aviso armado), keybinds nunca se degrada: es la única
 	// fuente de las teclas que espera la app. Se recortan stats y panel antes.
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, 1, true)
+		l := computeLayout(h, false, 1, true)
 		if !l.showKeybinds || l.hintLines != 1 {
 			t.Errorf("h=%d con keepKeybinds: keybinds degradada: %+v", h, l)
 		}
@@ -128,7 +128,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 	// Y sin keepKeybinds se comporta como antes: degrada antes de crunchar.
 	for h := 0; h <= 8; h++ {
-		if l := computeLayout(h, false, false, 1, false); l.hintLines != 0 || l.showKeybinds {
+		if l := computeLayout(h, false, 1, false); l.hintLines != 0 || l.showKeybinds {
 			t.Errorf("h=%d sin keepKeybinds: keybinds debería caerse: %+v", h, l)
 		}
 	}
@@ -139,18 +139,18 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 // de la feature.
 func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	// Con room: panel + todo lo demás.
-	if l := computeLayout(30, false, false, defaultHintLines, false); l.previewLines == 0 {
+	if l := computeLayout(30, false, defaultHintLines, false); l.previewLines == 0 {
 		t.Errorf("h=30: sin panel: %+v", l)
 	}
 	// El panel más pequeño que entra es el de la cabecera de la ficha (6), y solo
 	// si a la tabla le quedan minBodyLines filas.
-	if l := computeLayout(22, false, false, defaultHintLines, false); l.previewLines != detailHeadLines {
+	if l := computeLayout(22, false, defaultHintLines, false); l.previewLines != detailHeadLines {
 		t.Errorf("h=22: previewLines = %d, want %d", l.previewLines, detailHeadLines)
 	}
 	// Por debajo, nada de panel y el reparto de siempre: hints y stats intactos y
 	// la tabla con lo que sobra.
 	for h := 14; h <= 21; h++ {
-		l := computeLayout(h, false, false, defaultHintLines, false)
+		l := computeLayout(h, false, defaultHintLines, false)
 		if l.previewLines != 0 {
 			t.Errorf("h=%d: previewLines = %d, want 0 (el panel no puede pedir más)", h, l.previewLines)
 		}
@@ -164,7 +164,7 @@ func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	}
 	// Y con el panel presente nunca se recorta una hint ni se oculta una sección.
 	for h := 22; h <= 80; h++ {
-		l := computeLayout(h, false, false, defaultHintLines, false)
+		l := computeLayout(h, false, defaultHintLines, false)
 		if l.previewLines == 0 {
 			continue
 		}
@@ -177,17 +177,6 @@ func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	}
 }
 
-// Con el detalle abierto el panel desaparece: su contenido ya es el cuerpo
-// central y pintarlo dos veces solo le quitaría alto a la ficha.
-func TestPreviewPanelNoApareceConElDetalle(t *testing.T) {
-	for h := 10; h <= 60; h++ {
-		l := computeLayout(h, false, true, defaultHintLines, false)
-		if l.previewLines != 0 {
-			t.Errorf("h=%d con detalle abierto: previewLines = %d, want 0", h, l.previewLines)
-		}
-	}
-}
-
 // La suma de las secciones tiene que dar la altura de la terminal en cualquier
 // alto y combinación de flags: si no, alguna caja se sale de la pantalla (o
 // empuja los keybinds fuera). La única excepción es el suelo del cuerpo central
@@ -196,20 +185,19 @@ func TestPreviewPanelNoApareceConElDetalle(t *testing.T) {
 func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 	for h := 0; h <= 60; h++ {
 		for _, tc := range []struct {
-			name                  string
-			hasFilter, detailOpen bool
-			keybinds              int
-			keep                  bool
+			name      string
+			hasFilter bool
+			keybinds  int
+			keep      bool
 		}{
-			{"dashboard", false, false, defaultHintLines, false},
-			{"filtro", true, false, defaultHintLines, false},
-			{"armado", false, false, 1, true},
-			{"armado+filtro", true, false, 1, true},
-			{"detalle", false, true, defaultHintLines, false},
-			{"sin hints", false, false, 0, false},
+			{"dashboard", false, defaultHintLines, false},
+			{"filtro", true, defaultHintLines, false},
+			{"armado", false, 1, true},
+			{"armado+filtro", true, 1, true},
+			{"sin hints", false, 0, false},
 		} {
-			l := computeLayout(h, tc.hasFilter, tc.detailOpen, tc.keybinds, tc.keep)
-			total := l.altoTotal(tc.hasFilter, tc.detailOpen)
+			l := computeLayout(h, tc.hasFilter, tc.keybinds, tc.keep)
+			total := l.altoTotal(tc.hasFilter)
 			if l.bodyLines < 1 {
 				t.Errorf("%s h=%d: bodyLines = %d, want >= 1", tc.name, h, l.bodyLines)
 			}
@@ -226,11 +214,8 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 
 // altoTotal suma todo lo que el layout reserva (cajas y Borders incluidos) más el
 // cuerpo central. Es la altura que la vista tiene que medir.
-func (l layout) altoTotal(hasFilter, detailOpen bool) int {
+func (l layout) altoTotal(hasFilter bool) int {
 	n := tableChrome
-	if detailOpen {
-		n = detailChrome
-	}
 	if hasFilter {
 		n += filterSectionLines
 	}
@@ -295,52 +280,6 @@ func TestSeccionFiltroCondicional(t *testing.T) {
 	m, _ = press(m, "esc")
 	if strings.Contains(stripANSI(m.renderDashboard()), "╭ filter ") {
 		t.Error("la sección de filtro no desapareció al limpiar")
-	}
-}
-
-// El detalle se envuelve en una sección bordeada con título del repo; la
-// navegación y el cierre (esc) siguen funcionando.
-func TestDetalleSeccionBordada(t *testing.T) {
-	projects, states := fixtureProjects()
-	m := newTestModel(t, projects, states)
-
-	m, _ = press(m, "enter") // dirty-api es la primera fila
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
-	}
-	out := stripANSI(m.View().Content)
-	if !strings.Contains(out, "╭ dirty-api ") {
-		t.Errorf("el título del borde no identifica el repo:\n%s", out)
-	}
-	if !strings.Contains(out, "╭ gitdash ") || !strings.Contains(out, "╭ keybinds ") {
-		t.Errorf("stats/keybinds no acompañan al detalle:\n%s", out)
-	}
-
-	m, _ = press(m, "esc")
-	if m.detailOpen {
-		t.Error("esc no cerró el detalle")
-	}
-}
-
-// El título de la sección de detalle identifica el repo con su grupo y, en
-// una sub-fila de worktree, con la marca [worktree].
-func TestDetalleTituloIdentificaRepo(t *testing.T) {
-	grouped := discovery.Project{Path: "/x", Name: "api", PrimaryGroup: "backend", HasRepo: true}
-	m := newTestModel(t, []discovery.Project{grouped},
-		map[string]gitstatus.Snapshot{"/x": snapClean()})
-	m, _ = press(m, "down") // saltar el header de grupo
-	m, _ = press(m, "enter")
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ api · backend ") {
-		t.Errorf("el título no incluye el grupo:\n%s", out)
-	}
-
-	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
-	m = newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, " ")
-	m, _ = press(m, "down")
-	m, _ = press(m, "enter")
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ wt-a [worktree] ") {
-		t.Errorf("el título no marca el worktree:\n%s", out)
 	}
 }
 

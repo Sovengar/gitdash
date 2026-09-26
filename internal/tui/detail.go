@@ -49,47 +49,45 @@ func asOrDash(s string) string {
 	return s
 }
 
-// detailView es el contexto de pintado de una ficha: cuántas líneas hay y si es
-// la vista completa (enter) o el panel de preview. El presupuesto interno
-// (cuántos worktrees/ficheros/tails se listan) sale de rows y no de la altura
-// de la terminal: en un panel de 8 líneas, un tope calculado con el alto
-// completo pintaría una lista entera que luego se recorta sin decir cuántas
-// filas faltaron.
-type detailView struct {
-	rows int
-	full bool
-}
+// cmdInputLines es lo que ocupa el input de `!` al final de la ficha: el hueco
+// que lo separa y la línea del prompt. Se descuentan del presupuesto para que
+// escribir un comando no empuje la ficha fuera de la caja.
+const cmdInputLines = 2
 
-// detailFull es la ficha a pantalla completa: su presupuesto son las líneas de
-// contenido que le da el layout, no la terminal entera (si no, las listas se
-// cuentan como si cupieran cuando luego las recorta la caja).
-func detailFull(rows int) detailView { return detailView{rows: rows, full: true} }
-
-// detailPreview es la ficha del panel de preview, que vive en rows líneas.
-func detailPreview(rows int) detailView { return detailView{rows: rows} }
-
-// detailFooter es la ayuda al pie de la ficha. Cambia con el modo porque lo que
-// hay que leer es distinto: en la vista completa `esc` es la salida; en el
-// panel, `enter` es lo que amplía la ficha. Con el input de `!` abierto lo
-// relevante es qué hace enter, y eso vale en los dos modos.
-func (v detailView) detailFooter(cmdOpen bool) string {
-	if cmdOpen {
+// detailFooter es la ayuda al pie de la ficha. Con el input de `!` abierto lo
+// relevante es qué hace enter, y eso tiene prioridad sobre el resto.
+func (m *Model) detailFooter() string {
+	if m.cmdOpen {
 		return "enter run ($SHELL -c en el repo) · enter vacío = shell interactiva · esc cancel"
 	}
-	if v.full {
-		return "esc back · g lazygit · ! cmd"
-	}
-	return "enter detail · g lazygit · ! cmd"
+	return "g lazygit · ! cmd"
 }
 
-// renderDetail compone el panel de detalle del repo seleccionado con datos
-// vivos del snapshot. El título (nombre, grupo, marca de worktree) NO se pinta
-// aquí: lo lleva el borde de la sección, que es donde está en las dos vistas.
-func (m *Model) renderDetail(r row, v detailView) string {
+// fichaTail cierra la ficha: la ayuda al pie, o el input de `!` si está abierto.
+// El input se pinta SIEMPRE al final, aunque la ficha haya llenado la caja:
+// escribir un comando sin ver dónde se escribe es peor que no ver el resto de
+// la ficha, así que lo que sobra se recorta por arriba.
+func (m *Model) fichaTail(body string, rows int) string {
+	if m.cmdOpen {
+		return clipTo(body, max(1, rows-cmdInputLines)) +
+			"\n\n" + styleDetailKey.Render(m.cmdInput.Prompt) + m.cmdInput.View()
+	}
+	return body + "\n" + styleHint.Render(m.detailFooter())
+}
+
+// renderDetail compone la ficha del repo bajo el cursor con datos vivos del
+// snapshot. rows es el alto de contenido que le da el layout: el presupuesto
+// interno (cuántos worktrees/ficheros/tails se listan) sale de ahí y no de la
+// altura de la terminal, porque un tope calculado con el alto completo pintaría
+// una lista entera que luego recorta la caja sin decir cuántas filas faltaron.
+//
+// El título (nombre, grupo, marca de worktree) NO se pinta aquí: lo lleva el
+// borde de la sección.
+func (m *Model) renderDetail(r row, rows int) string {
 	var b strings.Builder
 
 	p := r.project
-	rows := max(1, v.rows)
+	rows = max(1, rows)
 	b.WriteString(styleHint.Render(truncate(p.Path, max(20, m.width-4))) + "\n\n")
 
 	key := styleDetailKey.Render
@@ -214,32 +212,27 @@ func (m *Model) renderDetail(r row, v detailView) string {
 		}
 	}
 
-	if m.cmdOpen {
-		b.WriteString("\n" + styleDetailKey.Render(m.cmdInput.Prompt) +
-			m.cmdInput.View() + "\n")
-	}
-	b.WriteString("\n" + styleHint.Render(v.detailFooter(m.cmdOpen)))
-	return b.String()
+	return m.fichaTail(b.String(), rows)
 }
 
 // renderWorktreeDetail compone el detalle de una sub-fila de worktree.
 // Si el worktree fue descubierto con marcador y tiene snapshot
 // vivo, se delega al detalle completo; si no, panel mínimo con los datos que
 // trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
-func (m *Model) renderWorktreeDetail(e tableEntry, v detailView) string {
+func (m *Model) renderWorktreeDetail(e tableEntry, rows int) string {
 	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
-			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)}, v)
+			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)}, rows)
 		}
 	}
-	return m.renderWorktreeMinimal(e.wt, e.parent, v)
+	return m.renderWorktreeMinimal(e.wt, e.parent, rows)
 }
 
 // renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
 // snapshot propio: path, rama (o `(detached)`), head. No muestra
 // dirty/ahead/behind/sync. El título lo lleva el borde de la sección, igual que
 // en la ficha completa.
-func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, v detailView) string {
+func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows int) string {
 	var b strings.Builder
 
 	b.WriteString(styleHint.Render(truncate(wt.Path, max(20, m.width-4))) + "\n\n")
@@ -255,8 +248,7 @@ func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, v de
 		b.WriteString(key("repo    ") + filepath.Base(parent) + "\n")
 	}
 
-	b.WriteString("\n" + styleHint.Render(v.detailFooter(false)))
-	return b.String()
+	return m.fichaTail(b.String(), rows)
 }
 
 // actionTail recorta la salida de una acción a sus últimas n líneas.

@@ -59,24 +59,27 @@ timeout     = "30s"   # timeout por fetch
 ## El panel de debajo de la tabla
 
 Entre el listado de repos y los atajos hay una **ficha del repo bajo el cursor**
-(estilo prdash): la misma que se abre con `enter`, sin abrirla. Se mueve con el
-cursor, así que `j`/`k` van leyendo los repos al pasar por encima.
+(estilo prdash). Se mueve con el cursor, así que `j`/`k` van leyendo los repos
+al pasar por encima. **Es la única vista de detalle**: no hay nada que abrir.
 
-- Es exactamente la ficha del detalle (mismos datos, mismo título en el borde),
-  recortada a la altura que le toca. `enter` sigue abriendo la vista completa.
+- Muestra la ficha del repo: path, branch, upstream, estado, sync, sus
+  worktrees, los ficheros cambiados, los commits, el resultado de la última
+  acción (con el argv que se ejecutó de verdad) y el del último `!`.
 - Con el cursor sobre un **header de grupo** no hay repo que describir, así que
   muestra el agregado del grupo: cuántos repos tiene y cuántos están dirty,
   ahead, behind o con error (solo los que hay: la tabla es quieta por el mismo
   motivo).
 - Con el cursor sobre una **sub-fila de worktree** muestra su ficha mínima
   (path, rama, head), sin inventar estado git.
+- `!` abre su input al final de la ficha, siempre visible: si la ficha llena la
+  caja, lo que se recorta es la ficha, nunca el prompt. `enter` lo ejecuta
+  (`$SHELL -c` en el repo del cursor; vacío = shell interactiva) y `esc` lo
+  cancela.
 - Las listas que no caben se anuncian (`… N más`) en vez de cortarse a medias.
 
 El panel es **aditivo**: se queda con su parte del alto libre solo si no le
 cuesta nada a lo que ya había. En una terminal donde no cabe (por debajo de ~22
-líneas con la config por defecto) no se dibuja y el dashboard es el de siempre;
-`enter` sigue estando para la ficha. Con el detalle abierto tampoco se dibuja:
-ahí ya es el cuerpo central.
+líneas con la config por defecto) no se dibuja y el dashboard es el de siempre.
 
 ## Columnas de la tabla
 
@@ -112,16 +115,14 @@ attention-first).
 | `j/k`, `↑↓` | mover cursor (`g`/`G` extremos) |
 | `n` | alternar solo repos con cambios pendientes |
 | `/` | filtrar por nombre/grupo o por rama/basename de worktree (en vivo; `enter` confirma, `esc` limpia) |
-| `space` | expandir/plegar los worktrees del repo bajo el cursor (configurable, acción `expand`) |
 | `D` | borrar el worktree bajo el cursor (configurable, acción `worktree_remove`; solo el worktree, la rama se conserva) |
-| `tab` | plegar/desplegar el grupo bajo el cursor |
 | `r` | rescan completo (discovery + estados + fetch auto) |
 | `R` | re-coleccionar el repo del cursor |
 | `f` / `F` | fetch del repo / fetch de todos |
 | `p` | selector de pull (ver abajo) |
 | `P` | push |
 | `e` | abrir `$EDITOR` en el directorio del repo |
-| `enter` | detalle completo: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
+| `enter` | plegar/desplegar lo que hay bajo el cursor: los worktrees del repo, o el bloque de un header de grupo (configurable, acción `fold`) |
 | `q` | salir |
 
 ### Pull: la política vive en tu gitconfig
@@ -145,7 +146,7 @@ Cualquier otra tecla cancela el selector y ejecuta su acción normal (`esc`
 cancela sin más). El repo objetivo se captura al pulsar `p`, así que la segunda
 tecla no puede operar sobre otra fila.
 
-El **detalle de cada repo guarda el argv que se ejecutó de verdad** (última
+La **ficha de cada repo guarda el argv que se ejecutó de verdad** (última
 acción, en memoria, solo la última). Es la única forma de saber qué reconcilió:
 con `p` `p` no hay flags que leer, la decisión la tomó tu gitconfig.
 
@@ -156,12 +157,12 @@ reintentar sobre un rebase sin resolver.
 ## Worktrees y grupos
 
 - Los **worktrees** se muestran plegados bajo el repo principal con un
-  indicador `▸ (N wt)` y se **expanden/pliegan con `space`** sobre su fila.
+  indicador `▸ (N wt)` y se **expanden/pliegan con `enter`** sobre su fila.
   Expandido, cada worktree de `git worktree list` aparece como **sub-fila
   navegable y operable** (incluidos los que no tienen marcador y los que
   están fuera de los roots): el cursor puede posarse en ella y *todas* las
-  acciones de repo (fetch, pull, push, lazygit, editor, recollect, `!` y
-  detalle) se ejecutan contra el path de ese worktree. La
+  acciones de repo (fetch, pull, push, lazygit, editor, recollect y `!`) se
+  ejecutan contra el path de ese worktree, igual que la ficha. La
   sub-fila muestra su rama (o `(detached)`) y deja vacías las celdas de
   estado por-worktree (no se inventa dirty/ahead/behind/sync). El estado
   expandido/plegado persiste entre sesiones (mismo `collapsed.json` que el

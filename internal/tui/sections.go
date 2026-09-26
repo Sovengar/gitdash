@@ -25,7 +25,7 @@ func (m Model) section(title, content string) string {
 // degradara, la app quedaría esperando una tecla sin decir cuáles.
 func (m Model) layout() layout {
 	armed := m.armedPrompt() != ""
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, m.keybindsLines(), armed)
+	return computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), armed)
 }
 
 // keybindsLines dice cuántas líneas de contenido pintará la sección de
@@ -53,10 +53,9 @@ func (m Model) armedPrompt() string {
 	return ""
 }
 
-// compose apila las secciones visibles: stats, filtro, la sección central
-// (tabla o detalle), el panel de preview y keybinds, sin líneas en blanco entre
-// ellas. preview es "" cuando el panel no tiene alto (terminal baja o detalle
-// abierto).
+// compose apila las secciones visibles: stats, filtro, la tabla, el panel con
+// la ficha del repo bajo el cursor y keybinds, sin líneas en blanco entre ellas.
+// preview es "" cuando el panel no tiene alto (terminal baja).
 func (m Model) compose(lay layout, middle, preview string) string {
 	sections := make([]string, 0, 5)
 	if lay.showStats {
@@ -187,20 +186,20 @@ func (m *Model) previewSection(lay layout, entries []tableEntry) string {
 	if lay.previewLines <= 0 {
 		return ""
 	}
-	v := detailPreview(lay.previewLines)
+	rows := lay.previewLines
 	e, ok := entryAt(entries, m.cursor)
 	var title, content string
 	switch {
 	case !ok:
-		title, content = "detail", m.previewEmpty()
+		title, content = "repos", m.previewEmpty()
 	case e.kind == kindRepo:
-		title, content = detailTitle(e.r), m.renderDetail(e.r, v)
+		title, content = detailTitle(e.r), m.renderDetail(e.r, rows)
 	case e.kind == kindWorktree:
-		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, v)
+		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, rows)
 	default: // header primario o secundario
-		title, content = e.group, m.renderGroupSummary(e)
+		title, content = e.group, m.renderGroupSummary(e, rows)
 	}
-	return m.section(title, fitLines(content, lay.previewLines))
+	return m.section(title, fitLines(content, rows))
 }
 
 // previewEmpty es lo que dice el panel cuando no hay fila bajo el cursor: la
@@ -239,13 +238,6 @@ func (m Model) keybindsSection(hintLines int) string {
 	return m.section("keybinds", strings.Join(rendered, "\n"))
 }
 
-// detailSection envuelve el contenido del detalle a pantalla completa. Rellena
-// también: si la ficha es más corta que el presupuesto, sin el relleno las
-// secciones de abajo (keybinds) subirían y la vista no ocuparía la terminal.
-func (m Model) detailSection(title, content string, bodyLines int) string {
-	return m.section(title, fitLines(content, bodyLines))
-}
-
 // detailTitle compone el título del borde para un repo (nombre + grupo y
 // marca de worktree).
 func detailTitle(r row) string {
@@ -269,7 +261,7 @@ func worktreeTitle(e tableEntry) string {
 // hace falta al pasar el cursor por encima para decidir si hay que abrir el
 // grupo. Solo se pintan los estados que hay: un grupo limpio no merece cuatro
 // líneas a cero (la tabla es quieta por el mismo motivo).
-func (m *Model) renderGroupSummary(e tableEntry) string {
+func (m *Model) renderGroupSummary(e tableEntry, rows int) string {
 	st := m.groupStats(e.group)
 	key := styleDetailKey.Render
 
@@ -290,20 +282,26 @@ func (m *Model) renderGroupSummary(e tableEntry) string {
 	if st.worktrees > 0 {
 		b.WriteString(key("wt       ") + fmt.Sprint(st.worktrees) + "\n")
 	}
-	b.WriteString("\n" + styleHint.Render("tab fold · j/k into a repo"))
-	return b.String()
+	return m.fichaTail(b.String(), rows)
 }
 
 // fitLines ajusta el contenido a exactamente n líneas: recorta por arriba lo que
 // sobra y rellena con líneas vacías lo que falta. La caja mide lo que dice el
 // layout, no lo que mida la ficha.
 func fitLines(content string, n int) string {
+	lines := strings.Split(clipTo(content, n), "\n")
+	for len(lines) < n {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clipTo recorta el contenido a n líneas sin rellenar. Es lo que se usa cuando
+// lo que viene detrás tiene que estar SIEMPRE visible (el input de `!`).
+func clipTo(content string, n int) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) > n {
 		lines = lines[:max(0, n)]
-	}
-	for len(lines) < n {
-		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
 }

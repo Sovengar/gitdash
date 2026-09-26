@@ -197,11 +197,11 @@ type Model struct {
 	removeGen    int
 	removeTokens map[string]int
 
-	detailOpen    bool
 	width, height int
 
-	// modo comando del detalle (tecla !): input de shell ejecutada en el
-	// repo con $SHELL -c; Enter con input vacío abre una shell interactiva.
+	// modo comando (tecla !): input de shell ejecutada en el repo con
+	// $SHELL -c; Enter con input vacío abre una shell interactiva. Se pinta al
+	// final de la ficha del panel, que es donde se leen las cosas del repo.
 	cmdOpen  bool
 	cmdInput textinput.Model
 
@@ -279,6 +279,14 @@ func (m *Model) loadPersisted(persisted map[string]bool) {
 		}
 		m.collapsed[k] = v
 	}
+}
+
+// NotifyConfig encola el aviso de carga de la config como toast. Sin esto, un
+// problema de config solo se vería por stderr —invisible detrás del alt screen—
+// y la tecla afectada parecería no hacer nada (p. ej. un `detail = "enter"` de
+// una config vieja).
+func (m *Model) NotifyConfig(warn string) {
+	m.toasts.showWarning(warn)
 }
 
 // Init lanza el primer scan, la bomba de eventos y el tick.
