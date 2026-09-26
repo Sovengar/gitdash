@@ -513,8 +513,8 @@ func TestPromptArmadoSustituyeLasHints(t *testing.T) {
 	if m.keybindsLines() != defaultHintLines {
 		t.Fatalf("sin armado, keybindsLines = %d, want %d", m.keybindsLines(), defaultHintLines)
 	}
-	if m.armedPrompt() != "" {
-		t.Errorf("sin armado hay prompt: %q", m.armedPrompt())
+	if m.promptLine() != "" {
+		t.Errorf("sin armado hay prompt: %q", m.promptLine())
 	}
 
 	m, _ = press(m, "p")
@@ -546,8 +546,8 @@ func TestPromptArmadoSustituyeLasHints(t *testing.T) {
 
 	// Resolver el selector devuelve las hints y con ellas el alto de la caja.
 	m, _ = press(m, "esc")
-	if m.armedPrompt() != "" {
-		t.Errorf("esc no limpió el prompt: %q", m.armedPrompt())
+	if m.promptLine() != "" {
+		t.Errorf("esc no limpió el prompt: %q", m.promptLine())
 	}
 	if lines := strings.Split(stripANSI(m.View().Content), "\n"); len(lines) != m.height {
 		t.Errorf("tras cancelar, líneas = %d, want %d", len(lines), m.height)

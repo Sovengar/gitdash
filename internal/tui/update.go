@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"gitdash/internal/cache"
+	"gitdash/internal/cmdlog"
 )
 
 // Update procesa mensajes: eventos de fondo, teclas, tick y resize.
@@ -54,7 +55,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// fetch automático en batches
 		if m.cfg.FetchAuto {
-			if c := m.fetchBatchCmd(m.fetchTargets()); c != nil {
+			if c := m.fetchBatchCmd(m.fetchTargets(), cmdlog.ClassAuto); c != nil {
 				cmds = append(cmds, c)
 			}
 		}
@@ -116,7 +117,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// banner.
 			return m.withPump(nil)
 		}
-		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", output: msg.output, err: msg.err}
+		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", cmd: msg.cmd, output: msg.output, err: msg.err}
 		// La mutación del estado armado solo aplica si este sigue apuntando al
 		// mismo worktree (o está vacío): un armado posterior sobre otro
 		// worktree no se pisa con el resultado tardío.
@@ -147,6 +148,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		delete(m.running, msg.path)
+		// El handoff presta la terminal al hijo, así que no hay salida que
+		// registrar: en el command log quedan el argv y cómo terminó.
+		// Dur = 0 (medirlo exigiría guardar el arranque en el modelo).
+		cmdlog.RecordExec(cmdlog.Entry{
+			Repo:   m.nameOf(msg.path),
+			Dir:    msg.path,
+			Class:  cmdlog.ClassAction,
+			Action: msg.action,
+			Argv:   msg.argv,
+			Exit:   execExit(msg.err),
+		})
 		// el handoff pudo cambiar el estado del repo: siempre re-colecta
 		cmd := m.recollectCmd(msg.path)
 		if msg.err != nil {
@@ -274,7 +286,27 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		armed := *m.pullArmed
 		m.pullArmed = nil
 		if kind, ok := PullKinds[key]; ok {
+			// La intención lleva la variante elegida, no "pull": es lo que
+			// explica el argv que se ve una línea más abajo en el log.
+			cmdlog.RecordIntent(cmdlog.Entry{
+				Class:  cmdlog.ClassAction,
+				Repo:   m.nameOf(armed.path),
+				Dir:    armed.path,
+				Key:    key,
+				Action: kind,
+			})
 			return m, m.startActionCmd(armed.path, kind)
+		}
+	}
+
+	// Panel del command log: sus teclas se consultan antes del enrutado
+	// normal (como los estados armados) porque j/k chocan con la navegación
+	// de la tabla. Las teclas que no son suyas siguen su curso normal: el
+	// panel es un view mode, no una modal, y así la app nunca queda
+	// encerrada aquí dentro.
+	if m.logOpen {
+		if m.handleLogKey(key, m.layout().bodyLines) {
+			return m, nil
 		}
 	}
 
@@ -289,6 +321,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if !r.project.HasRepo {
 					return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 				}
+				// El comando tecleado viaja en la exec entry (con su argv
+				// `sh -c …`); la intención deja la tecla que lo lanzó.
+				m.logIntent(key, "cmd")
 				if cmdStr == "" {
 					return m, m.openShellCmd(r.project.Path) // shell interactiva
 				}
@@ -357,6 +392,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Resolver acción desde keybindings configurados.
 	action := m.actionForKey(key)
 
+	// Un punto único de intención para las acciones que lanzan algo: la tecla
+	// y qué acción resolvió, sobre el repo del cursor. Las de navegación
+	// (filtro, plegado, detalle, el propio panel del log) no se registran:
+	// esto es un log de comandos, no de teclas. Las que necesitan más
+	// detalle (la variante de pull, el comando `!`, la ejecución del borrado)
+	// registran la suya donde lo saben.
+	if launchesCommand(action) {
+		m.logIntent(key, action)
+	}
+
 	switch action {
 	case "dirty":
 		m.onlyDirty = !m.onlyDirty
@@ -370,14 +415,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if !r.project.HasRepo {
 				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
-			return m, m.fetchBatchCmd([]string{r.project.Path})
+			return m, m.fetchBatchCmd([]string{r.project.Path}, cmdlog.ClassAction)
 		}
 	case "fetch_all":
 		paths := m.fetchTargets()
 		if len(paths) == 0 {
 			return m, m.toastCmd(toastInfo, "no repositories with upstream to fetch")
 		}
-		return m, m.fetchBatchCmd(paths)
+		return m, m.fetchBatchCmd(paths, cmdlog.ClassAction)
 	case "pull":
 		// La tecla de pull no ejecuta: arma el selector de variante. El
 		// guard de "no repo" se resuelve al armar, no al elegir, para no
@@ -430,6 +475,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.cmdOpen = true
 		return m, m.cmdInput.Focus()
+	case "log":
+		// `l` abre/cierra el panel del command log. La tecla es de la
+		// sección log, así que el enrutado normal también la cierra: el
+		// panel se comprueba antes de llegar aquí.
+		m.toggleLog()
 	}
 	return m, nil
 }
@@ -465,6 +515,30 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 	m.saveCollapsed()
 	return m, nil
 }
+
+// commandActions son las acciones que acaban en un proceso. El resto (filtro,
+// búsqueda, plegado, el panel del log, salir) solo mueven la vista, así que no
+// dejan entrada en el command log: registrar "pulsé enter para plegar" no aporta
+// nada sobre qué comandos se ejecutan.
+var commandActions = map[string]bool{
+	"fetch": true, "fetch_all": true, "pull": true, "push": true,
+	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
+	"command": true, "worktree_remove": true,
+}
+
+// launchesCommand reporta si la acción acaba en un proceso.
+func launchesCommand(action string) bool { return commandActions[action] }
+
+// rowActions son las que además necesitan una fila: sin fila bajo el cursor no
+// se despachan, así que tampoco dejan intención (pulsar `p` sobre un header de
+// grupo no es un comando que alguien quisiera auditar).
+var rowActions = map[string]bool{
+	"fetch": true, "pull": true, "push": true, "lazygit": true,
+	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
+}
+
+// actionNeedsRow reporta si la acción requiere una fila seleccionada.
+func actionNeedsRow(action string) bool { return rowActions[action] }
 
 // actionForKey resuelve la acción para una tecla dada usando el mapa
 // de keybindings configurado. Si no hay match, devuelve "".
@@ -503,6 +577,15 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		}
 		m.removeTokens[armed.parent] = m.removeGen
 		m.armed = nil
+		// La intención del borrado: la pulsación que lo confirma, no la que
+		// lo arma (esa ya quedó registrada por el enrutado de la acción).
+		cmdlog.RecordIntent(cmdlog.Entry{
+			Class:  cmdlog.ClassAction,
+			Repo:   filepath.Base(armed.wtPath),
+			Dir:    armed.wtPath,
+			Key:    m.cfg.KeyFor("worktree_remove"),
+			Action: "worktree_remove",
+		})
 		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
 	}
 	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
@@ -566,7 +649,8 @@ func (m Model) removePrompt() string {
 
 // View compone la pantalla del dashboard con el overlay de toasts en la esquina
 // inferior derecha. La ficha del repo bajo el cursor va en su propia sección, así
-// que aquí no hay una vista alternativa que componer.
+// que aquí no hay una vista alternativa que componer; el command log sí lo es
+// (toma el cuerpo entero) y lo resuelve renderDashboard.
 func (m Model) View() tea.View {
 	content := m.renderDashboard()
 	if toasts := m.toasts.blocksFor(m.width); len(toasts) > 0 {
@@ -580,8 +664,16 @@ func (m Model) View() tea.View {
 // renderDashboard apila las secciones bordadas del dashboard: stats, filtro,
 // tabla, panel con la ficha del repo bajo el cursor y keybinds. Las entradas se
 // calculan una vez y se comparten entre la tabla y el panel.
+//
+// Con el command log abierto el cuerpo NO es la tabla: es el log, y la ficha no
+// se dibuja (layout ya le devolvió su alto). El log es una vista a la que se va
+// a mirar, no información ambiente como la ficha, así que no se reparte el
+// espacio con la tabla: se sustituye.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
+	if m.logOpen {
+		return m.compose(lay, m.logSection(lay.bodyLines), "")
+	}
 	entries := m.entries()
 	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))
 }

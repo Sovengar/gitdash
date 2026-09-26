@@ -8,6 +8,7 @@ package gitstatus
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,7 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"gitdash/internal/cmdlog"
 	"gitdash/internal/discovery"
 )
 
@@ -57,7 +60,7 @@ func (s Snapshot) State(hasRepo bool) State {
 func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	var snap Snapshot
 
-	out, err := runGit(ctx, dir, "status", "--porcelain=v2", "--branch")
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "status", "--porcelain=v2", "--branch")
 	if err != nil {
 		snap.Err = firstLine(err.Error())
 		return snap
@@ -77,7 +80,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 		// sync ref inexistente o error: SyncKnown=false → "<rama> —" en UI
 	}
 
-	logOut, err := runGit(ctx, dir, "log", "-5", "--format=%h%x00%ct%x00%s")
+	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s")
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
 		if len(snap.Commits) > 0 {
@@ -87,7 +90,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	// Un repo sin commits es legítimo: el error de log se ignora.
 
 	// Inventario de worktrees (sin el repo principal).
-	if wtOut, err := runGit(ctx, dir, "worktree", "list", "--porcelain"); err == nil {
+	if wtOut, err := runGit(ctx, dir, cmdlog.ClassRead, "worktree", "list", "--porcelain"); err == nil {
 		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
 	}
 	return snap
@@ -98,7 +101,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 // y respectan el merge-base (no es un diff de tips). Cualquier error
 // (ref inexistente, repo roto) devuelve known=false.
 func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
-	out, err := runGit(ctx, dir, "rev-list", "--count", "HEAD.."+sync)
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--count", "HEAD.."+sync)
 	if err != nil {
 		return 0, false
 	}
@@ -165,11 +168,15 @@ func SyncFor(p discovery.Project, defaultSync string) string {
 
 // Fetch ejecuta `git fetch` en dir con los args dados (default: --prune).
 // El caller aplica el timeout vía contexto.
-func Fetch(ctx context.Context, dir string, args ...string) error {
+//
+// class distingue el fetch que pidió una tecla del que dispara el scan
+// automático: el comando es idéntico y solo el origen lo separa, así que lo
+// tiene que traer quien llama.
+func Fetch(ctx context.Context, dir string, class cmdlog.Class, args ...string) error {
 	if len(args) == 0 {
 		args = []string{"fetch", "--prune"}
 	}
-	_, err := runGit(ctx, dir, args...)
+	_, err := runGit(ctx, dir, class, args...)
 	return err
 }
 
@@ -178,7 +185,7 @@ func Fetch(ctx context.Context, dir string, args ...string) error {
 // a argv en config, así que no hay wrappers por acción ni defaults de flags
 // escondidos aquí (la política de pull vive en el gitconfig del usuario).
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
-	return runGitCombined(ctx, dir, args...)
+	return runGitCombined(ctx, dir, cmdlog.ClassAction, args...)
 }
 
 // RebaseInProgress reporta si dir tiene un rebase a medias. Un pull con
@@ -192,7 +199,7 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 // casos.
 func RebaseInProgress(ctx context.Context, dir string) bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		out, err := runGit(ctx, dir, "rev-parse", "--git-path", name)
+		out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-parse", "--git-path", name)
 		if err != nil {
 			continue
 		}
@@ -217,12 +224,20 @@ func RebaseInProgress(ctx context.Context, dir string) bool {
 // pull/push: el caller resume el motivo con FailureReason. La rama del worktree
 // nunca se toca.
 func RemoveWorktree(ctx context.Context, repoDir, wtPath string, withForce bool) (string, error) {
+	return runGitCombined(ctx, repoDir, cmdlog.ClassAction, RemoveWorktreeArgv(wtPath, withForce)...)
+}
+
+// RemoveWorktreeArgv compone el argv de RemoveWorktree. Vive aparte para que el
+// caller pueda mostrar y registrar el comando resuelto (el detail y el command
+// log) sin duplicar aquí la construcción: si se duplicara, el log podría
+// mentir sobre lo que se ejecutó, que es justo lo que el log existe para
+// evitar.
+func RemoveWorktreeArgv(wtPath string, withForce bool) []string {
 	args := []string{"worktree", "remove"}
 	if withForce {
 		args = append(args, "--force")
 	}
-	args = append(args, wtPath)
-	return runGitCombined(ctx, repoDir, args...)
+	return append(args, wtPath)
 }
 
 // gitEnv devuelve el entorno para los subprocess de git forzando mensajes en
@@ -262,14 +277,18 @@ func FailureReason(out string, err error) string {
 	return ""
 }
 
-// runGit ejecuta git en dir y devuelve stdout.
-func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+// runGit ejecuta git en dir y devuelve stdout. class etiqueta la entrada en el
+// command log (las lecturas del scan son ClassRead; un fetch ClassAction o
+// ClassAuto según quién lo pidió).
+func runGit(ctx context.Context, dir string, class cmdlog.Class, args ...string) ([]byte, error) {
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	recordExec(dir, class, args, out, err, time.Since(start))
 	if err != nil {
 		if msg := stderr.String(); msg != "" {
 			return nil, fmt.Errorf("git %v: %s", args, firstLine(msg))
@@ -279,8 +298,11 @@ func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// runGitCombined ejecuta git y devuelve stdout+stderr mezclados.
-func runGitCombined(ctx context.Context, dir string, args ...string) (string, error) {
+// runGitCombined ejecuta git y devuelve stdout+stderr mezclados. Es el camino de
+// las acciones (pull, push, worktree remove), así que es el único que puede
+// clasificar el resultado: solo aquí está la salida completa que git imprimió.
+func runGitCombined(ctx context.Context, dir string, class cmdlog.Class, args ...string) (string, error) {
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitEnv()
@@ -288,7 +310,42 @@ func runGitCombined(ctx context.Context, dir string, args ...string) (string, er
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
-	return buf.String(), err
+	out := buf.String()
+	recordExec(dir, class, args, []byte(out), err, time.Since(start))
+	return out, err
+}
+
+// recordExec deja una entrada en el command log con los hechos del proceso:
+// argv, directorio, código de salida, duración y resultado clasificado. Es un
+// no-op si nadie instaló un recorder (--print, tests).
+//
+// El nombre visible del repo es el basename del directorio: la capa de exec no
+// conoce la lista de proyectos (ni el nombre que un .gitdash.toml pueda haber
+// sobreescrito), y para un log de comandos el basename es la referencia
+// precisa del checkout.
+func recordExec(dir string, class cmdlog.Class, args []string, out []byte, err error, dur time.Duration) {
+	if cmdlog.Active() == nil {
+		return
+	}
+	code := 0
+	if err != nil {
+		code = -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		}
+	}
+	argv := append([]string{"git"}, args...)
+	cmdlog.RecordExec(cmdlog.Entry{
+		Dir:     dir,
+		Repo:    filepath.Base(dir),
+		Class:   class,
+		Action:  args[0],
+		Argv:    argv,
+		Exit:    code,
+		Dur:     dur,
+		Outcome: Classify(args, string(out), code),
+	})
 }
 
 // firstLine recorta un mensaje a su primera línea (para UI compacta).
