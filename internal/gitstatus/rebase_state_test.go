@@ -16,7 +16,7 @@ func TestRebaseInProgressFalse(t *testing.T) {
 	testutil.PushUpstreamFile(t, origin, "u.txt", "remote\n", "remote")
 	testutil.FetchLocal(t, dir)
 
-	if out, err := Pull(t.Context(), dir, "pull", "--rebase"); err != nil {
+	if out, err := Run(t.Context(), dir, "pull", "--rebase"); err != nil {
 		t.Fatalf("el pull de un repo no divergente falló:\n%s", out)
 	}
 	if RebaseInProgress(t.Context(), dir) {
@@ -33,7 +33,7 @@ func TestRebaseInProgressTrue(t *testing.T) {
 	testutil.PushUpstreamFile(t, origin, "c.txt", "remote\n", "remote")
 	testutil.FetchLocal(t, dir)
 
-	out, err := Pull(t.Context(), dir, "pull", "--rebase")
+	out, err := Run(t.Context(), dir, "pull", "--rebase")
 	if err == nil {
 		t.Skipf("el pull no chocó (fixture sin conflicto):\n%s", out)
 	}
@@ -64,7 +64,7 @@ func TestRebaseInProgressEnWorktree(t *testing.T) {
 	testutil.CommitFiles(t, wt, map[string]string{"c.txt": "local\n"}, "local")
 	testutil.PushUpstreamFile(t, origin, "c.txt", "remote\n", "remote")
 	testutil.FetchLocal(t, wt)
-	if out, err := Pull(t.Context(), wt, "pull", "--rebase", "origin", "main"); err == nil {
+	if out, err := Run(t.Context(), wt, "pull", "--rebase", "origin", "main"); err == nil {
 		t.Skipf("el pull no chocó:\n%s", out)
 	}
 

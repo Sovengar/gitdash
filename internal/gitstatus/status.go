@@ -174,29 +174,11 @@ func Fetch(ctx context.Context, dir string, args ...string) error {
 }
 
 // Run ejecuta un argv de git en dir y devuelve la salida combinada
-// (stdout+stderr). Es el ejecutor genérico para las acciones de la UI: el kind
-// ya viene resuelto a argv en config, así que no hace falta un wrapper por
-// acción. Los defaults por acción viven en Pull/Push.
+// (stdout+stderr). Es el único ejecutor de acciones: el kind ya viene resuelto
+// a argv en config, así que no hay wrappers por acción ni defaults de flags
+// escondidos aquí (la política de pull vive en el gitconfig del usuario).
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, args...)
-}
-
-// Pull ejecuta `git pull` con los args dados (default: --ff-only) y
-// devuelve la salida combinada para el detalle.
-func Pull(ctx context.Context, dir string, args ...string) (string, error) {
-	if len(args) == 0 {
-		args = []string{"pull", "--ff-only"}
-	}
-	return Run(ctx, dir, args...)
-}
-
-// Push ejecuta `git push` con los args dados y devuelve la salida
-// combinada.
-func Push(ctx context.Context, dir string, args ...string) (string, error) {
-	if len(args) == 0 {
-		args = []string{"push"}
-	}
-	return Run(ctx, dir, args...)
 }
 
 // RebaseInProgress reporta si dir tiene un rebase a medias. Un pull con

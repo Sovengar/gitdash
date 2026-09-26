@@ -33,7 +33,9 @@ func TestPullDivergedReportsReason(t *testing.T) {
 	testutil.PushUpstreamCommits(t, origin, 2, "div-")
 	testutil.FetchLocal(t, diverged)
 
-	out, err := Pull(t.Context(), diverged)
+	// El flag va explícito: el mensaje que se comprueba es el del ff-only, y
+	// dejarlo en manos del gitconfig haría el test dependiente de la máquina.
+	out, err := Run(t.Context(), diverged, "pull", "--ff-only")
 	if err == nil {
 		t.Fatalf("pull divergido no falló:\n%s", out)
 	}
@@ -53,7 +55,7 @@ func TestPullReasonIgnoresLocale(t *testing.T) {
 	t.Setenv("LANG", "es_ES.UTF-8")
 
 	dir, _ := testutil.NewRepo(t, false) // sin upstream
-	out, err := Pull(t.Context(), dir)
+	out, err := Run(t.Context(), dir, "pull")
 	if err == nil {
 		t.Fatalf("pull sin upstream no falló:\n%s", out)
 	}
