@@ -24,13 +24,13 @@ type layout struct {
 // computeLayout reparte el alto de la terminal entre las secciones. En
 // terminales bajas degrada en orden: recortar hints de keybinds (hasta
 // defaultHintLines→0), ocultar keybinds, ocultar stats y, por último,
-// garantizar bodyLines >= 1. hintBarLines es el número real de líneas de hints
-// (config): la reserva de keybinds nunca pide más de las que se van a pintar.
-// keepStats fuerza que la sección de stats siga visible aunque el alto sea
-// mínimo (para que un aviso persistente —el prompt de confirmación de borrado—
-// no desaparezca). Seguro con height = 0 (primer render antes de
+// garantizar bodyLines >= 1. keybindsLines es el número real de líneas de
+// contenido de la sección de keybinds (la reserva nunca pide más de las que se
+// van a pintar). keepKeybinds impide degradar esa sección: con un aviso armado
+// es la única fuente de las teclas que espera la app, así que se recorta stats
+// antes que ella. Seguro con height = 0 (primer render antes de
 // WindowSizeMsg).
-func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int, keepStats bool) layout {
+func computeLayout(height int, hasFilter, detailOpen bool, keybindsLines int, keepKeybinds bool) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
@@ -42,7 +42,7 @@ func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int, kee
 
 	showStats := true
 	showKeybinds := true
-	hint := min(defaultHintLines, max(0, hintBarLines))
+	hint := max(0, keybindsLines)
 
 	fixed := func() int {
 		n := chrome + filterH
@@ -55,13 +55,15 @@ func computeLayout(height int, hasFilter, detailOpen bool, hintBarLines int, kee
 		return n
 	}
 
-	for hint > 0 && height-fixed() < 1 {
-		hint--
+	if !keepKeybinds {
+		for hint > 0 && height-fixed() < 1 {
+			hint--
+		}
 	}
 	if hint == 0 {
 		showKeybinds = false
 	}
-	if !keepStats && height-fixed() < 1 {
+	if height-fixed() < 1 {
 		showStats = false
 	}
 

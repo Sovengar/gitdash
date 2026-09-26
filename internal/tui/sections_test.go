@@ -107,14 +107,21 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 		}
 	}
 
-	// con keepStats (aviso persistente armado), stats nunca se oculta.
+	// con keepKeybinds (aviso armado), keybinds nunca se degrada: es la única
+	// fuente de las teclas que espera la app. Se recorta stats antes que ella.
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, 3, true)
-		if !l.showStats {
-			t.Errorf("h=%d con keepStats: stats oculta: %+v", h, l)
+		l := computeLayout(h, false, false, 1, true)
+		if !l.showKeybinds || l.hintLines != 1 {
+			t.Errorf("h=%d con keepKeybinds: keybinds degradada: %+v", h, l)
 		}
 		if l.bodyLines < 1 {
-			t.Errorf("h=%d con keepStats: bodyLines = %d, want >= 1", h, l.bodyLines)
+			t.Errorf("h=%d con keepKeybinds: bodyLines = %d, want >= 1", h, l.bodyLines)
+		}
+	}
+	// Y sin keepKeybinds se comporta como antes: degrada antes de crunchar.
+	for h := 0; h <= 8; h++ {
+		if l := computeLayout(h, false, false, 1, false); l.hintLines != 0 || l.showKeybinds {
+			t.Errorf("h=%d sin keepKeybinds: keybinds debería caerse: %+v", h, l)
 		}
 	}
 }
@@ -420,18 +427,70 @@ func TestRemoveWorktreeRunningVisibleInStats(t *testing.T) {
 	}
 }
 
-// En una terminal baja, el prompt de confirmación sigue visible aunque stats se
-// ocultaría sin el estado armado.
-func TestRemoveWorktreeBannerVisibleInShortTerminal(t *testing.T) {
+// En una terminal baja el aviso de borrado sigue visible: se degrada stats
+// antes que keybinds, porque keybinds es donde se anuncia la tecla.
+func TestRemoveWorktreePromptVisibleInShortTerminal(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m.height = 6 // sin keepStats, stats se oculta a esta altura
+	m.height = 6 // sin el aviso armado, keybinds se oculta a esta altura
 
 	if strings.Contains(stripANSI(m.View().Content), "remove worktree") {
 		t.Fatal("precondición: sin armado no debe verse el prompt")
 	}
 
 	m, _ = press(m, "D")
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "remove worktree wt-a? D to confirm") {
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm") {
 		t.Errorf("el prompt no es visible en terminal baja:\n%s", out)
+	}
+}
+
+// Con el aviso armado, keybinds se queda con una línea de contenido (la del
+// prompt) y el alto que sobraba vuelve a la tabla: ni caja inflada ni hints
+// compitiendo con el prompt.
+func TestPromptArmadoSustituyeLasHints(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+
+	if m.keybindsLines() != defaultHintLines {
+		t.Fatalf("sin armado, keybindsLines = %d, want %d", m.keybindsLines(), defaultHintLines)
+	}
+	if m.armedPrompt() != "" {
+		t.Errorf("sin armado hay prompt: %q", m.armedPrompt())
+	}
+
+	m, _ = press(m, "p")
+	if m.keybindsLines() != 1 {
+		t.Errorf("armado, keybindsLines = %d, want 1", m.keybindsLines())
+	}
+
+	out := m.View().Content
+	lines := strings.Split(stripANSI(out), "\n")
+	if len(lines) != m.height {
+		t.Errorf("líneas = %d, want %d (alto exacto de la terminal)", len(lines), m.height)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != m.width {
+			t.Errorf("línea %d ancho = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
+		}
+	}
+
+	plano := stripANSI(out)
+	kb := sectionContent(t, plano, "keybinds")
+	if !strings.Contains(kb, "p default") {
+		t.Errorf("el prompt no está en keybinds:\n%s", kb)
+	}
+	for _, hint := range []string{"j/k move", "f fetch", "q quit"} {
+		if strings.Contains(kb, hint) {
+			t.Errorf("la hint %q sigue ahí tras armar el prompt:\n%s", hint, kb)
+		}
+	}
+
+	// Resolver el selector devuelve las hints y con ellas el alto de la caja.
+	m, _ = press(m, "esc")
+	if m.armedPrompt() != "" {
+		t.Errorf("esc no limpió el prompt: %q", m.armedPrompt())
+	}
+	if lines := strings.Split(stripANSI(m.View().Content), "\n"); len(lines) != m.height {
+		t.Errorf("tras cancelar, líneas = %d, want %d", len(lines), m.height)
 	}
 }

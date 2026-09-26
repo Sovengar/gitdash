@@ -155,8 +155,16 @@ elige variante (`p`/`r`/`f`/`m` en `PullKinds`). Dos reglas:
   lo que evita que la app quede pegada esperando una segunda pulsación. Es el
   patrón de prefix-key, no un modo bloqueante.
 
-El prompt se pinta en el **banner de stats** (como `removePrompt`), no en un
+El prompt se pinta en la **sección keybinds, sustituyendo las hints**, no en un
 toast: los toasts expiran a los 3 s y el selector vive hasta la siguiente tecla.
+Keybinds es su sitio porque comparte función con las hints ("qué hago ahora"), y
+el banner de stats queda para el resumen y la actividad en curso. Lo mismo aplica
+a `removePrompt`: los dos avisos salen de `armedPrompt()`, que devuelve uno u
+otro, y `keybindsLines()` deriva de ahí el presupuesto de alto (1 línea con
+aviso armado, `defaultHintLines` sin él) para que la caja nunca mida más que su
+contenido. Con un aviso armado, `computeLayout` degrada **stats antes que
+keybinds** (`keepKeybinds`): si la caja del aviso cayera, la app quedaría
+esperando una tecla sin decir cuáles.
 
 ## Probar
 

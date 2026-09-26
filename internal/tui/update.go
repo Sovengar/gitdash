@@ -532,7 +532,8 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 // Se resolución es por tecla (p/r/f/m), no por flechas: el set es corto y
 // fijo, y una lista navegable obligaría a dos teclas extra para la variante que
 // se usa el 90% de las veces. El aviso sobrevive a los toasts porque es el
-// único sitio donde se anuncia qué hace cada tecla.
+// único sitio donde se anuncia qué hace cada tecla, y se pinta en keybinds
+// (sustituyendo las hints) porque comparte función con ellas.
 func (m Model) pullPrompt() string {
 	if m.pullArmed == nil {
 		return ""

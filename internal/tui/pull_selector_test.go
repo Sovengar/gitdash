@@ -146,14 +146,21 @@ func TestSelectorPromptAnunciaLasCuatroVariantes(t *testing.T) {
 	}
 }
 
-// El prompt se pinta en el banner (no en un toast): un toast expira a los 3 s y
-// el selector vive hasta la siguiente tecla.
-func TestSelectorPromptVisibleEnElBanner(t *testing.T) {
+// El prompt se pinta en la sección de keybinds (no en un toast): un toast expira
+// a los 3 s y el selector vive hasta la siguiente tecla.
+func TestSelectorPromptVisibleEnKeybinds(t *testing.T) {
 	m := newPullModel(t)
 	m, _ = press(m, "p")
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(out, "ff-only") {
 		t.Errorf("el selector armado no se anuncia en el dashboard:\n%s", out)
+	}
+	// Y no en el banner de stats: ahí solo van el resumen y la actividad.
+	if banner := sectionContent(t, out, "gitdash"); strings.Contains(banner, "ff-only") {
+		t.Errorf("el prompt se coló en la sección de stats:\n%s", banner)
+	}
+	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "ff-only") {
+		t.Errorf("el prompt no está en la sección de keybinds:\n%s", kb)
 	}
 }
 

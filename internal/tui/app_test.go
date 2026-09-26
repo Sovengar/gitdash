@@ -74,6 +74,31 @@ func snapNoUpstream() gitstatus.Snapshot {
 	return s
 }
 
+// sectionContent devuelve el interior de la sección bordada con ese título. Los
+// avisos armados se pintan en una sección concreta (keybinds): para comprobar
+// dónde acaba cada cosa hay que mirar dentro de la caja, no en el texto plano.
+func sectionContent(t *testing.T, view, title string) string {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, "╭ "+title+" ") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("no está la sección %q en la vista:\n%s", title, view)
+	}
+	for i := start + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "╰") {
+			return strings.Join(lines[start+1:i], "\n")
+		}
+	}
+	t.Fatalf("la sección %q no se cierra:\n%s", title, view)
+	return ""
+}
+
 func press(m Model, key string) (Model, tea.Cmd) {
 	km := tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
 	if len(key) > 1 {

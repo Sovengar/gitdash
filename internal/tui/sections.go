@@ -19,12 +19,38 @@ func (m Model) section(title, content string) string {
 	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, m.width)
 }
 
-// layout calcula el reparto de alto para el estado actual del modelo. Con una
-// confirmación de borrado o un selector de pull armados se fuerza la
-// visibilidad de stats para que el prompt no desaparezca en terminales bajas.
+// layout calcula el reparto de alto para el estado actual del modelo. Con un
+// aviso armado (selector de pull o confirmación de borrado) lo que se fuerza
+// es la visibilidad de keybinds, que es donde se pinta ese aviso: si se
+// degradara, la app quedaría esperando una tecla sin decir cuáles.
 func (m Model) layout() layout {
-	armed := m.armed != nil || m.pullArmed != nil
-	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, len(m.cfg.HintBarLines()), armed)
+	armed := m.armedPrompt() != ""
+	return computeLayout(m.height, m.searchActive || m.search != "", m.detailOpen, m.keybindsLines(), armed)
+}
+
+// keybindsLines dice cuántas líneas de contenido pintará la sección de
+// keybinds: las hints del config (con tope) o, si hay un aviso armado, solo la
+// del prompt. El presupuesto de alto se deriva de aquí para que la caja nunca
+// mida más que lo que lleva dentro.
+func (m Model) keybindsLines() int {
+	if m.armedPrompt() != "" {
+		return 1
+	}
+	return min(defaultHintLines, max(0, len(m.cfg.HintBarLines())))
+}
+
+// armedPrompt devuelve el aviso persistente de los estados de "una tecla más":
+// el selector de pull y la confirmación de borrado de worktree. Solo puede haber
+// uno armado a la vez (la segunda pulsación desarma el anterior), pero si se
+// solaparan manda el de borrado. Vacío si no hay nada armado.
+func (m Model) armedPrompt() string {
+	switch {
+	case m.armed != nil:
+		return m.removePrompt()
+	case m.pullArmed != nil:
+		return m.pullPrompt()
+	}
+	return ""
 }
 
 // compose apila las secciones visibles: stats, filtro, la sección central
@@ -47,22 +73,12 @@ func (m Model) compose(lay layout, middle string) string {
 // statsSection resume el estado global. El indicador compacto de actividad va
 // primero para que sobreviva al recorte en anchos estrechos; después el
 // resumen. El propio indicador ya nombra las acciones en curso, así que no se
-// duplican aparte.
+// duplican aparte. Los avisos armados NO van aquí: viven en keybinds, que es
+// donde el usuario ya busca las teclas.
 func (m Model) statsSection() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 2)
 	if activity := m.activityIndicator(); activity != "" {
 		parts = append(parts, activity)
-	}
-	if m.armed != nil {
-		// Aviso persistente de confirmación: sobrevive hasta la segunda
-		// pulsación o la cancelación (los toasts expiran a los 3 s).
-		parts = append(parts, styleWarn.Render(m.removePrompt()))
-	}
-	if m.pullArmed != nil {
-		// El selector de variante se anuncia en el mismo sitio y con el mismo
-		// carácter: los dos son estados de "una tecla más". La barra se apila
-		// sobre el resumen para que el prompt sea la primera línea, no la segunda.
-		parts = append([]string{styleWarn.Render(m.pullPrompt())}, parts...)
 	}
 	total, dirty, ahead, behind := m.summary()
 	summary := fmt.Sprintf("%d repos · %d dirty · %d ahead · %d behind", total, dirty, ahead, behind)
@@ -153,9 +169,15 @@ func (m Model) tableSection(bodyLines int) string {
 	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"))
 }
 
-// keybindsSection muestra hasta hintLines líneas de hints.
+// keybindsSection muestra hasta hintLines líneas de hints o, si hay un aviso
+// armado, el prompt en su lugar. El prompt sustituye a las hints (no se apila):
+// compite por el mismo espacio de lectura —"qué hago ahora"—, y las hints
+// vuelven intactas en cuanto se resuelve la pulsación.
 func (m Model) keybindsSection(hintLines int) string {
 	lines := m.cfg.HintBarLines()
+	if prompt := m.armedPrompt(); prompt != "" {
+		lines = []string{styleWarn.Render(prompt)}
+	}
 	if hintLines < len(lines) {
 		lines = lines[:max(0, hintLines)]
 	}

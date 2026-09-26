@@ -472,29 +472,33 @@ func TestRemoveWorktreeArmedRevalidatesSelection(t *testing.T) {
 	}
 }
 
-// El aviso persistente aparece en la vista, cambia en el forzado y desaparece
-// al cancelar.
-func TestRemoveWorktreeBannerRender(t *testing.T) {
+// El aviso persistente se pinta en la sección de keybinds, cambia en el forzado
+// y desaparece al cancelar.
+func TestRemoveWorktreePromptRender(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 
 	m, _ = press(m, "D")
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(out, "remove worktree wt-a? D to confirm, esc to cancel") {
-		t.Errorf("aviso de confirmación ausente:\n%s", out)
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm, esc to cancel") {
+		t.Errorf("aviso de confirmación ausente de keybinds:\n%s", out)
 	}
 
 	// Variante forzada.
 	e, _ := m.selectedEntry()
 	m = armedOver(t, m, e, true)
 	out = stripANSI(m.View().Content)
-	if !strings.Contains(out, "remove worktree wt-a? has changes — D to force, esc to cancel") {
-		t.Errorf("aviso forzado ausente:\n%s", out)
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? has changes — D to force, esc to cancel") {
+		t.Errorf("aviso forzado ausente de keybinds:\n%s", out)
 	}
 
-	// Cancelar lo retira.
+	// Cancelar lo retira y devuelve las hints.
 	m, _ = press(m, "esc")
-	if strings.Contains(stripANSI(m.View().Content), "remove worktree") {
+	out = stripANSI(m.View().Content)
+	if strings.Contains(out, "remove worktree") {
 		t.Error("el aviso sigue visible tras cancelar")
+	}
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "j/k move") {
+		t.Errorf("las hints no volvieron tras cancelar:\n%s", out)
 	}
 }
 
