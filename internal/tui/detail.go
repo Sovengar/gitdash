@@ -129,7 +129,12 @@ func (m *Model) renderDetail(r row) string {
 		if act.err != "" {
 			verdict = styleError.Render("failed")
 		}
-		b.WriteString("\n" + key("last "+act.kind) + " " + verdict + "\n")
+		b.WriteString("\n" + key("last "+pullVariantLabel(act.kind)) + " " + verdict + "\n")
+		// El argv resuelto es lo único que revela la política real: con
+		// `p` sin flags, lo que reconcilió fue el gitconfig, no gitdash.
+		if act.cmd != "" {
+			b.WriteString(styleHint.Render(indent(truncate(act.cmd, max(20, m.width-30)), "  ")) + "\n")
+		}
 		if tail := actionTail(act.output, max(3, m.height-20)); tail != "" {
 			b.WriteString(styleHint.Render(indent(tail, "  ")) + "\n")
 		}

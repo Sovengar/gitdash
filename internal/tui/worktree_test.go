@@ -436,18 +436,27 @@ func TestWorktreeFoldKeepsCursor(t *testing.T) {
 	}
 }
 
-// Pull/sync/push/recollect operan sobre el path del worktree.
+// Las variantes de pull, push y recollect operan sobre el path del worktree.
 func TestWorktreeActionsPathS33_2_4(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
-	for _, tc := range []struct{ key, kind string }{
-		{"p", "pull"}, {"s", "sync"}, {"P", "push"}, {"R", "collect"},
+	for _, tc := range []struct {
+		keys []string
+		kind string
+	}{
+		{[]string{"p", "p"}, "pull"},        // variante default
+		{[]string{"p", "r"}, "pull_rebase"}, // variante rebase
+		{[]string{"p", "m"}, "pull_merge"},  // variante merge
+		{[]string{"P"}, "push"},
+		{[]string{"R"}, "collect"},
 	} {
 		m := newTestModel(t, []discovery.Project{p}, st)
 		m, _ = press(m, " ")
 		m, _ = press(m, "down")
-		m, _ = press(m, tc.key)
+		for _, k := range tc.keys {
+			m, _ = press(m, k)
+		}
 		if m.running["/tmp/wt-a"] != tc.kind {
-			t.Errorf("%s en running = %q, want %q", tc.key, m.running["/tmp/wt-a"], tc.kind)
+			t.Errorf("%v en running = %q, want %q", tc.keys, m.running["/tmp/wt-a"], tc.kind)
 		}
 	}
 }
@@ -482,7 +491,7 @@ func TestWorktreeFetchPath(t *testing.T) {
 	}
 }
 
-// Lazygit/update/editor resuelven el path del worktree.
+// Lazygit/editor resuelven el path del worktree.
 func TestWorktreeHandoffPath(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
@@ -498,14 +507,10 @@ func TestWorktreeHandoffPath(t *testing.T) {
 		t.Errorf("editor path = %q", r.project.Path)
 	}
 
-	// update: comando configurado → running sobre el path del worktree.
-	mu := newTestModel(t, []discovery.Project{p}, st)
-	mu, _ = press(mu, " ")
-	mu, _ = press(mu, "down")
-	mu.cfg.Commands["update"] = "echo"
-	mu, _ = press(mu, "u")
-	if mu.running["/tmp/wt-a"] != "update" {
-		t.Errorf("update running = %q", mu.running["/tmp/wt-a"])
+	// El selector de pull captura el path del worktree al armar.
+	mp, _ := press(m, "p")
+	if mp.pullArmed == nil || mp.pullArmed.path != "/tmp/wt-a" {
+		t.Errorf("pull armado = %+v, want path del worktree", mp.pullArmed)
 	}
 
 	// lazygit: solo si está instalado (mismo skip que el resto de tests).

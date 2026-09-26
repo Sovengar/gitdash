@@ -96,11 +96,40 @@ attention-first).
 | `r` | rescan completo (discovery + estados + fetch auto) |
 | `R` | re-coleccionar el repo del cursor |
 | `f` / `F` | fetch del repo / fetch de todos |
-| `p` | pull (`--ff-only`; si divergió, falla visible con hint) |
+| `p` | selector de pull (ver abajo) |
 | `P` | push |
 | `e` | abrir `$EDITOR` en el directorio del repo |
 | `enter` | detalle: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
 | `q` | salir |
+
+### Pull: la política vive en tu gitconfig
+
+`p` no ejecuta un pull: abre un selector y la **siguiente** tecla elige variante.
+
+| Tecla | Variante | Comando |
+|---|---|---|
+| `p` `p` | default | `git pull` (sin flags) |
+| `p` `r` | rebase | `git pull --rebase --autostash` |
+| `p` `f` | ff-only | `git pull --ff-only` |
+| `p` `m` | merge | `git pull --no-rebase` |
+
+La variante **default va sin flags a propósito**: la política de reconciliación
+es de tu gitconfig (`pull.rebase`, `pull.ff`, …) y los flags en la línea de
+comandos la pisan. Con `--ff-only` hardcodeado, un `pull.rebase=true` en tu
+config quedaba ignorado. Las otras tres variantes existen para pisar la política
+sin tener que editar la config de gitdash.
+
+Cualquier otra tecla cancela el selector y ejecuta su acción normal (`esc`
+cancela sin más). El repo objetivo se captura al pulsar `p`, así que la segunda
+tecla no puede operar sobre otra fila.
+
+El **detalle de cada repo guarda el argv que se ejecutó de verdad** (última
+acción, en memoria, solo la última). Es la única forma de saber qué reconcilió:
+con `p` `p` no hay flags que leer, la decisión la tomó tu gitconfig.
+
+Si un pull `--rebase` choca, el aviso **no** dice solo "falló": dice que el
+rebase quedó a medias y cómo continuar o abandonar. Decir "falló" invita a
+reintentar sobre un rebase sin resolver.
 
 ## Worktrees y grupos
 
@@ -109,8 +138,8 @@ attention-first).
   Expandido, cada worktree de `git worktree list` aparece como **sub-fila
   navegable y operable** (incluidos los que no tienen marcador y los que
   están fuera de los roots): el cursor puede posarse en ella y *todas* las
-  acciones de repo (fetch, pull, sync, push, lazygit, update, editor,
-  recollect, `!` y detalle) se ejecutan contra el path de ese worktree. La
+  acciones de repo (fetch, pull, push, lazygit, editor, recollect, `!` y
+  detalle) se ejecutan contra el path de ese worktree. La
   sub-fila muestra su rama (o `(detached)`) y deja vacías las celdas de
   estado por-worktree (no se inventa dirty/ahead/behind/sync). El estado
   expandido/plegado persiste entre sesiones (mismo `collapsed.json` que el
@@ -164,9 +193,11 @@ marcador), `internal/gitstatus` (subprocess git + parsing `porcelain=v2`),
 
 ## Roadmap
 
+- Sincronizar la rama con la *sync branch* (`git pull --rebase origin <sync>`):
+  la columna SYNC ya avisa del desfase, pero no hay tecla que lo arregle
 - Fetch de la sync branch (frescura de la columna SYNC sin pull manual)
 - Acciones grupales (fetch/pull de todo un grupo)
-- Acciones extra: git update, stash, PRs
+- Acciones extra: stash, PRs
 - Fetch programado en background
 
 MIT

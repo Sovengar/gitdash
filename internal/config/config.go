@@ -167,8 +167,7 @@ func DefaultKeybindings() Keybindings {
 		"search":    "/",
 		"fetch":     "f",
 		"fetch_all": "F",
-		"sync":      "s",
-		"pull":      "p",
+		"pull":      "p", // abre el selector de variante (p/r/f/m)
 		"push":      "P",
 		"editor":    "e",
 		"lazygit":   "g",
@@ -177,7 +176,6 @@ func DefaultKeybindings() Keybindings {
 		"fold":      "tab",
 		"detail":    "enter",
 		"command":   "!",
-		"update":    "u",
 		"expand":    "space", // toggle de expansión de worktrees
 		// Borrado de un worktree desde su sub-fila (nunca la rama).
 		"worktree_remove": "D",
@@ -185,12 +183,19 @@ func DefaultKeybindings() Keybindings {
 }
 
 // DefaultCommands devuelve los comandos git por defecto.
+//
+// `pull` va SIN flags a propósito: la política de reconciliación (merge,
+// rebase, ff-only) vive en el gitconfig del usuario y los flags en la línea de
+// comandos la pisan. Las variantes con flags existen para el selector de la
+// tecla `p`, que ofrece la política explícita sin cambiar el default.
 func DefaultCommands() Commands {
 	return Commands{
-		"pull":  "pull --ff-only",
-		"push":  "push",
-		"sync":  "pull --rebase --autostash",
-		"fetch": "fetch --prune",
+		"pull":        "pull", // default: decide el gitconfig
+		"pull_rebase": "pull --rebase --autostash",
+		"pull_ff":     "pull --ff-only",
+		"pull_merge":  "pull --no-rebase",
+		"push":        "push",
+		"fetch":       "fetch --prune",
 	}
 }
 
@@ -270,8 +275,7 @@ var hintLabels = map[string]string{
 	"search":    "/ filter",
 	"fetch":     "f fetch",
 	"fetch_all": "F fetch all",
-	"sync":      "s sync",
-	"pull":      "p pull",
+	"pull":      "p pull ▸",
 	"push":      "P push",
 	"lazygit":   "g lazygit",
 	"editor":    "e edit",
@@ -280,7 +284,6 @@ var hintLabels = map[string]string{
 	"fold":      "tab fold",
 	"detail":    "enter detail",
 	"command":   "! cmd",
-	"update":    "u update",
 	"expand":    "expand",
 	"quit":      "q quit",
 	// acción de borrado de worktree: la tecla la antepone HintBarLines.
@@ -296,8 +299,8 @@ func (c Config) HintBarLines() []string {
 	row3 := []string{}           // tools
 
 	for _, action := range []string{
-		"dirty", "search", "fetch", "fetch_all", "sync",
-		"pull", "push", "lazygit", "update", "editor", "rescan", "recollect",
+		"dirty", "search", "fetch", "fetch_all", "pull",
+		"push", "lazygit", "editor", "rescan", "recollect",
 		"fold", "expand", "detail", "command", "quit", "worktree_remove",
 	} {
 		key, ok := c.Keybindings[action]
@@ -313,7 +316,7 @@ func (c Config) HintBarLines() []string {
 		switch action {
 		case "dirty", "search", "fold", "expand", "detail", "command":
 			row1 = append(row1, hint)
-		case "fetch", "fetch_all", "sync", "pull", "push":
+		case "fetch", "fetch_all", "pull", "push":
 			row2 = append(row2, hint)
 		default:
 			row3 = append(row3, hint)

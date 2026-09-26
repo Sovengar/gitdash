@@ -83,7 +83,7 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 |---|---|
 | `internal/config` | TOML XDG. `Load()` nunca falla: defaults + warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude`. `MainRepo` enlaza worktree→repo principal |
-| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Fetch, Pull, Push). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro |
+| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, Pull, Push, RebaseInProgress). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro |
 | `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
 | `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `styles.go` |
 | `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
@@ -123,6 +123,40 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
    aparece como untracked y ensucia el estado dirty de todos los repos.
 6. **textinput v2 con teclas sintéticas**: `tea.KeyPressMsg` necesita
    `Code` Y `Text` — solo `Code` no inserta runas en el input.
+7. **La política de pull es del usuario, no nuestra**: `commands.pull` va
+   **sin flags** a propósito. Los flags en la línea de comandos pisan el
+   gitconfig, así que un `--ff-only` hardcodeado anulaba un `pull.rebase=true`
+   del usuario (comprobado: el mismo repo divergente rebasea con `git pull` pelado
+   y no con `git pull --ff-only`). Las variantes con flags existen solo para el
+   selector de `p`, que ofrece la política explícita. **No reintroduzcas flags en
+   el default.**
+8. **Un pull --rebase que choca no es un fallo limpio**: deja el rebase a medias
+   (`rebase-merge`/`rebase-apply` en el dir del worktree). Por eso
+   `gitstatus.RebaseInProgress` existe y el aviso tiene prioridad sobre los
+   hints de divergencia/upstream: decir "falló" invita a reintentar sobre un
+   rebase sin resolver. Se resuelve con `git rev-parse --git-path`, no mirando
+   `.git/rebase-*` a pelo, porque en un worktree `.git` es un fichero.
+9. **El argv resuelto viaja en `actionMsg`/`actionResult`**: con la política
+   delegada en el gitconfig, el kind ya no implica los flags. El detalle lo
+   muestra; sin eso la UI miente sobre lo que reconcilió.
+10. **Las filas se ordenan attention-first**: la posición del cursor NO es la del
+   fixture de test. Los tests que necesitan una fila concreta la localizan por
+   path (`cursorOn`), no por índice.
+
+## Gotcha de diseño: el selector de pull
+
+`p` no ejecuta: arma `pullArmed` con el path capturado, y la **siguiente** tecla
+elige variante (`p`/`r`/`f`/`m` en `PullKinds`). Dos reglas:
+
+- Las cuatro teclas **chocan con acciones reales** de la tabla (`p`=pull,
+  `r`=rescan, `f`=fetch), así que el estado armado tiene que consumir la tecla
+  **antes** del enrutado normal en `handleKey`.
+- Cualquier otra tecla **cancela y sigue su curso normal** (no se consume): es
+  lo que evita que la app quede pegada esperando una segunda pulsación. Es el
+  patrón de prefix-key, no un modo bloqueante.
+
+El prompt se pinta en el **banner de stats** (como `removePrompt`), no en un
+toast: los toasts expiran a los 3 s y el selector vive hasta la siguiente tecla.
 
 ## Probar
 
