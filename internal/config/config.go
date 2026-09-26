@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -102,6 +103,9 @@ func LoadFrom(path string) (Config, string) {
 	if _, err := toml.Decode(string(raw), &fc); err != nil {
 		return cfg, fmt.Sprintf("config: %v", err)
 	}
+	// warns acumula los avisos parciales: una config puede estar bien en casi
+	// todo y aun así tener una tecla muerta.
+	var warns []string
 
 	if fc.Marker != nil && *fc.Marker != "" {
 		cfg.Marker = *fc.Marker
@@ -134,10 +138,22 @@ func LoadFrom(path string) (Config, string) {
 		}
 	}
 	// Keybindings: merge sobre defaults (el usuario solo sobreescribe lo que cambia).
+	// Una acción que ya no existe se ignora, pero se avisa: sin el aviso, un
+	// `detail = "enter"` de una config vieja deja la tecla muerta y parece un
+	// bug de la TUI.
+	var stale []string
 	for k, v := range fc.Keybindings {
+		if _, known := DefaultKeybindings()[k]; !known {
+			stale = append(stale, k)
+			continue
+		}
 		if v != "" {
 			cfg.Keybindings[k] = v
 		}
+	}
+	if len(stale) > 0 {
+		sort.Strings(stale)
+		warns = append(warns, "config: keybindings ignoradas, acción inexistente: "+strings.Join(stale, ", "))
 	}
 	// Commands: merge sobre defaults.
 	for k, v := range fc.Commands {
@@ -145,7 +161,7 @@ func LoadFrom(path string) (Config, string) {
 			cfg.Commands[k] = v
 		}
 	}
-	return cfg, ""
+	return cfg, strings.Join(warns, "; ")
 }
 
 // Path devuelve la ruta del fichero de config respetando $XDG_CONFIG_HOME.
@@ -173,10 +189,12 @@ func DefaultKeybindings() Keybindings {
 		"lazygit":   "g",
 		"rescan":    "r",
 		"recollect": "R",
-		"fold":      "tab",
-		"detail":    "enter",
-		"command":   "!",
-		"expand":    "space", // toggle de expansión de worktrees
+		// `enter` es la única tecla de plegado: pliega/despliega los worktrees
+		// del repo bajo el cursor y los bloques de grupo. No hay vista de
+		// detalle aparte —la ficha vive en su propia sección—, así que `enter`
+		// ya no hace falta para abrirla.
+		"fold":    "enter",
+		"command": "!",
 		// Borrado de un worktree desde su sub-fila (nunca la rama).
 		"worktree_remove": "D",
 	}
@@ -265,28 +283,27 @@ func (c Config) KeyByAction() map[string]string {
 	return inv
 }
 
-// HintLabel devuelve la etiqueta corta para la barra de hints.
+// hintLabels es la etiqueta corta de cada acción para la barra de hints: SOLO la
+// acción, sin la tecla, que la antepone HintBarLines. Si la etiqueta llevara la
+// tecla dentro, un rebind produciría hints como "w enter fold".
 // Acciones internas como "quit" no aparecen (ya están hardcodeadas
 // en la UI o son universales).
 var hintLabels = map[string]string{
-	"up":        "↑/k",
-	"down":      "↓/j",
-	"dirty":     "d dirty",
-	"search":    "/ filter",
-	"fetch":     "f fetch",
-	"fetch_all": "F fetch all",
-	"pull":      "p pull ▸",
-	"push":      "P push",
-	"lazygit":   "g lazygit",
-	"editor":    "e edit",
-	"rescan":    "r rescan",
-	"recollect": "R recollect",
-	"fold":      "tab fold",
-	"detail":    "enter detail",
-	"command":   "! cmd",
-	"expand":    "expand",
-	"quit":      "q quit",
-	// acción de borrado de worktree: la tecla la antepone HintBarLines.
+	"up":              "↑/k",
+	"down":            "↓/j",
+	"dirty":           "dirty",
+	"search":          "filter",
+	"fetch":           "fetch",
+	"fetch_all":       "fetch all",
+	"pull":            "pull ▸",
+	"push":            "push",
+	"lazygit":         "lazygit",
+	"editor":          "edit",
+	"rescan":          "rescan",
+	"recollect":       "recollect",
+	"fold":            "fold",
+	"command":         "cmd",
+	"quit":            "quit",
 	"worktree_remove": "remove wt",
 }
 
@@ -301,7 +318,7 @@ func (c Config) HintBarLines() []string {
 	for _, action := range []string{
 		"dirty", "search", "fetch", "fetch_all", "pull",
 		"push", "lazygit", "editor", "rescan", "recollect",
-		"fold", "expand", "detail", "command", "quit", "worktree_remove",
+		"fold", "command", "quit", "worktree_remove",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {
@@ -311,10 +328,10 @@ func (c Config) HintBarLines() []string {
 		if !ok {
 			label = key
 		}
-		hint := key + " " + strings.TrimPrefix(label, key+" ")
+		hint := key + " " + label
 
 		switch action {
-		case "dirty", "search", "fold", "expand", "detail", "command":
+		case "dirty", "search", "fold", "command":
 			row1 = append(row1, hint)
 		case "fetch", "fetch_all", "pull", "push":
 			row2 = append(row2, hint)

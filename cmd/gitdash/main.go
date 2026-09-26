@@ -32,6 +32,8 @@ func main() {
 	}
 
 	model := tui.New(cfg)
+	// El aviso va también a la TUI: stderr se queda detrás del alt screen.
+	model.NotifyConfig(warn)
 	if _, err := tea.NewProgram(model).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gitdash:", err)
 		os.Exit(1)

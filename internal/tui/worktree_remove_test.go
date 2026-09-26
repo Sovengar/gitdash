@@ -34,7 +34,7 @@ func removeWtModel(t *testing.T, parent string, wts ...gitstatus.Worktree) (Mode
 	t.Helper()
 	p, st := repoWithWorktrees(filepath.Base(parent), parent, wts...)
 	m := newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, " ") // expandir worktrees
+	m, _ = press(m, "enter") // expandir worktrees
 	m, _ = press(m, "down")
 	if e, ok := m.selectedEntry(); !ok || e.kind != kindWorktree {
 		t.Fatalf("el cursor no quedó sobre una sub-fila: %+v", e)
@@ -128,19 +128,15 @@ func TestRemoveWorktreeSecondPressExecutes(t *testing.T) {
 	}
 }
 
-// esc cancela la confirmación y NO cierra el detalle.
+// esc cancela la confirmación y no lanza nada.
 func TestRemoveWorktreeEscCancels(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m, _ = press(m, "D")
-	m.detailOpen = true
 
 	m, _ = press(m, "esc")
 
 	if m.armed != nil {
 		t.Error("esc no desarmó la confirmación")
-	}
-	if !m.detailOpen {
-		t.Error("esc cerró el detalle pese a estar armado")
 	}
 	if m.running["/tmp/parent-repo"] != "" {
 		t.Error("esc no debe lanzar ninguna acción")
@@ -246,13 +242,13 @@ func TestRemoveWorktreeOtherKeysDisarm(t *testing.T) {
 	}
 
 	// tab sobre la sub-fila: no-op de plegado pero desarma
-	m4, _ := press(m, "tab")
+	m4, _ := press(m, "enter")
 	if m4.armed != nil {
 		t.Error("tab no desarmó")
 	}
 
 	// space sobre la sub-fila: no-op de expansión pero desarma
-	m5, _ := press(m, " ")
+	m5, _ := press(m, "enter")
 	if m5.armed != nil {
 		t.Error("space no desarmó")
 	}
@@ -356,10 +352,10 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 
 	p := proj(filepath.Base(dir), dir, true)
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
-	m, _ = press(m, " ")    // expandir
-	m, _ = press(m, "down") // sub-fila
-	m, _ = press(m, "D")    // armar
-	m, _ = press(m, "D")    // ejecutar
+	m, _ = press(m, "enter") // expandir
+	m, _ = press(m, "down")  // sub-fila
+	m, _ = press(m, "D")     // armar
+	m, _ = press(m, "D")     // ejecutar
 
 	waitEvent(t, &m, func(ev event) bool {
 		sm, ok := ev.(statusMsg)
@@ -635,7 +631,6 @@ func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 // `!` (modo comando) desarma la confirmación y abre el input.
 func TestRemoveWorktreeCommandKeyDisarms(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m.detailOpen = true
 	m, _ = press(m, "D") // armar
 
 	m, _ = press(m, "!")
@@ -662,7 +657,7 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 
 	p := proj(filepath.Base(dir), dir, true)
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
-	m, _ = press(m, " ")
+	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
 	m, _ = press(m, "D") // armar
 	m, _ = press(m, "D") // intento sin force → falla

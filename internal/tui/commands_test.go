@@ -1,12 +1,14 @@
 // Tests de las acciones con handoff de terminal: tecla g (lazygit) y
-// modo comando `!` del detalle via worktrunk.
+// modo comando `!` (input al final de la ficha del panel) via worktrunk.
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
@@ -31,21 +33,16 @@ func TestRunShellCmdCapturaSalidaYExit(t *testing.T) {
 	}
 }
 
-// flujo completo del modo comando: enter abre detalle, ! abre el input,
-// teclear, enter lanza el comando en la worktree y marca running "cmd".
+// flujo completo del modo comando: `!` abre el input al final de la ficha del
+// panel, teclear, enter lanza el comando en el repo y marca running "cmd".
 func TestBangModoComandoFlujo(t *testing.T) {
 	p := proj("demo", "/tmp/gitdash-test/demo", true)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
-	m, _ = press(m, "enter") // abre el detalle
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
-	}
-
 	m, _ = press(m, "!") // abre el input
 	if !m.cmdOpen {
-		t.Fatal("! no abrió el modo comando en el detalle")
+		t.Fatal("! no abrió el modo comando")
 	}
 
 	m, _ = press(m, "g")
@@ -70,7 +67,6 @@ func TestBangModoComandoCancelar(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
-	m, _ = press(m, "enter")
 	m, _ = press(m, "!")
 	m, _ = press(m, "esc")
 	if m.cmdOpen {
@@ -108,7 +104,6 @@ func TestBangSinRepo(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
-	m, _ = press(m, "enter")
 	m, cmd := press(m, "!")
 	if m.cmdOpen {
 		t.Fatal("! abrió el input en un repo sin git")
@@ -157,10 +152,87 @@ func hasLazygit() bool {
 // tecleada (bug del "! c" fantasma).
 func TestBangPlaceholderCursorLimpio(t *testing.T) {
 	m := New(config.Defaults())
-	m.detailOpen = true
 	m.cmdOpen = true
 	v := stripANSI(m.cmdInput.View())
 	if !strings.HasPrefix(v, "!  ") {
 		t.Fatalf("view = %q, quizo empezar por \"!  \" (prompt + espacio del placeholder)", v)
 	}
+}
+
+// El input de `!` se pinta al final de la ficha del panel y SIEMPRE visible:
+// aunque la ficha haya llenado la caja, lo que se recorta es la ficha, no el
+// prompt (escribir un comando sin verlo es escribir a ciegas).
+func TestBangInputVisibleEnElPanel(t *testing.T) {
+	projects, states := fixtureProjects()
+	s := states["/tmp/dirty-api"]
+	// Ficha larga: ficheros y commits de sobra para llenar el panel.
+	for i := 0; i < 20; i++ {
+		s.Files = append(s.Files, gitstatus.FileEntry{Code: ".M", Path: fmt.Sprintf("pkg/f%02d.go", i)})
+	}
+	for i := 0; i < 10; i++ {
+		s.Commits = append(s.Commits, gitstatus.Commit{
+			Sha: fmt.Sprintf("%07d", i), Subject: fmt.Sprintf("commit %d", i), When: time.Now().Unix(),
+		})
+	}
+	states["/tmp/dirty-api"] = s
+	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/dirty-api")
+	lay := m.layout()
+	if lay.previewLines < detailHeadLines+cmdInputLines {
+		t.Fatalf("precondición: el panel es demasiado pequeño (%d)", lay.previewLines)
+	}
+
+	m, _ = press(m, "!")
+	if !m.cmdOpen {
+		t.Fatal("! no abrió el input")
+	}
+	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "dirty-api"))
+	if len(panel) != lay.previewLines {
+		t.Errorf("el panel mide %d líneas, want %d (el input no puede desbordarlo)",
+			len(panel), lay.previewLines)
+	}
+	if last := lastNonEmpty(panel); !strings.HasPrefix(last, "! ") {
+		t.Errorf("la última línea del panel es %q, want el prompt del input\n%v", last, panel)
+	}
+	// Lo que se recorta es la ficha por arriba, no la cabecera: el repo y su
+	// estado siguen estando.
+	if panel[0] != "/tmp/dirty-api" {
+		t.Errorf("la cabecera de la ficha no está: %q", panel[0])
+	}
+	// Con el input abierto la ayuda al pie se sustituye (es lo que dice enter).
+	if strings.Contains(strings.Join(panel, "\n"), "g lazygit · ! cmd") {
+		t.Errorf("con el input abierto sigue la ayuda al pie:\n%v", panel)
+	}
+}
+
+// Sin input abierto, la ficha corta por su ayuda al pie.
+func TestFichaTerminaEnLaAyuda(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/old-clean")
+	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "old-clean"))
+	if last := lastNonEmpty(panel); last != "g lazygit · ! cmd" {
+		t.Errorf("la última línea de la ficha es %q, want la ayuda al pie", last)
+	}
+}
+
+// panelLines devuelve el interior de una caja sin sus bordes laterales, para
+// poder mirar líneas concretas del panel.
+func panelLines(t *testing.T, box string) []string {
+	t.Helper()
+	var out []string
+	for _, l := range strings.Split(box, "\n") {
+		l = strings.TrimSpace(l)
+		l = strings.TrimSuffix(strings.TrimPrefix(l, "│"), "│")
+		out = append(out, strings.TrimRight(l, " "))
+	}
+	return out
+}
+
+// lastNonEmpty devuelve la última línea con contenido.
+func lastNonEmpty(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }

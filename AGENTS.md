@@ -166,6 +166,58 @@ contenido. Con un aviso armado, `computeLayout` degrada **stats antes que
 keybinds** (`keepKeybinds`): si la caja del aviso cayera, la app quedaría
 esperando una tecla sin decir cuáles.
 
+## Gotcha de diseño: el panel de preview
+
+Debajo de la tabla hay una ficha del repo bajo el cursor (estilo prdash), entre
+el listado y los keybinds. **Es la única vista de detalle**: no hay `enter`
+detalle, ni `detailSection`, ni `detailOpen`. Decisiones que no son evidentes:
+
+- **El título va solo en el borde.** `detailTitle`/`worktreeTitle` componen el
+  título de la caja y `renderDetail` NO lo repite como primera línea: pintado en
+  los dos sitios, el mismo texto salía duplicado justo bajo el borde.
+- **El panel es aditivo.** `computeLayout` busca el mayor alto de panel que
+  (a) deje `minBodyLines` filas de tabla y (b) no obligue a recortar hints ni a
+  ocultar stats/keybinds (`mismaChromeQue`). Si no hay ninguno, el panel no se
+  dibuja. Por debajo de ~22 líneas (config por defecto) el dashboard es
+  exactamente el que había antes de la feature.
+- **El share se mide sobre el alto LIBRE**, no sobre el terminal: contra el
+  total, una ventana de 30 líneas se quedaba con 12 para la ficha y 3 para la
+  tabla.
+- **El presupuesto de la ficha son sus líneas**, no las de la terminal:
+  `renderDetail(r, rows)` reserva `detailHeadLines` para la cabecera de estado y
+  reparte el resto con `listBudget`, que reserva la línea del aviso `… N más`
+  cuando la lista no cabe entera. `rows` es `lay.previewLines`. Sin eso, las
+  listas se cuentan como si cupieran y luego las recorta la caja sin avisar.
+- **El input de `!` va al FINAL de la ficha y siempre se ve** (`fichaTail`): si
+  la ficha llenó la caja, se recorta la ficha por arriba. Escribir un comando sin
+  ver el prompt es escribir a ciegas. Con el input abierto sustituye a la ayuda
+  al pie.
+- **La caja se rellena** (`fitLines`): el alto lo dice el layout, no la ficha. Sin
+  el relleno, una ficha corta haría subir los keybinds y la vista no ocuparía la
+  terminal.
+
+Con el cursor sobre un **header de grupo** el panel no tiene ficha que enseñar:
+muestra el agregado del grupo (`groupStats`, sobre `rows()` y antes del
+plegado, que es lo mismo que cuenta su header). Los estados a cero no se pintan.
+
+## Gotcha de diseño: `enter` es la única tecla de plegado
+
+`enter` (acción `fold`) pliega **lo que hay bajo el cursor**, y cada fila tiene una
+cosa distinta debajo: un header pliega su bloque, una fila de repo pliega sus
+sub-filas de worktree, y una sub-fila de worktree no tiene nada que plegar (no-op,
+y a propósito: plegar el grupo del padre desde la sub-fila sería una sorpresa).
+No hay vista de detalle que abrir, así que `enter` quedó libre para esto; `tab`
+(plegado) y `space` (expansión) se eliminaron por redundantes.
+
+Los dos estados se siguen persistiendo en el mismo `collapsed.json` (worktrees
+bajo su prefijo), así que el plegado sobrevive entre sesiones.
+
+Los hints llevan la acción SIN la tecla dentro (`hintLabels`): la tecla la
+antepone `HintBarLines`. Si la etiqueta la llevara, un rebind producía hints
+como `w enter fold`. Y `config.LoadFrom` avisa (toast + stderr) de las acciones
+de `[keybindings]` que ya no existen: sin ese aviso, un `detail = "enter"` de una
+config vieja deja `enter` muerta y parece un bug de la TUI.
+
 ## Probar
 
 ```bash

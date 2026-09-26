@@ -188,7 +188,6 @@ func TestDetalleMuestraElComandoResuelto(t *testing.T) {
 		output: "Rebase aplicado",
 	})
 	m = updated.(Model)
-	m.detailOpen = true
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(out, "git pull --rebase --autostash") {
 		t.Errorf("el detalle no muestra el comando ejecutado:\n%s", out)
@@ -207,7 +206,6 @@ func TestDetallePushMuestraComando(t *testing.T) {
 		path: "/tmp/old-clean", kind: "push", cmd: "git push", output: "",
 	})
 	m = updated.(Model)
-	m.detailOpen = true
 	if out := stripANSI(m.View().Content); !strings.Contains(out, "git push") {
 		t.Errorf("el detalle no muestra el push ejecutado:\n%s", out)
 	}

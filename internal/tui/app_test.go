@@ -285,25 +285,31 @@ func TestNavigationBounds(t *testing.T) {
 	}
 }
 
-func TestDetailOpen(t *testing.T) {
+// La ficha del repo bajo el cursor se ve sin abrir nada: `enter` ya no abre un
+// detalle (plega worktrees y grupos), así que los ficheros cambiados tienen que
+// estar en la sección del panel.
+func TestPanelMuestraLosFicheros(t *testing.T) {
 	projects, states := fixtureProjects()
 	s := states["/tmp/dirty-api"]
 	s.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	states["/tmp/dirty-api"] = s
 	// dirty-api es la primera fila (score 4): cursor en 0
 	m := newTestModel(t, projects, states)
+
+	out := stripANSI(m.renderDashboard())
+	for _, want := range []string{"main.go", "/tmp/dirty-api", "╭ dirty-api "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("el panel no dice %q:\n%s", want, out)
+		}
+	}
+	// Y `enter` sobre un repo sin worktrees no pliega nada ni altera la vista.
+	before := stripANSI(m.renderDashboard())
 	m, _ = press(m, "enter")
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
+	if !strings.HasPrefix(stripANSI(m.renderDashboard()), before[:40]) {
+		t.Errorf("enter en un repo sin worktrees cambió la vista:\n%s", stripANSI(m.renderDashboard()))
 	}
-	r, _ := m.selected()
-	out := m.renderDetail(r)
-	if !strings.Contains(out, "main.go") || !strings.Contains(out, "dirty-api") {
-		t.Errorf("detalle sin contenido esperado:\n%s", out)
-	}
-	m, _ = press(m, "esc")
-	if m.detailOpen {
-		t.Error("esc no cerró el detalle")
+	if len(m.expanded) != 0 || len(m.collapsed) != 0 {
+		t.Errorf("enter en un repo sin worktrees plegó algo: expanded=%v collapsed=%v", m.expanded, m.collapsed)
 	}
 }
 
@@ -313,7 +319,7 @@ func TestDetailShowsLastAction(t *testing.T) {
 	m.lastAction["/tmp/old-clean"] = actionResult{kind: "pull", output: "error: pull diverged\n", err: "exit 1"}
 	m.search = "old-clean"
 	r, _ := m.selected()
-	out := m.renderDetail(r)
+	out := m.renderDetail(r, m.height)
 	if !strings.Contains(out, "pull") || !strings.Contains(out, "failed") || !strings.Contains(out, "diverged") {
 		t.Errorf("detalle sin última acción:\n%s", out)
 	}

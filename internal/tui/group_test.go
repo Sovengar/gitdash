@@ -48,12 +48,12 @@ func TestFoldToggle(t *testing.T) {
 		t.Fatalf("60: entries = %d, want header+2", len(m.entries()))
 	}
 
-	m, _ = press(m, "tab") // cursor en header backend
+	m, _ = press(m, "enter") // cursor en header backend
 	if len(m.entries()) != 1 {
 		t.Errorf("plegado entries = %d, want 1 (solo header)", len(m.entries()))
 	}
 
-	m, _ = press(m, "tab")
+	m, _ = press(m, "enter")
 	if len(m.entries()) != 3 {
 		t.Errorf("desplegado entries = %d, want 3", len(m.entries()))
 	}
@@ -141,7 +141,7 @@ func TestFoldSecondary(t *testing.T) {
 	if m.entries()[m.cursor].kind != kindSecondary {
 		t.Fatalf("cursor en %+v, want header secundario", m.entries()[m.cursor])
 	}
-	m, _ = press(m, "tab")
+	m, _ = press(m, "enter")
 	entries := m.entries()
 	// primario + sec backend + sec frontend + repo b = 4
 	if len(entries) != 4 {
@@ -165,14 +165,17 @@ func TestFoldPrimaryHidesSecondaryHeaders(t *testing.T) {
 	states := map[string]gitstatus.Snapshot{"/a": snapClean(), "/b": snapClean()}
 	m := newTestModel(t, projects, states)
 
-	m, _ = press(m, "tab") // cursor sobre header primario vsocial: pliega
+	m, _ = press(m, "enter") // cursor sobre header primario vsocial: pliega
 	if n := len(m.entries()); n != 1 {
 		t.Errorf("entries = %s, want solo header primario", rowsOf(m.entries()))
 	}
 }
 
 // Tab sobre un repo pliega el contenedor más interno.
-func TestTabOnRepoFoldsInnermost(t *testing.T) {
+// `enter` pliega lo que hay bajo el cursor, y una fila de repo solo tiene
+// worktrees debajo: el grupo se pliega desde su header, no desde un repo. Aquí
+// los repos no tienen worktrees, así que `enter` sobre ellos no hace nada.
+func TestEnterEnRepoNoPlegaElGrupo(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
 		{Path: "/b", Name: "b", PrimaryGroup: "vsocial", HasRepo: true}, // sin secundario
@@ -183,19 +186,24 @@ func TestTabOnRepoFoldsInnermost(t *testing.T) {
 	// cursor al repo a (tras primario y secundario)
 	m, _ = press(m, "down")
 	m, _ = press(m, "down")
-	m, _ = press(m, "tab")
-	if !m.collapsed["vsocial/backend"] || m.collapsed["vsocial"] {
-		t.Errorf("repo con secundario pliega %v, want vsocial/backend", m.collapsed)
+	m, _ = press(m, "enter")
+	if len(m.collapsed) != 0 {
+		t.Errorf("enter en un repo sin worktrees plegó el grupo: %v", m.collapsed)
 	}
 
-	// reset y tab sobre repo b (sin secundario) → pliega el primario
+	// desde el header del secundario, sí
 	m2 := newTestModel(t, projects, states)
-	m2, _ = press(m2, "down") // header secundario
-	m2, _ = press(m2, "down") // repo a
-	m2, _ = press(m2, "down") // repo b
-	m2, _ = press(m2, "tab")
-	if !m2.collapsed["vsocial"] || m2.collapsed["vsocial/"] {
-		t.Errorf("repo sin secundario pliega %v, want vsocial", m2.collapsed)
+	m2, _ = press(m2, "down")
+	m2, _ = press(m2, "enter")
+	if !m2.collapsed["vsocial/backend"] || m2.collapsed["vsocial"] {
+		t.Errorf("el secundario no plegó su bloque: %v", m2.collapsed)
+	}
+
+	// y desde el primario
+	m3 := newTestModel(t, projects, states)
+	m3, _ = press(m3, "enter")
+	if !m3.collapsed["vsocial"] {
+		t.Errorf("el primario no plegó su bloque: %v", m3.collapsed)
 	}
 }
 
@@ -209,7 +217,7 @@ func TestFoldKeysNoCollision(t *testing.T) {
 	m := newTestModel(t, projects, states)
 
 	m, _ = press(m, "down") // header secundario alfa/backend
-	m, _ = press(m, "tab")
+	m, _ = press(m, "enter")
 	if !m.collapsed["alfa/backend"] {
 		t.Fatalf("alfa/backend no plegado: %v", m.collapsed)
 	}

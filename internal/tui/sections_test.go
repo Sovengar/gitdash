@@ -64,41 +64,49 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 	}
 }
 
-// Terminal baja degrada secciones en orden antes de romper el layout.
+// Terminal baja degrada secciones en orden antes de romper el layout. El panel
+// de preview es lo primero que cede (se encoge hasta su share y después se va
+// entero), y mientras está la tabla no baja de minBodyLines.
 func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
-	lay := computeLayout(40, false, false, 3, false)
-	if !lay.showStats || !lay.showKeybinds || lay.hintLines != 3 {
-		t.Errorf("altura amplia: %+v, want todo visible", lay)
+	// Altura amplia: todo visible y el panel con su share del alto libre.
+	wide := computeLayout(40, false, defaultHintLines, false)
+	if !wide.showStats || !wide.showKeybinds || wide.hintLines != defaultHintLines {
+		t.Errorf("altura amplia: %+v, want todo visible", wide)
 	}
-	if lay.bodyLines != 40-(statsSectionLines+tableChrome+keybindsChrome+3) {
-		t.Errorf("bodyLines = %d, want %d", lay.bodyLines, 40-(statsSectionLines+tableChrome+keybindsChrome+3))
+	if wide.previewLines < minPreviewLines {
+		t.Errorf("previewLines = %d, want >= %d", wide.previewLines, minPreviewLines)
+	}
+	if want := 40 - (statsSectionLines + tableChrome + keybindsChrome +
+		defaultHintLines + previewChrome + wide.previewLines); wide.bodyLines != want {
+		t.Errorf("bodyLines = %d, want %d", wide.bodyLines, want)
 	}
 
 	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
-	// HintBarLines)
-	pocas := computeLayout(40, false, false, 1, false)
+	// HintBarLines): el panel crece con el hueco que dejan.
+	pocas := computeLayout(40, false, 1, false)
 	if pocas.hintLines != 1 {
-		t.Errorf("hintBarLines=1: hintLines = %d, want 1", pocas.hintLines)
+		t.Errorf("keybindsLines=1: hintLines = %d, want 1", pocas.hintLines)
 	}
-	if want := 40 - (statsSectionLines + tableChrome + keybindsChrome + 1); pocas.bodyLines != want {
-		t.Errorf("hintBarLines=1: bodyLines = %d, want %d", pocas.bodyLines, want)
+	if pocas.previewLines <= wide.previewLines {
+		t.Errorf("con 1 hint el panel = %d, want > %d (se lleva el hueco libre)",
+			pocas.previewLines, wide.previewLines)
 	}
 
 	// altura intermedia: se recortan las hints antes de ocultar secciones
-	mid := computeLayout(10, false, false, 3, false)
+	mid := computeLayout(10, false, defaultHintLines, false)
 	if mid.hintLines != 1 || !mid.showKeybinds {
 		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
 	}
 
 	// más baja: keybinds fuera, stats aún visible
-	baja := computeLayout(9, false, false, 3, false)
+	baja := computeLayout(9, false, defaultHintLines, false)
 	if baja.showKeybinds || !baja.showStats {
 		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
 	}
 
 	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, 3, false)
+		l := computeLayout(h, false, defaultHintLines, false)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
@@ -108,9 +116,9 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 
 	// con keepKeybinds (aviso armado), keybinds nunca se degrada: es la única
-	// fuente de las teclas que espera la app. Se recorta stats antes que ella.
+	// fuente de las teclas que espera la app. Se recortan stats y panel antes.
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, false, 1, true)
+		l := computeLayout(h, false, 1, true)
 		if !l.showKeybinds || l.hintLines != 1 {
 			t.Errorf("h=%d con keepKeybinds: keybinds degradada: %+v", h, l)
 		}
@@ -120,10 +128,107 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 	// Y sin keepKeybinds se comporta como antes: degrada antes de crunchar.
 	for h := 0; h <= 8; h++ {
-		if l := computeLayout(h, false, false, 1, false); l.hintLines != 0 || l.showKeybinds {
+		if l := computeLayout(h, false, 1, false); l.hintLines != 0 || l.showKeybinds {
 			t.Errorf("h=%d sin keepKeybinds: keybinds debería caerse: %+v", h, l)
 		}
 	}
+}
+
+// El panel se va antes que las secciones que ya existían: por debajo del alto en
+// el que cabe sin costarle nada, el dashboard es exactamente el que había antes
+// de la feature.
+func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
+	// Con room: panel + todo lo demás.
+	if l := computeLayout(30, false, defaultHintLines, false); l.previewLines == 0 {
+		t.Errorf("h=30: sin panel: %+v", l)
+	}
+	// El panel más pequeño que entra es el de la cabecera de la ficha (6), y solo
+	// si a la tabla le quedan minBodyLines filas.
+	if l := computeLayout(22, false, defaultHintLines, false); l.previewLines != detailHeadLines {
+		t.Errorf("h=22: previewLines = %d, want %d", l.previewLines, detailHeadLines)
+	}
+	// Por debajo, nada de panel y el reparto de siempre: hints y stats intactos y
+	// la tabla con lo que sobra.
+	for h := 14; h <= 21; h++ {
+		l := computeLayout(h, false, defaultHintLines, false)
+		if l.previewLines != 0 {
+			t.Errorf("h=%d: previewLines = %d, want 0 (el panel no puede pedir más)", h, l.previewLines)
+		}
+		if !l.showStats || !l.showKeybinds || l.hintLines != defaultHintLines {
+			t.Errorf("h=%d: el panel se llevó algo que ya existía: %+v", h, l)
+		}
+		want := h - (statsSectionLines + tableChrome + keybindsChrome + defaultHintLines)
+		if l.bodyLines != want {
+			t.Errorf("h=%d: bodyLines = %d, want %d", h, l.bodyLines, want)
+		}
+	}
+	// Y con el panel presente nunca se recorta una hint ni se oculta una sección.
+	for h := 22; h <= 80; h++ {
+		l := computeLayout(h, false, defaultHintLines, false)
+		if l.previewLines == 0 {
+			continue
+		}
+		if !l.showStats || !l.showKeybinds || l.hintLines != defaultHintLines {
+			t.Errorf("h=%d: panel con previewLines=%d pero el resto degradado: %+v", h, l.previewLines, l)
+		}
+		if l.bodyLines < minBodyLines {
+			t.Errorf("h=%d: panel con previewLines=%d y bodyLines=%d: %+v", h, l.previewLines, l.bodyLines, l)
+		}
+	}
+}
+
+// La suma de las secciones tiene que dar la altura de la terminal en cualquier
+// alto y combinación de flags: si no, alguna caja se sale de la pantalla (o
+// empuja los keybinds fuera). La única excepción es el suelo del cuerpo central
+// (una fila aunque no quede nada más), y por eso la exactitud se exige solo
+// cuando el cuerpo central no está en ese suelo.
+func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
+	for h := 0; h <= 60; h++ {
+		for _, tc := range []struct {
+			name      string
+			hasFilter bool
+			keybinds  int
+			keep      bool
+		}{
+			{"dashboard", false, defaultHintLines, false},
+			{"filtro", true, defaultHintLines, false},
+			{"armado", false, 1, true},
+			{"armado+filtro", true, 1, true},
+			{"sin hints", false, 0, false},
+		} {
+			l := computeLayout(h, tc.hasFilter, tc.keybinds, tc.keep)
+			total := l.altoTotal(tc.hasFilter)
+			if l.bodyLines < 1 {
+				t.Errorf("%s h=%d: bodyLines = %d, want >= 1", tc.name, h, l.bodyLines)
+			}
+			if total < h {
+				t.Errorf("%s h=%d: alto total = %d < %d (hueco en la vista): %+v",
+					tc.name, h, total, h, l)
+			}
+			if l.bodyLines > 1 && total != h {
+				t.Errorf("%s h=%d: alto total = %d, want %d: %+v", tc.name, h, total, h, l)
+			}
+		}
+	}
+}
+
+// altoTotal suma todo lo que el layout reserva (cajas y Borders incluidos) más el
+// cuerpo central. Es la altura que la vista tiene que medir.
+func (l layout) altoTotal(hasFilter bool) int {
+	n := tableChrome
+	if hasFilter {
+		n += filterSectionLines
+	}
+	if l.showStats {
+		n += statsSectionLines
+	}
+	if l.showKeybinds {
+		n += keybindsChrome + l.hintLines
+	}
+	if l.previewLines > 0 {
+		n += previewChrome + l.previewLines
+	}
+	return n + l.bodyLines
 }
 
 // Terminal estrecha: el contenido se recorta al interior, sin wrap ni cajas
@@ -175,52 +280,6 @@ func TestSeccionFiltroCondicional(t *testing.T) {
 	m, _ = press(m, "esc")
 	if strings.Contains(stripANSI(m.renderDashboard()), "╭ filter ") {
 		t.Error("la sección de filtro no desapareció al limpiar")
-	}
-}
-
-// El detalle se envuelve en una sección bordeada con título del repo; la
-// navegación y el cierre (esc) siguen funcionando.
-func TestDetalleSeccionBordada(t *testing.T) {
-	projects, states := fixtureProjects()
-	m := newTestModel(t, projects, states)
-
-	m, _ = press(m, "enter") // dirty-api es la primera fila
-	if !m.detailOpen {
-		t.Fatal("enter no abrió el detalle")
-	}
-	out := stripANSI(m.View().Content)
-	if !strings.Contains(out, "╭ dirty-api ") {
-		t.Errorf("el título del borde no identifica el repo:\n%s", out)
-	}
-	if !strings.Contains(out, "╭ gitdash ") || !strings.Contains(out, "╭ keybinds ") {
-		t.Errorf("stats/keybinds no acompañan al detalle:\n%s", out)
-	}
-
-	m, _ = press(m, "esc")
-	if m.detailOpen {
-		t.Error("esc no cerró el detalle")
-	}
-}
-
-// El título de la sección de detalle identifica el repo con su grupo y, en
-// una sub-fila de worktree, con la marca [worktree].
-func TestDetalleTituloIdentificaRepo(t *testing.T) {
-	grouped := discovery.Project{Path: "/x", Name: "api", PrimaryGroup: "backend", HasRepo: true}
-	m := newTestModel(t, []discovery.Project{grouped},
-		map[string]gitstatus.Snapshot{"/x": snapClean()})
-	m, _ = press(m, "down") // saltar el header de grupo
-	m, _ = press(m, "enter")
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ api · backend ") {
-		t.Errorf("el título no incluye el grupo:\n%s", out)
-	}
-
-	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
-	m = newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, " ")
-	m, _ = press(m, "down")
-	m, _ = press(m, "enter")
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "╭ wt-a [worktree] ") {
-		t.Errorf("el título no marca el worktree:\n%s", out)
 	}
 }
 
