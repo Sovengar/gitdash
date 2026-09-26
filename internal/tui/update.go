@@ -277,11 +277,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Selector de variante de pull: la tecla de pull solo arma, la segunda
-	// tecla elige. Las cuatro opciones (p/r/f/m) están-en-concurrencia con
+	// tecla elige. Las opciones de git (p/r/f/m) están en concurrencia con
 	// acciones reales de la tabla (pull/rescan/fetch), así que el estado
 	// armado tiene que consumir la tecla antes de que llegue al resto del
-	// enrutado. Cualquier otra tecla cancela y sigue su curso normal: es lo
-	// que evita que la app quede pegada esperando una segunda pulsación.
+	// enrutado. La variante `a` (AI) lanza directamente, sin confirmación.
+	// Cualquier otra tecla cancela y sigue su curso normal: es lo que evita
+	// que la app quede pegada esperando una segunda pulsación.
 	if m.pullArmed != nil {
 		armed := *m.pullArmed
 		m.pullArmed = nil
@@ -297,9 +298,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			})
 			return m, m.startActionCmd(armed.path, kind)
 		}
+		if key == "a" {
+			// La variante AI no es un pull de git (PullKinds no la incluye):
+			// resuelve el prompt del marcador y lanza el handoff en el mismo
+			// acto.
+			cmdlog.RecordIntent(cmdlog.Entry{
+				Class:  cmdlog.ClassAction,
+				Repo:   m.nameOf(armed.path),
+				Dir:    armed.path,
+				Key:    key,
+				Action: "pull_ai",
+			})
+			return m, m.startPullAICmd(armed.path)
+		}
 	}
 
-	// Panel del command log: sus teclas se consultan antes del enrutado
+	// El panel del command log: sus teclas se consultan antes del enrutado
 	// normal (como los estados armados) porque j/k chocan con la navegación
 	// de la tabla. Las teclas que no son suyas siguen su curso normal: el
 	// panel es un view mode, no una modal, y así la app nunca queda
@@ -364,6 +378,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.clampCursor()
 			return m, cmd
 		}
+	}
+
+	// El panel del log es un view mode y dentro `a` es su filtro: no se arma el
+	// selector de pull ahí dentro (su aviso no se pintaría y la tecla quedaría
+	// shadowed). Abrir el panel ya suelta los estados armados; esto evita
+	// rearmarlos mientras siga abierto. Va DESPUÉS de los inputs: con el filtro
+	// o el modo comando activos la tecla es texto, no una acción.
+	if m.logOpen && m.actionForKey(key) == "pull" {
+		return m, nil
 	}
 
 	// Teclas fijas (universales, no configurables).
@@ -599,7 +622,7 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 }
 
 // pullPrompt compone el aviso persistente del selector de variante de pull.
-// Se resolución es por tecla (p/r/f/m), no por flechas: el set es corto y
+// Su resolución es por tecla (p/r/f/m/a), no por flechas: el set es corto y
 // fijo, y una lista navegable obligaría a dos teclas extra para la variante que
 // se usa el 90% de las veces. El aviso sobrevive a los toasts porque es el
 // único sitio donde se anuncia qué hace cada tecla, y se pinta en keybinds
@@ -608,28 +631,21 @@ func (m Model) pullPrompt() string {
 	if m.pullArmed == nil {
 		return ""
 	}
-	// Las etiquetas salen de pullVariantLabel, no de hardcodearlas: la tecla
-	// y el nombre de la variante tienen que ser la misma fuente que la del
-	// hint bar, o el prompt miente cuando algo se reescribe.
-	variants := make([]string, 0, len(PullKinds))
-	for _, k := range []string{"p", "r", "f", "m"} {
-		kind := PullKinds[k]
-		variants = append(variants, fmt.Sprintf("%s %s", k, pullVariantLabel(kind)))
+	// Las variantes salen de pullOptions, la misma fuente que PullKinds y las
+	// etiquetas: añadir una variante no puede dejar el prompt mintiendo.
+	variants := make([]string, 0, len(pullOptions))
+	for _, o := range pullOptions {
+		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
 	}
 	return fmt.Sprintf("pull %s: %s · esc cancel", m.nameOf(m.pullArmed.path), strings.Join(variants, " · "))
 }
 
 // pullVariantLabel nombra una variante de pull para el prompt y los hints.
 func pullVariantLabel(kind string) string {
-	switch kind {
-	case "pull":
-		return "default"
-	case "pull_rebase":
-		return "rebase"
-	case "pull_ff":
-		return "ff-only"
-	case "pull_merge":
-		return "merge"
+	for _, o := range pullOptions {
+		if o.kind == kind {
+			return o.label
+		}
 	}
 	return kind
 }

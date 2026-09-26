@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"gitdash/internal/cmdlog"
 )
@@ -146,6 +148,10 @@ func (m Model) logHeader(c logColumns) string {
 // logLine compone una entrada. La intención se pinta tenue y sin veredicto:
 // es contexto de "qué pediste", no un resultado. El código de salida y la
 // duración van juntos porque sin uno de los dos la línea no dice nada.
+//
+// Todo lo que viene de fuera (el argv, que puede incluir el prompt del marcador)
+// pasa por sanitizeLogText: una entrada tiene que ocupar exactamente UNA línea,
+// sin caracteres de control que inyecten secuencias en la terminal.
 func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 	style := styleLogExec
 	if e.Intent {
@@ -160,16 +166,17 @@ func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 		if !e.Intent {
 			kind = "exec"
 		}
-		b.WriteString("  " + style.Render(pad(truncate(kind, c.kind), c.kind)))
+		b.WriteString("  " + style.Render(pad(truncate(sanitizeLogText(kind), c.kind), c.kind)))
 	}
 	if c.repo > 0 {
-		b.WriteString("  " + style.Render(pad(truncate(e.Repo, c.repo), c.repo)))
+		b.WriteString("  " + style.Render(pad(truncate(sanitizeLogText(e.Repo), c.repo), c.repo)))
 	}
 	if c.argv > 0 {
 		cmdline := e.Action
 		if !e.Intent {
 			cmdline = e.Command()
 		}
+		cmdline = sanitizeLogText(cmdline)
 		if cmdline == "" {
 			cmdline = "-"
 		}
@@ -180,12 +187,92 @@ func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 		if outcome == "" && !e.Intent {
 			outcome = "-"
 		}
-		b.WriteString("  " + m.logOutcomeStyle(e).Render(pad(truncate(outcome, c.outcome), c.outcome)))
+		b.WriteString("  " + m.logOutcomeStyle(e).Render(pad(truncate(sanitizeLogText(outcome), c.outcome), c.outcome)))
 	}
 	if c.verdict > 0 {
 		b.WriteString("  " + m.logVerdictStyle(e).Render(pad(truncate(logVerdict(e), c.verdict), c.verdict)))
 	}
 	return b.String()
+}
+
+// sanitizeLogText deja un texto apto para una línea del panel: fuera caracteres
+// de control (C0/C1 y DEL), caracteres de formato (Cf: bidi y zero-width) y los
+// separadores de línea/parágrafo U+2028/U+2029 —todos reordenarían o partirían
+// la línea visualmente—, y las secuencias de escape; los saltos de línea y
+// tabuladores se colapsan a un solo espacio. El argv incluye texto no confiable
+// —el prompt del marcador—, así que sin esto una secuencia OSC/CSI inyectada se
+// renderiza tal cual y un prompt multilínea rompe el alto del panel. Solo afecta
+// a la pintura: el argv ejecutado y el registrado no se tocan.
+func sanitizeLogText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	// lastSpace evita que una tirada de saltos/tabuladores ("\r\n", "\n\n")
+	// meta varios espacios: el texto sigue siendo de una línea.
+	lastSpace := false
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			i = skipEscape(s, i)
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			if !lastSpace {
+				b.WriteByte(' ')
+				lastSpace = true
+			}
+		case r == utf8.RuneError && size <= 1:
+			// byte inválido: se descarta
+		case unicode.IsControl(r):
+			// C0, C1 y DEL: se descartan
+		case unicode.Is(unicode.Cf, r):
+			// formato (bidi, zero-width): se descarta
+		case r == '\u2028' || r == '\u2029':
+			// separadores de línea/parágrafo: se descartan
+		default:
+			b.WriteRune(r)
+			lastSpace = r == ' '
+		}
+	}
+	return b.String()
+}
+
+// skipEscape devuelve el índice tras la secuencia de escape que arranca en i
+// (s[i] == ESC). Reconoce CSI (parámetros hasta un byte final 0x40–0x7E) y OSC
+// (hasta BEL o ST); para cualquier otra se descarta ESC y el carácter siguiente.
+// Si la secuencia queda sin terminar, se come el resto: mejor perder cola que
+// dejar un fragmento de escape.
+func skipEscape(s string, i int) int {
+	j := i + 1
+	if j >= len(s) {
+		return j
+	}
+	switch s[j] {
+	case '[': // CSI
+		j++
+		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+			j++
+		}
+		if j < len(s) {
+			j++
+		}
+		return j
+	case ']': // OSC
+		j++
+		for j < len(s) {
+			if s[j] == 0x07 {
+				return j + 1
+			}
+			if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+				return j + 2
+			}
+			j++
+		}
+		return j
+	default:
+		return j + 1
+	}
 }
 
 // logOutcomeStyle colorea el resultado: lo que integró commits con éxito es
@@ -287,15 +374,14 @@ func (m *Model) handleLogKey(key string, bodyLines int) bool {
 }
 
 // toggleLog abre o cierra el panel. Al abrir se ancla en la cola (lo más
-// reciente visible) y al cerrar se sueltan los estados armados: navegar fuera
-// deja el aviso sin sentido, y dejarlo armado obligaría a acertar la tecla
-// siguiente desde un panel que ya no está.
+// reciente visible). Tanto abrir como cerrar sueltan los estados armados:
+// navegar fuera deja el aviso sin sentido, y dentro del panel `a` es "show all",
+// así que un selector de pull armado secuestraría la tecla.
 func (m *Model) toggleLog() {
 	m.logOpen = !m.logOpen
-	if m.logOpen {
-		m.logOffset = 0
-		return
-	}
 	m.armed = nil
 	m.pullArmed = nil
+	if m.logOpen {
+		m.logOffset = 0
+	}
 }

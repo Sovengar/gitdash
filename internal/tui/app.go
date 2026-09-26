@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,15 +113,43 @@ type actionResult struct {
 	kind, cmd, output, err string
 }
 
-// PullKinds son las variantes de pull del selector de la tecla `p`. Cada una
-// existe porque la política por defecto vive en el gitconfig y hay que poder
-// pisarla sin editar la config de gitdash.
-var PullKinds = map[string]string{
-	"p": "pull",        // sin flags: decide el gitconfig
-	"r": "pull_rebase", // rebase + autostash
-	"f": "pull_ff",     // ff-only
-	"m": "pull_merge",  // merge clásico
+// pullOption es una variante del selector de la tecla `p`: la tecla, el kind,
+// su etiqueta y si es un pull de git (los que entran en PullKinds).
+type pullOption struct {
+	key   string
+	kind  string
+	label string
+	git   bool
 }
+
+// pullOptions es la fuente única de variantes del selector. Añadir una aquí la
+// propaga al prompt y a PullKinds: sin la tabla, una lista hardcodeada en otro
+// sitio se quedaba sin la variante nueva (bug latente).
+//
+// `pull_ai` NO es un pull de git: no entra en PullKinds (ese mapa alimenta
+// startActionCmd → gitstatus.Run y el guard de RebaseInProgress) y se resuelve
+// como handoff aparte.
+var pullOptions = []pullOption{
+	{"p", "pull", "default", true},
+	{"r", "pull_rebase", "rebase", true},
+	{"f", "pull_ff", "ff-only", true},
+	{"m", "pull_merge", "merge", true},
+	{"a", "pull_ai", "AI", false},
+}
+
+// PullKinds son las variantes de pull de git del selector de la tecla `p`. Cada
+// una existe porque la política por defecto vive en el gitconfig y hay que poder
+// pisarla sin editar la config de gitdash. Derivadas de pullOptions para que no
+// puedan desincronizarse.
+var PullKinds = func() map[string]string {
+	kinds := make(map[string]string, len(pullOptions))
+	for _, o := range pullOptions {
+		if o.git {
+			kinds[o.key] = o.kind
+		}
+	}
+	return kinds
+}()
 
 // IsPullKind reporta si un kind es una variante de pull.
 func IsPullKind(kind string) bool {
@@ -586,6 +615,119 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return execDoneMsg{path: path, action: "lazygit", argv: argv, err: err}
+	})
+}
+
+// aiVars arma los placeholders de contexto ({branch}, {behind}, …) del comando
+// AI desde el snapshot vivo del repo. Los resuelve la TUI porque config no
+// puede importar gitstatus (ciclo) y el snapshot es de aquí.
+//
+// Un worktree sin marcador no tiene snapshot propio: la rama sale del inventario
+// del padre (`git worktree list`), la MISMA fuente que la sub-fila, y el resto no
+// se inventa (un `{state}` "no upstream" sería falso). Los placeholders no se
+// resuelven si el dato no existe: quedan literales en el argv.
+func (m *Model) aiVars(path string) map[string]string {
+	snap, ok := m.effectiveSnapshot(path)
+	if !ok {
+		vars := map[string]string{}
+		if wt, ok := m.worktreeFor(path); ok {
+			vars["branch"] = worktreeBranchLabel(wt)
+		}
+		return vars
+	}
+	return map[string]string{
+		"branch":   snap.Status.Branch,
+		"upstream": snap.Status.Upstream,
+		"state":    snap.State(true).String(),
+		"ahead":    strconv.Itoa(snap.Status.Ahead),
+		"behind":   strconv.Itoa(snap.Status.Behind),
+		"sync":     snap.SyncBranch,
+	}
+}
+
+// effectiveSnapshot resuelve el snapshot de un path como la ficha: si el path
+// es un proyecto descubierto (worktree con marcador incluido), el snapshot se
+// indexa por el path del proyecto, no por el de la sub-fila —pueden diferir en
+// symlinks o barras finales—; si no, por el path tal cual.
+func (m *Model) effectiveSnapshot(path string) (gitstatus.Snapshot, bool) {
+	if p, ok := m.discoveredByPath(path); ok {
+		snap, ok := m.states[p.Path]
+		return snap, ok
+	}
+	snap, ok := m.states[path]
+	return snap, ok
+}
+
+// worktreeFor busca en los snapshots de los repos principales el worktree con
+// ese path. Es la misma fuente que usan las sub-filas (el `git worktree list`
+// del padre), para que los placeholders AI de un worktree sin marcador digan lo
+// mismo que la fila.
+func (m *Model) worktreeFor(path string) (gitstatus.Worktree, bool) {
+	clean := filepath.Clean(path)
+	for _, p := range m.projects {
+		for _, wt := range m.states[p.Path].Worktrees {
+			if filepath.Clean(wt.Path) == clean {
+				return wt, true
+			}
+		}
+	}
+	return gitstatus.Worktree{}, false
+}
+
+// pullAIArgv resuelve el argv del handoff AI: la plantilla de la config global
+// con el prompt del marcador (un único elemento) y los placeholders de contexto
+// del repo. Se separa de startPullAICmd para poder comprobar la resolución sin
+// ejecutar el handoff.
+func (m *Model) pullAIArgv(path, prompt string) []string {
+	return config.BuildAIArgv(m.cfg.AICommand("pull"), prompt, m.aiVars(path))
+}
+
+// startPullAICmd resuelve prompt y comando y lanza el comando AI como handoff
+// de terminal (variante `a` del selector de pull). Sin prompt, sin comando o
+// sin binario termina en toast y NO hay handoff: no se inventa un ejecutable.
+//
+// El ejecutable sale SOLO de la config global; el marcador commiteado (input no
+// confiable) aporta solo el texto del prompt, y ese texto viaja como un único
+// elemento de argv — nunca interpolado en un `sh -c`.
+func (m *Model) startPullAICmd(path string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	prompt, err := discovery.MarkerPrompt(path, m.cfg.Marker, "pull")
+	if err != nil {
+		return m.toastCmd(toastWarning, "marker error — fix .gitdash.toml first")
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return m.toastCmd(toastInfo, "no AI pull prompt (.gitdash.toml [ai.pull].prompt)")
+	}
+	if strings.TrimSpace(m.cfg.AICommand("pull")) == "" {
+		return m.toastCmd(toastInfo, "ai.pull command not configured (~/.config/gitdash/config.toml)")
+	}
+	argv := m.pullAIArgv(path, prompt)
+	if argv[0] == "" {
+		// Primer campo de la plantilla resuelto a vacío (p. ej. "{branch}" sin
+		// rama): LookPath daría un " not installed" que no explica nada.
+		return m.toastCmd(toastWarning, "ai command: empty executable")
+	}
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s not installed", argv[0]))
+	}
+	return m.openPullAICmd(path, argv)
+}
+
+// openPullAICmd lanza el comando AI con handoff de terminal. Mismo patrón que
+// lazygit: la terminal es del hijo (sin captura de salida ni timeout), y al
+// volver execDoneMsg registra el exec (Dur=0) y re-colecta el estado, porque el
+// comando pudo cambiarlo.
+func (m *Model) openPullAICmd(path string, argv []string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	m.running[path] = "pull_ai"
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = path
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: path, action: "pull_ai", argv: argv, err: err}
 	})
 }
 
