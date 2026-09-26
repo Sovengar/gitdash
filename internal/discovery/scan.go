@@ -9,6 +9,7 @@
 package discovery
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -149,6 +150,38 @@ type markerMeta struct {
 	PrimaryGroup   string `toml:"primary_group"`
 	SecondaryGroup string `toml:"secondary_group"`
 	SyncBranch     string `toml:"sync_branch"` // override de la sync branch
+	// AI es el namespace [ai.<acción>]: solo el prompt (dato). El ejecutable
+	// vive en la config global, nunca en el marcador commiteado. `inspect` lo
+	// ignora a propósito: el prompt no se guarda en Project (se relee on demand
+	// y así no engorda repos.json ni queda obsoleto).
+	AI map[string]markerAIAction `toml:"ai"`
+}
+
+// markerAIAction es la tabla [ai.<acción>] del marcador.
+type markerAIAction struct {
+	Prompt string `toml:"prompt"`
+}
+
+// MarkerPrompt lee el prompt de la acción AI indicada desde el marcador de dir.
+// No lo guarda en Project: la TUI lo pide al pulsar la tecla, así que una
+// edición del marcador se nota sin rescan y el cache no se ensucia.
+//
+// Un directorio sin marcador (p. ej. un worktree sintético sin el suyo) no es
+// un error: devuelve vacío. Un marcador ilegible o malformado sí lo es, para
+// que la TUI avise en vez de lanzar a ciegas.
+func MarkerPrompt(dir, marker, action string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, marker))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	var meta markerMeta
+	if err := toml.Unmarshal(raw, &meta); err != nil {
+		return "", fmt.Errorf("marker: %v", err)
+	}
+	return meta.AI[action].Prompt, nil
 }
 
 // parseMarker lee name/primary_group/secondary_group del marcador; campos
