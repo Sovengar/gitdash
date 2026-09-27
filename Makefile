@@ -14,7 +14,7 @@ PKG         := ./cmd/gitdash
 GOLANGCI_LINT_VERSION := v2.13.2
 
 .DEFAULT_GOAL := help
-.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean
+.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -75,6 +75,12 @@ smoke: build ## Smoke test de la TUI en tmux con config aislada y fixtures
 
 tidy: ## go mod tidy
 	go mod tidy
+
+mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
+	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --output report.json
+
+mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — advisory
+	go tool gremlins unleash --diff main --workers 4 --timeout-coefficient 3 --output report.json
 
 clean: ## Borra los artefactos de bin/
 	rm -rf bin
