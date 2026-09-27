@@ -313,6 +313,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Selector de preview visual con git-sim: mismo contrato prefix-key que el
+	// de pull. Las teclas de variante (p/m/r) chocan con acciones reales de la
+	// tabla (pull/rescan), así que el estado armado consume la tecla antes del
+	// enrutado normal. Cualquier otra tecla desarma y NO se consume: sigue su
+	// curso normal para que la app no quede pegada esperando una segunda
+	// pulsación.
+	if m.visualArmed != nil {
+		armed := *m.visualArmed
+		m.visualArmed = nil
+		if o, ok := visualOptionForKey(key); ok {
+			if o.needsUpstream && armed.upstream == "" {
+				return m, m.toastCmd(toastWarning, "no upstream")
+			}
+			cmdlog.RecordIntent(cmdlog.Entry{
+				Class:  cmdlog.ClassAction,
+				Repo:   m.nameOf(armed.path),
+				Dir:    armed.path,
+				Key:    key,
+				Action: "visual",
+			})
+			return m, m.startVisualCmd(armed.path, armed.upstream, o.sub)
+		}
+	}
+
 	// El panel del command log: sus teclas se consultan antes del enrutado
 	// normal (como los estados armados) porque j/k chocan con la navegación
 	// de la tabla. Las teclas que no son suyas siguen su curso normal: el
@@ -380,13 +404,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// El panel del log es un view mode y dentro `a` es su filtro: no se arma el
-	// selector de pull ahí dentro (su aviso no se pintaría y la tecla quedaría
+	// El panel del log es un view mode y dentro `a` es su filtro: no se arman
+	// ahí los selectores (su aviso no se pintaría y la tecla quedaría
 	// shadowed). Abrir el panel ya suelta los estados armados; esto evita
 	// rearmarlos mientras siga abierto. Va DESPUÉS de los inputs: con el filtro
 	// o el modo comando activos la tecla es texto, no una acción.
-	if m.logOpen && m.actionForKey(key) == "pull" {
-		return m, nil
+	if m.logOpen {
+		switch m.actionForKey(key) {
+		case "pull", "visual":
+			return m, nil
+		}
 	}
 
 	// Teclas fijas (universales, no configurables).
@@ -456,6 +483,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pullArmed = &armedPull{path: r.project.Path}
 			return m, nil
 		}
+	case "visual":
+		// La tecla visual tampoco ejecuta: arma el selector y captura path y
+		// upstream de la fila elegida. Sin fila o sin repo no hay nada que
+		// previsualizar: toast y no se arma.
+		r, ok := m.selected()
+		if !ok || !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
+		}
+		m.visualArmed = &armedVisual{path: r.project.Path, upstream: r.snap.Status.Upstream}
+		return m, nil
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -546,7 +583,7 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true, "push": true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
-	"command": true, "worktree_remove": true,
+	"command": true, "worktree_remove": true, "visual": true,
 }
 
 // launchesCommand reporta si la acción acaba en un proceso.
@@ -558,6 +595,7 @@ func launchesCommand(action string) bool { return commandActions[action] }
 var rowActions = map[string]bool{
 	"fetch": true, "pull": true, "push": true, "lazygit": true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
+	"visual": true,
 }
 
 // actionNeedsRow reporta si la acción requiere una fila seleccionada.
@@ -648,6 +686,20 @@ func pullVariantLabel(kind string) string {
 		}
 	}
 	return kind
+}
+
+// visualPrompt compone el aviso persistente del selector visual. Las variantes
+// salen de visualOptions, la misma fuente que las etiquetas: añadir una no
+// puede dejar el prompt mintiendo.
+func (m Model) visualPrompt() string {
+	if m.visualArmed == nil {
+		return ""
+	}
+	variants := make([]string, 0, len(visualOptions))
+	for _, o := range visualOptions {
+		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
+	}
+	return fmt.Sprintf("visual %s: %s · esc cancel", m.nameOf(m.visualArmed.path), strings.Join(variants, " · "))
 }
 
 // removePrompt compone el aviso persistente de la confirmación armada. La
