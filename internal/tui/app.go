@@ -161,11 +161,59 @@ func IsPullKind(kind string) bool {
 	return false
 }
 
+// visualOption es una variante del selector de la tecla `visual`: la tecla, el
+// subcomando de git-sim, su etiqueta y si necesita el ref del upstream.
+type visualOption struct {
+	key           string
+	sub           string // subcomando de git-sim: pull | merge | rebase
+	label         string
+	needsUpstream bool
+}
+
+// visualOptions es la fuente única de variantes del selector visual. Añadir una
+// aquí la propaga al prompt y a las etiquetas: sin la tabla, una lista
+// hardcodeada en otro sitio se quedaría sin la variante nueva. NO entra en
+// PullKinds: son caminos distintos (aquí el proceso es git-sim, no git).
+var visualOptions = []visualOption{
+	{"p", "pull", "pull", false},
+	{"m", "merge", "merge", true},
+	{"r", "rebase", "rebase", true},
+}
+
+// visualOptionForKey resuelve la variante de git-sim para una tecla.
+func visualOptionForKey(key string) (visualOption, bool) {
+	for _, o := range visualOptions {
+		if o.key == key {
+			return o, true
+		}
+	}
+	return visualOption{}, false
+}
+
+// visualOptionForSub resuelve la variante por su subcomando de git-sim.
+func visualOptionForSub(sub string) (visualOption, bool) {
+	for _, o := range visualOptions {
+		if o.sub == sub {
+			return o, true
+		}
+	}
+	return visualOption{}, false
+}
+
 // armedPull es el selector de variante de pull pendiente (nil = ninguno).
 // Captura el path al armar: la segunda tecla resuelve sobre esa fila, no sobre
 // la que esté bajo el cursor cuando llegue.
 type armedPull struct {
 	path string
+}
+
+// armedVisual es el selector de preview visual (git-sim) pendiente (nil =
+// ninguno). Captura path y upstream al armar para que el argv de la variante
+// sea determinista respecto a la fila elegida, no a la que esté bajo el cursor
+// después.
+type armedVisual struct {
+	path     string
+	upstream string
 }
 
 // armedRemoval es la confirmación pendiente de borrado de un worktree (nil =
@@ -226,6 +274,9 @@ type Model struct {
 	// Mismo carácter efímero que armed: se resuelve o se cancela con la
 	// siguiente tecla.
 	pullArmed *armedPull
+	// visualArmed es el selector de preview visual con git-sim (nil = ninguno).
+	// Efímero como pullArmed: la segunda tecla elige la variante o cancela.
+	visualArmed *armedVisual
 	// removeGen/removeTokens correlacionan cada borrado en vuelo con su
 	// resultado. removeTokens mapea path del repo padre → token del intento
 	// vigente (el guard de "acción en curso" es por padre, así que el token
@@ -728,6 +779,64 @@ func (m *Model) openPullAICmd(path string, argv []string) tea.Cmd {
 	cmd.Dir = path
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return execDoneMsg{path: path, action: "pull_ai", argv: argv, err: err}
+	})
+}
+
+// visualMediaDir resuelve (y crea si falta) el directorio de medios de git-sim
+// bajo la caché XDG de gitdash: <caché>/gitdash/git-sim.
+//
+// Es obligatorio, no cosmético: sin `--media-dir` git-sim escribe
+// `git-sim_media/` dentro del repo y gitdash lo marcaría dirty (mira `git
+// status` real). Si el dir no se puede crear, quien llama debe abortar con
+// toast: lanzar igualmente ensuciaría el repo.
+func visualMediaDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, cache.DirName, "git-sim")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// visualArgv compone el argv exacto del handoff: el subcomando de git-sim y,
+// solo para las variantes que lo exigen (merge/rebase), el ref del upstream.
+// `pull` no lleva argumento posicional (git-sim simula la operación sin ref
+// explícito). El `--media-dir` va SIEMPRE, en todas las variantes.
+func visualArgv(sub, upstream, mediaDir string) []string {
+	argv := []string{"git-sim", "--media-dir", mediaDir, sub}
+	if o, ok := visualOptionForSub(sub); ok && o.needsUpstream && upstream != "" {
+		argv = append(argv, upstream)
+	}
+	return argv
+}
+
+// startVisualCmd lanza el handoff de git-sim para la variante elegida. Sin
+// binario en PATH o con el media-dir no creable termina en toast y NO hay
+// handoff: no se inventa un ejecutable ni se arriesga a ensuciar el repo.
+//
+// Sigue el patrón de lazygit: la terminal es del hijo (sin captura ni timeout),
+// `m.running[path]` marca la acción en curso y al volver execDoneMsg registra
+// el exec (Dur=0) con el argv real y re-colecta el estado.
+func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
+	if prev, busy := m.running[path]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
+	}
+	mediaDir, err := visualMediaDir()
+	if err != nil {
+		return m.toastCmd(toastError, fmt.Sprintf("git-sim media dir: %v", err))
+	}
+	if _, err := exec.LookPath("git-sim"); err != nil {
+		return m.toastCmd(toastWarning, "git-sim not installed")
+	}
+	argv := visualArgv(sub, upstream, mediaDir)
+	m.running[path] = "visual"
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = path
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: path, action: "visual", argv: argv, err: err}
 	})
 }
 

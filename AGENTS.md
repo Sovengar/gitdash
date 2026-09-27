@@ -102,8 +102,11 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 
 - Comentarios de código en **español**, **sin referencias a specs ni a IDs de
   requisito/escenario**: el código es la fuente de verdad. No hay artefactos
-  SDD en el repo y no se crean (nada de `docs/planning/`, `proposal.md`,
-  `spec.md`, `R#n SHALL`, `S#n.#`).
+  SDD en el repo y no se crean (`proposal.md`, `spec.md`, specs con IDs de
+  requisito/escenario, `R#n SHALL`, `S#n.#`).
+- `docs/planning/<NNNN>-<tipo>-<slug>/` NO es un artefacto SDD: es el paquete
+  que deposita el pipeline de planificación como andamiaje suyo, así que es
+  válido en el repo y no se retira.
 - Tests del modelo **directo** (construir Model, enviar msgs con Update,
   inspeccionar estado) — sin teatest. Patrón: `internal/tui/app_test.go`.
 - Estados derivados con precedencia: `diverged > dirty > ahead > behind >

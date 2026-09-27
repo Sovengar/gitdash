@@ -381,6 +381,7 @@ func (m *Model) toggleLog() {
 	m.logOpen = !m.logOpen
 	m.armed = nil
 	m.pullArmed = nil
+	m.visualArmed = nil
 	if m.logOpen {
 		m.logOffset = 0
 	}
