@@ -179,6 +179,33 @@ worktree_remove = "W"
 	}
 }
 
+// El preview visual tiene default `v` y es reconfigurable; su hint lleva la
+// etiqueta sin la tecla.
+func TestDefaultKeybindingsVisual(t *testing.T) {
+	cfg := Defaults()
+	if cfg.KeyFor("visual") != "v" {
+		t.Errorf("default visual = %q, want v", cfg.KeyFor("visual"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "v visual") {
+		t.Errorf("hint de visual ausente: %v", cfg.HintBarLines())
+	}
+
+	path := write(t, `
+[keybindings]
+visual = "V"
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warn inesperado: %q", warn)
+	}
+	if cfg.KeyFor("visual") != "V" {
+		t.Errorf("visual = %q, want V", cfg.KeyFor("visual"))
+	}
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "V visual") {
+		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+	}
+}
+
 // Una config vieja con acciones que ya no existen (detail, expand) avisa en vez
 // de dejar la tecla muerta: sin aviso, `detail = "enter"` hace que enter no haga
 // nada y parece un bug de la TUI.

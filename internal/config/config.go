@@ -218,6 +218,10 @@ func DefaultKeybindings() Keybindings {
 		"log": "l",
 		// Borrado de un worktree desde su sub-fila (nunca la rama).
 		"worktree_remove": "D",
+		// Selector de preview visual con git-sim (`v` arma, la segunda tecla
+		// elige pull/merge/rebase). Es un camino paralelo al de `p`: no ejecuta
+		// git, cede la terminal a git-sim.
+		"visual": "v",
 	}
 }
 
@@ -337,6 +341,8 @@ var hintLabels = map[string]string{
 	"quit":      "quit",
 	// acción de borrado de worktree: la tecla la antepone HintBarLines.
 	"worktree_remove": "remove wt",
+	// acción de preview visual: etiqueta sin la tecla, que la antepone HintBarLines.
+	"visual": "visual",
 }
 
 // HintBarLines devuelve las líneas de hints agrupadas por categoría,
@@ -350,7 +356,7 @@ func (c Config) HintBarLines() []string {
 	for _, action := range []string{
 		"dirty", "search", "fetch", "fetch_all", "pull",
 		"push", "lazygit", "editor", "rescan", "recollect",
-		"fold", "command", "log", "quit", "worktree_remove",
+		"fold", "command", "log", "quit", "worktree_remove", "visual",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {
