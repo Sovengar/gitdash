@@ -29,3 +29,7 @@ CONDITIONALS_NEGATION internal/config/config.go:272
 CONDITIONALS_NEGATION internal/discovery/scan.go:72
 CONDITIONALS_NEGATION internal/tui/bordered/bordered.go:42
 CONDITIONALS_NEGATION internal/tui/bordered/bordered.go:60
+# Equivalentes demonstrados: con v == lo, "v < lo" y "v <= lo" devuelven ambos lo,
+# asi que ningun test puede distinguirlos. Mismo caso en el limite superior.
+CONDITIONALS_BOUNDARY internal/tmpgate/gate.go:6
+CONDITIONALS_BOUNDARY internal/tmpgate/gate.go:9
