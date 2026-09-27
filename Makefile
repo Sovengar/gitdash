@@ -12,6 +12,7 @@ PKG         := ./cmd/gitdash
 
 # Misma versión que usa dbx; se ejecuta con `go run`, sin binario global.
 GOLANGCI_LINT_VERSION := v2.13.2
+MUTATE_BASE ?= main
 
 .DEFAULT_GOAL := help
 .PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff
@@ -82,10 +83,10 @@ mutate: ## Mutation testing (gremlins) on the whole module — advisory, never b
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — advisory
-	@if git diff --name-only main...HEAD | grep -q '\.go$$'; then \
-		go tool gremlins unleash --diff main --workers 4 --timeout-coefficient 3 --output report.json; \
+	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
+		go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 3 --output report.json; \
 	else \
-		echo "no .go changes vs main - nothing to mutate"; \
+		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi
 
 clean: ## Borra los artefactos de bin/
