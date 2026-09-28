@@ -83,9 +83,7 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s")
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
-		if len(snap.Commits) > 0 {
-			snap.LastCommit = snap.Commits[0].When
-		}
+		snap.LastCommit = lastCommitWhen(snap.Commits)
 	}
 	// Un repo sin commits es legítimo: el error de log se ignora.
 
@@ -94,6 +92,18 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
 	}
 	return snap
+}
+
+// lastCommitWhen devuelve la fecha del commit más reciente, o 0 si el log vino
+// vacío. Existe como función aparte porque la rama vacía solo se alcanza con un
+// git que sale con 0 y no imprime nada (un repo sin commits sale con error, así
+// que el test tiene que alcanzarla sin subprocess: con la guarda en medio del
+// camino de error, nadie la cubría).
+func lastCommitWhen(commits []Commit) int64 {
+	if len(commits) == 0 {
+		return 0
+	}
+	return commits[0].When
 }
 
 // syncBehind cuenta los commits de sync ausentes en HEAD con
@@ -122,18 +132,16 @@ func normalizeBranch(st Status) string {
 
 // StreamPool recolecta los snapshots de todos los proyectos en paralelo
 // (máximo concurrency a la vez) invocando emit por cada uno. defaultSync es
-// la sync branch global: cada proyecto puede overriddenla desde el
+// la sync branch global: cada proyecto puede sobrescribirla desde el
 // marcador. Bloquea hasta terminar o cancelarse por contexto.
 //
 // emit se invoca concurrentemente desde hasta `concurrency` goroutines: el
 // callback DEBE ser seguro para uso concurrente (p.ej. mutex o canal).
 func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, concurrency int, emit func(path string, snap Snapshot)) {
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	if concurrency > runtime.NumCPU()*4 {
-		concurrency = runtime.NumCPU() * 4
-	}
+	// El pool usa entre 1 y 4 workers por CPU: acotado por abajo para no
+	// colgarse con un 0 en la config, y por arriba para no lanzar miles de git
+	// de golpe si alguien pone concurrency = 99999.
+	concurrency = min(max(concurrency, 1), runtime.NumCPU()*4)
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
@@ -336,11 +344,19 @@ func recordExec(dir string, class cmdlog.Class, args []string, out []byte, err e
 		}
 	}
 	argv := append([]string{"git"}, args...)
+	// Un argv vacío es alcanzable desde la config del usuario
+	// (`[commands] pull = ""` → CmdArgs → strings.Fields → []). Classify ya lo
+	// tolera; sin esta guarda, args[0] revienta la goroutine de la acción y con
+	// ella la TUI. Sin verbo no hay acción que nombrar.
+	action := ""
+	if len(args) > 0 {
+		action = args[0]
+	}
 	cmdlog.RecordExec(cmdlog.Entry{
 		Dir:     dir,
 		Repo:    filepath.Base(dir),
 		Class:   class,
-		Action:  args[0],
+		Action:  action,
 		Argv:    argv,
 		Exit:    code,
 		Dur:     dur,

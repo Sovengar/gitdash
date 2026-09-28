@@ -178,3 +178,105 @@ func TestExecSinRecorderNoRompe(t *testing.T) {
 		t.Fatalf("Run sin recorder falló: %v", err)
 	}
 }
+
+// Fetch sin args usa el default `fetch --prune`. No se deduce del resultado
+// (un `git` a secas sale con 0 sin hacer nada), así que lo que lo ata es el argv
+// registrado: sin default, el log mentiría sobre lo que se ejecutó.
+func TestFetchSinArgsUsaElDefault(t *testing.T) {
+	rec := installRecorder(t)
+	dir, _ := testutil.NewRepo(t, true)
+
+	if err := Fetch(context.Background(), dir, cmdlog.ClassAction); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	e := lastEntry(t, rec)
+	if got, want := e.Command(), "git fetch --prune"; got != want {
+		t.Errorf("Command() = %q, want %q", got, want)
+	}
+	if e.Action != "fetch" {
+		t.Errorf("Action = %q, want fetch", e.Action)
+	}
+}
+
+// Un exec que falla sin escribir nada en stderr (el caso real: el contexto se
+// cancela a mitad del scan) tiene que conservar el motivo del error de proceso.
+// Si no, el Snapshot llega a la UI con un motivo vacío y el usuario no ve por
+// qué desapareció el repo.
+func TestExecSinStderrConservaElMotivo(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // nadie va a escribir en stderr
+
+	_, err := runGit(ctx, dir, cmdlog.ClassRead, "status")
+	if err == nil {
+		t.Fatal("runGit con contexto cancelado debería fallar")
+	}
+	if !strings.Contains(err.Error(), context.Canceled.Error()) {
+		t.Errorf("err = %q, want el motivo del proceso (context canceled)", err)
+	}
+	// El mismo camino desde Collect: el error viaja en el Snapshot.
+	snap := Collect(ctx, dir, "")
+	if snap.Err == "" {
+		t.Fatal("Collect con contexto cancelado sin Err")
+	}
+	if !strings.Contains(snap.Err, context.Canceled.Error()) {
+		t.Errorf("snap.Err = %q, want el motivo del proceso", snap.Err)
+	}
+}
+
+// Un exec que no llegó a salir (contexto cancelado) no tiene código de salida de
+// git: se registra como -1, que es "no salió", no como 1, que en el panel se
+// leería como un fallo real de git.
+func TestExecSinCodigoDeSalidaSeRegistraComoMenosUno(t *testing.T) {
+	rec := installRecorder(t)
+	dir, _ := testutil.NewRepo(t, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := runGit(ctx, dir, cmdlog.ClassRead, "status"); err == nil {
+		t.Fatal("runGit con contexto cancelado debería fallar")
+	}
+	if e := lastEntry(t, rec); e.Exit != -1 {
+		t.Errorf("Exit = %d, want -1 (no llegó a salir)", e.Exit)
+	}
+}
+
+// firstLine recorta a la primera línea sin partirse en los bordes: sin salto de
+// línea devuelve la cadena entera, y un "\n" inicial es una primera línea vacía
+// (no "sin recorte").
+func TestFirstLine(t *testing.T) {
+	casos := []struct{ in, want string }{
+		{"sin salto", "sin salto"},
+		{"", ""},
+		{"una\ndos", "una"},
+		{"\nprimera", ""},
+		{"\n", ""},
+		{"con\r\n", "con\r"},
+		{"tres\nlíneas\ny más", "tres"},
+	}
+	for _, c := range casos {
+		if got := firstLine(c.in); got != c.want {
+			t.Errorf("firstLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Un argv vacío es alcanzable desde la config del usuario (`[commands] pull = ""`
+// → CmdArgs → strings.Fields → []) y la TUI SIEMPRE tiene recorder instalado:
+// sin esta guarda, `Action: args[0]` revienta la goroutine de la acción y con
+// ella la app entera. Se registra con verbo vacío, no con un panic.
+func TestExecSinArgsNoRevienta(t *testing.T) {
+	rec := installRecorder(t)
+	dir, _ := testutil.NewRepo(t, true)
+
+	if _, err := Run(context.Background(), dir); err == nil {
+		t.Fatal("git sin argumentos debería fallar")
+	}
+	e := lastEntry(t, rec)
+	if e.Action != "" {
+		t.Errorf("Action = %q, want vacío (no hay verbo que nombrar)", e.Action)
+	}
+	if len(e.Argv) != 1 || e.Argv[0] != "git" {
+		t.Errorf("Argv = %v, want [git]", e.Argv)
+	}
+}

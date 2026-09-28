@@ -32,6 +32,44 @@ func TestRenderWithTitleAnchoExactoYGrifos(t *testing.T) {
 	}
 }
 
+// Sin color de borde no se emite NINGÚN escape: el estilo del borde solo existe
+// si hay un color. `ansi.Style` con un color nil no es "sin estilo", es un
+// `\x1b[39m` (fg por defecto) alrededor de cada trozo, así que este caso
+// distingue un borde sin pintar de uno pintado de blanco.
+func TestRenderSinColorNoEmiteANSI(t *testing.T) {
+	out := RenderWithTitle(Rounded(), nil, " titulo ", "contenido", 24)
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("borde sin color emitió ANSI: %q", out)
+	}
+	if !strings.Contains(ansi.Strip(out), " titulo ") {
+		t.Errorf("el título se perdió al no pintar: %q", out)
+	}
+}
+
+// El relleno horizontal de la línea de borde es el del Border (fill), no un
+// espacio: un borde sin fill propio tiene que caer a un espacio, y uno con fill
+// lo conserva.
+func TestRenderUsaElFillDelBorder(t *testing.T) {
+	t.Run("fill propio", func(t *testing.T) {
+		out := RenderWithTitle(Rounded(), nil, " t ", "c", 12)
+		top := ansi.Strip(strings.Split(out, "\n")[0])
+		if !strings.Contains(top, "─") {
+			t.Errorf("relleno del borde = %q, want el fill ─ del Border", top)
+		}
+	})
+	t.Run("fill vacío", func(t *testing.T) {
+		b := lipgloss.Border{TopLeft: "|", Top: "", TopRight: "|", BottomLeft: "|", Bottom: "", BottomRight: "|", Left: "!", Right: "!"}
+		out := RenderWithTitle(b, nil, "", "c", 10)
+		lines := strings.Split(out, "\n")
+		if got := ansi.Strip(lines[0]); got != "|        |" {
+			t.Errorf("línea superior = %q, want | + espacios + |", got)
+		}
+		if got := ansi.Strip(lines[1]); got != "!c       !" {
+			t.Errorf("línea de contenido = %q, want bordes laterales del Border", got)
+		}
+	})
+}
+
 // El contenido más ancho que el interior se recorta, no se re-envuelve.
 func TestRenderWithTitleRecortaSinWrap(t *testing.T) {
 	largo := strings.Repeat("x", 100)

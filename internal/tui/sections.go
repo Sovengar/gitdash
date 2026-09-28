@@ -254,9 +254,10 @@ func (m Model) keybindsSection(hintLines int) string {
 	if prompt := m.promptLine(); prompt != "" {
 		lines = []string{styleWarn.Render(prompt)}
 	}
-	if hintLines < len(lines) {
-		lines = lines[:max(0, hintLines)]
-	}
+	// El presupuesto manda: si no caben todas las hints, se cortan (recortar las
+	// que caben justas == no tocar nada) y un presupuesto negativo deja la caja
+	// vacía en vez de un panic por slice.
+	lines = lines[:max(0, min(hintLines, len(lines)))]
 	rendered := make([]string, 0, len(lines))
 	for _, l := range lines {
 		rendered = append(rendered, styleHint.Render(l))
@@ -326,8 +327,7 @@ func fitLines(content string, n int) string {
 // lo que viene detrás tiene que estar SIEMPRE visible (el input de `!`).
 func clipTo(content string, n int) string {
 	lines := strings.Split(content, "\n")
-	if len(lines) > n {
-		lines = lines[:max(0, n)]
-	}
-	return strings.Join(lines, "\n")
+	// Recortar al número exacto es identidad, así que el min() sustituye a la
+	// guarda: aquí solo se puede recortar, nunca rellenar.
+	return strings.Join(lines[:max(0, min(n, len(lines)))], "\n")
 }

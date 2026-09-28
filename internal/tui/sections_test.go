@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,8 @@ import (
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
-) // Cada área funcional se dibuja en su propia sección bordeada, todas con el
-// ancho exterior de la terminal.
+)
+
 func TestDashboardSeccionesBordeadas(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
@@ -245,6 +246,66 @@ func (l layout) altoTotal(hasFilter bool) int {
 		n += previewChrome + l.previewLines
 	}
 	return n + l.bodyLines
+}
+
+// El presupuesto en los altos degenerados es una cuenta justa: cada sección se
+// queda mientras quepa dejando al menos una línea de cuerpo. Los casos que
+// importan son los de encaje EXACTO, donde la sección cabe justo, porque ahí es
+// donde un "> " mal puesto esconde una sección que sí cabe.
+func TestLayoutEnElEncajeExacto(t *testing.T) {
+	// h=7: chrome de la tabla (3) + stats (3) = 6, y sobra exactamente una
+	// línea de cuerpo. Stats se quedan (caben justas); una línea menos ya no.
+	if l := computeLayout(7, false, defaultHintLines, false); !l.showStats {
+		t.Errorf("h=7: stats ocultas aunque caben justas: %+v", l)
+	}
+	if l := computeLayout(6, false, defaultHintLines, false); l.showStats {
+		t.Errorf("h=6: stats visibles sin sitio: %+v", l)
+	}
+
+	// El share del panel es 2/5 del alto LIBRE (el que no ocupan el chrome y las
+	// secciones), con minPreviewLines por abajo. A h=41 le quedan 28 líneas
+	// libres, así que el panel se lleva 28*2/5 = 11 y a la tabla le sobran 17.
+	// El 2/5 es el contrato: no un "casi la mitad" que qualquer cálculo dé.
+	const h = 41
+	free := h - (tableChrome + statsSectionLines + keybindsChrome + defaultHintLines + previewChrome)
+	if want := free * previewShare / 5; want <= minPreviewLines {
+		t.Fatalf("h=%d: free=%d da un share de %d, que no ejercita el 2/5 (caería al mínimo)", h, free, want)
+	}
+	l := computeLayout(h, false, defaultHintLines, false)
+	if l.previewLines != free*previewShare/5 {
+		t.Errorf("h=%d: previewLines = %d, want %d (2/5 de %d libres)", h, l.previewLines, free*previewShare/5, free)
+	}
+	if want := h - (tableChrome + statsSectionLines + keybindsChrome + defaultHintLines + previewChrome + l.previewLines); l.bodyLines != want {
+		t.Errorf("h=%d: bodyLines = %d, want %d", h, l.bodyLines, want)
+	}
+
+	// El panel se queda con SU SHARE como tope (es aditivo: no se come el
+	// dashboard entero) y solo baja de ahí cuando el resto no lo permite. En
+	// este tramo es la tabla la que marca el techo: el panel crece hasta
+	// dejarle EXACTAMENTE minBodyLines filas, ni una menos. Una tabla más
+	// grande o más pequeña seguiría "cayendo bien" en cualquier test que solo
+	// compruebe que el panel cabe, así que el borde se mira de cerca.
+	for h := 14; h <= 40; h++ {
+		got := computeLayout(h, false, defaultHintLines, false)
+		if got.previewLines == 0 {
+			continue
+		}
+		top := panelHeight(h, tableChrome, 0, defaultHintLines)
+		if got.previewLines > top {
+			t.Errorf("h=%d: previewLines = %d, want <= %d (el share manda)", h, got.previewLines, top)
+		}
+		// Con el panel en su tope no había nada más grande que buscar; si está
+		// por debajo, una línea más tiene que ser la que no cupiera.
+		if mas := fitLayout(h, tableChrome, 0, got.previewLines+1, defaultHintLines, false); got.previewLines < top &&
+			mas.bodyLines >= minBodyLines && mas.mismaChromeQue(got) {
+			t.Errorf("h=%d: el panel se quedó en %d pudiendo llegar a %d (bodyLines=%d, top=%d)",
+				h, got.previewLines, got.previewLines+1, mas.bodyLines, top)
+		}
+		if got.previewLines < top && got.bodyLines != minBodyLines {
+			t.Errorf("h=%d: panel en %d por debajo de su share %d con bodyLines=%d, want exactamente %d",
+				h, got.previewLines, top, got.bodyLines, minBodyLines)
+		}
+	}
 }
 
 // Terminal estrecha: el contenido se recorta al interior, sin wrap ni cajas
@@ -568,4 +629,217 @@ func TestPromptArmadoSustituyeLasHints(t *testing.T) {
 	if lines := strings.Split(stripANSI(m.View().Content), "\n"); len(lines) != m.height {
 		t.Errorf("tras cancelar, líneas = %d, want %d", len(lines), m.height)
 	}
+}
+
+// --- indicador de actividad, resumen de grupo y presupuestos de sección ---
+
+// El indicador de actividad cuenta las acciones EN CURSO: una sola no lleva
+// sufijo (nada de "+0"), N acciones llevan "+(N-1)", y solo cuentan las que
+// lanzan git. El orden es por path para que el render sea determinista.
+func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
+	projects, states := fixtureProjects()
+
+	t.Run("ninguna", func(t *testing.T) {
+		m := newTestModel(t, projects, states)
+		if got := m.activityIndicator(); got != "" {
+			t.Errorf("indicador = %q, want vacío sin acciones", got)
+		}
+	})
+
+	t.Run("una sola sin sufijo", func(t *testing.T) {
+		m := newTestModel(t, projects, states)
+		m.running = map[string]string{"/tmp/dirty-api": "pull"}
+		got := m.activityIndicator()
+		if !strings.Contains(got, "pull dirty-api…") {
+			t.Errorf("indicador = %q, want la acción en curso", got)
+		}
+		if strings.Contains(got, "+") {
+			t.Errorf("indicador = %q, want sin sufijo con una sola acción", got)
+		}
+	})
+
+	t.Run("tres con +2", func(t *testing.T) {
+		m := newTestModel(t, projects, states)
+		m.running = map[string]string{
+			"/tmp/dirty-api":     "pull",
+			"/tmp/old-clean":     "push",
+			"/tmp/worktree-host": "worktree_remove",
+		}
+		got := m.activityIndicator()
+		if !strings.Contains(got, "+2") {
+			t.Errorf("indicador = %q, want +2 con tres acciones", got)
+		}
+	})
+
+	t.Run("cada kind cuenta", func(t *testing.T) {
+		// push y worktree_remove no son pull, pero también son acciones que
+		// lanzan git: si se colaran fuera del indicador, el usuario vería la
+		// fila quieta mientras el push está en marcha.
+		for _, kind := range []string{"pull", "pull_rebase", "pull_ff", "pull_merge", "push", "worktree_remove"} {
+			m := newTestModel(t, projects, states)
+			m.running = map[string]string{"/tmp/dirty-api": kind}
+			if got := m.runningActions(); len(got) != 1 {
+				t.Errorf("kind %q: runningActions = %v, want 1", kind, got)
+			}
+		}
+	})
+
+	t.Run("lo que no lanza git no se cuenta", func(t *testing.T) {
+		// fetch y el handoff de pull_ai ceden la terminal o son lecturas: no
+		// son una acción sobre un repo que el usuario pueda esperar.
+		for _, kind := range []string{"fetch", "fetch_all", "pull_ai", "scan", "rescan"} {
+			m := newTestModel(t, projects, states)
+			m.running = map[string]string{"/tmp/dirty-api": kind}
+			if got := m.runningActions(); len(got) != 0 {
+				t.Errorf("kind %q: runningActions = %v, want vacío", kind, got)
+			}
+			if got := m.activityIndicator(); got != "" {
+				t.Errorf("kind %q: indicador = %q, want vacío", kind, got)
+			}
+		}
+	})
+
+	t.Run("orden por path", func(t *testing.T) {
+		m := newTestModel(t, projects, states)
+		m.running = map[string]string{
+			"/tmp/worktree-host": "push",
+			"/tmp/dirty-api":     "pull",
+			"/tmp/old-clean":     "push",
+		}
+		got := m.runningActions()
+		want := []string{"pull dirty-api…", "push old-clean…", "push worktree-host…"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("runningActions = %v, want %v (orden por path)", got, want)
+		}
+	})
+}
+
+// El resumen de un grupo solo pinta los estados que HAY: un grupo limpio son
+// cuatro líneas a cero que no le dicen nada al usuario que está decidiendo si
+// abrirlo. Y con estados, cada uno aparece exactamente una vez.
+func TestResumenDeGrupoSoloPintaLoQueHay(t *testing.T) {
+	projects := []discovery.Project{
+		{Path: "/a", Name: "a", PrimaryGroup: "backend", HasRepo: true},
+		{Path: "/b", Name: "b", PrimaryGroup: "backend", HasRepo: true},
+	}
+	clean := map[string]gitstatus.Snapshot{"/a": snapClean(), "/b": snapClean()}
+
+	t.Run("limpio solo repos", func(t *testing.T) {
+		m := newTestModel(t, projects, clean)
+		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
+		if !strings.Contains(out, "repos    2") {
+			t.Errorf("falta el total de repos:\n%s", out)
+		}
+		for _, cero := range []string{"errors", "dirty", "ahead", "behind", "wt "} {
+			if strings.Contains(out, cero) {
+				t.Errorf("pinta %q a cero:\n%s", cero, out)
+			}
+		}
+	})
+
+	t.Run("con cada estado", func(t *testing.T) {
+		states := map[string]gitstatus.Snapshot{
+			"/a": func() gitstatus.Snapshot {
+				s := snapDirty(1, 0)
+				s.Status.Ahead = 2
+				return s
+			}(),
+			"/b": func() gitstatus.Snapshot {
+				s := snapClean()
+				s.Status.Behind = 3
+				return s
+			}(),
+		}
+		m := newTestModel(t, projects, states)
+		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
+		for _, quiere := range []string{"dirty    1", "ahead    1", "behind   1"} {
+			if !strings.Contains(out, quiere) {
+				t.Errorf("falta %q en el resumen:\n%s", quiere, out)
+			}
+		}
+		if strings.Contains(out, "errors") {
+			t.Errorf("errors a cero en un grupo sin errores:\n%s", out)
+		}
+	})
+}
+
+// groupHeader construye la entrada de un header primario, que es lo que hay
+// bajo el cursor cuando se navega por la vista agrupada.
+func groupHeader(key string) tableEntry {
+	return tableEntry{kind: kindPrimary, group: key}
+}
+
+// Con el panel sin alto (terminal baja) no se dibuja ninguna caja: una ficha de
+// 0 líneas con el título vacío es un borde colgado en medio del dashboard.
+func TestPreviewSinAltoNoDibujaCaja(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m.height = 14 // por debajo del alto mínimo del panel
+	lay := computeLayout(m.height, false, defaultHintLines, false)
+	if lay.previewLines != 0 {
+		t.Fatalf("h=%d: el layout dio panel de %d; el test necesita un alto sin panel", m.height, lay.previewLines)
+	}
+	if got := m.previewSection(lay, m.entries()); got != "" {
+		t.Errorf("previewSection con 0 líneas = %q, want vacío", got)
+	}
+	plano := stripANSI(m.renderDashboard())
+	if strings.Contains(plano, "╭ ") && strings.Count(plano, "╭ ") != 3 {
+		t.Errorf("se dibujó una sección de más sin panel:\n%s", plano)
+	}
+}
+
+// El presupuesto de hints manda sobre cuántas hints hay: si el layout deja
+// una línea, la caja tiene una línea, aunque haya tres hints que enseñar.
+func TestKeybindsRespetaElPresupuestoDeHints(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	if len(m.cfg.HintBarLines()) < 2 {
+		t.Fatalf("el test necesita varias hints: %v", m.cfg.HintBarLines())
+	}
+	for _, n := range []int{0, 1, 2} {
+		out := stripANSI(m.keybindsSection(n))
+		got := len(nonEmptyLines(strings.Split(sectionContent(t, out, "keybinds"), "\n")))
+		if got != n {
+			t.Errorf("n=%d: %d líneas de hints, want %d:\n%s", n, got, n, out)
+		}
+	}
+}
+
+// Solo la fila bajo el cursor lleva la marca del cursor: si el marcado se
+// invirtiese, el usuario leería como seleccionada una fila en la que no está.
+func TestCursorMarcaUnaSolaFila(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	entries := m.entries()
+	if len(entries) < 3 {
+		t.Fatalf("el test necesita 3 entradas, hay %d", len(entries))
+	}
+	m.cursor = 1
+	out := stripANSI(m.tableSection(len(entries), entries))
+	lineas := strings.Split(out, "\n")
+	var marcadas []string
+	for i, l := range lineas {
+		if strings.Contains(l, "▸") {
+			marcadas = append(marcadas, strings.TrimSpace(l))
+		}
+		_ = i
+	}
+	if len(marcadas) != 1 {
+		t.Fatalf("filas marcadas = %d, want 1:\n%s", len(marcadas), out)
+	}
+	if want := stripANSI(m.renderEntry(entries[1], true)); !strings.Contains(marcadas[0], strings.TrimSpace(want)) {
+		t.Errorf("la fila marcada = %q, want la del cursor %q", marcadas[0], strings.TrimSpace(want))
+	}
+}
+
+// nonEmptyLines cuenta las líneas con contenido real de una caja: los bordes
+// verticales y el relleno no cuentan como línea pintada.
+func nonEmptyLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		if strings.Trim(strings.TrimSpace(l), "│| ") != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }

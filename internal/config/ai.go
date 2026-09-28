@@ -22,8 +22,7 @@ func BuildAIArgv(template, prompt string, vars map[string]string) []string {
 	if len(fields) == 0 {
 		return nil
 	}
-	pairs := make([]string, 0, 2*(len(vars)+1))
-	pairs = append(pairs, "{prompt}", prompt)
+	pairs := []string{"{prompt}", prompt}
 	for k, v := range vars {
 		pairs = append(pairs, "{"+k+"}", v)
 	}

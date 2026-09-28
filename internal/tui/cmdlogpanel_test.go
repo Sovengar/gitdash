@@ -28,11 +28,24 @@ func logModel(t *testing.T) (Model, *cmdlog.Recorder) {
 	return m, cmdlog.Active()
 }
 
-// sembrar mete entradas controladas en el log del modelo.
+// sembrar mete ejecuciones controladas en el log del modelo.
 func sembrar(rec *cmdlog.Recorder, entries ...cmdlog.Entry) {
 	for _, e := range entries {
 		cmdlog.RecordExec(e)
 	}
+}
+
+// sembrarIntent mete una INTENCIÓN por su canal (RecordIntent), no como
+// ejecución: sembrarla con RecordExec deja Intent=false y la línea se rotula
+// "exec" con la Key dentro del argv, así que cualquier aserción sobre la tecla
+// la satisfaría la entrada equivocada.
+func sembrarIntent(e cmdlog.Entry) {
+	e.Intent = true
+	e.Exit = 0
+	e.Dur = 0
+	e.Argv = nil
+	e.Outcome = ""
+	cmdlog.RecordIntent(e)
 }
 
 // execEntry describe una ejecución de ejemplo para sembrar el log.
@@ -66,10 +79,8 @@ func TestPanelEnsenaElComandoRealYSuResultado(t *testing.T) {
 	m, _ = press(m, "p")
 	m, _ = press(m, "p")
 
-	sembrar(rec,
-		cmdlog.Entry{Repo: "dirty-api", Key: "p", Action: "pull", Class: cmdlog.ClassAction},
-		execEntry("dirty-api", "pull", "git pull", "rebase+autostash", 0),
-	)
+	sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "p", Action: "pull", Class: cmdlog.ClassAction})
+	sembrar(rec, execEntry("dirty-api", "pull", "git pull", "rebase+autostash", 0))
 
 	m, _ = press(m, "l")
 	if !m.logOpen {
@@ -97,10 +108,8 @@ func TestPanelDistingueLaVarianteDePull(t *testing.T) {
 	m, _ = press(m, "p")
 	m, _ = press(m, "r") // variante rebase explícita
 
-	sembrar(rec,
-		cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction},
-		execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0),
-	)
+	sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
+	sembrar(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
 	m, _ = press(m, "l")
 
 	log := sectionContent(t, stripANSI(m.View().Content), "log")
@@ -390,10 +399,8 @@ func TestIntencionSinFilaNoSeRegistra(t *testing.T) {
 func TestPanelRespetaElAncho(t *testing.T) {
 	for _, width := range []int{200, 120, 80, 60, 40} {
 		m, rec := logModel(t)
-		sembrar(rec,
-			execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0),
-			cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction},
-		)
+		sembrar(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
+		sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
 		m.width, m.height = width, 24
 		m, _ = press(m, "l")
 		for i, l := range strings.Split(stripANSI(m.View().Content), "\n") {
@@ -454,6 +461,281 @@ func TestLogColumnsNoRompenConAnchosImposibles(t *testing.T) {
 		}
 		if c.argv == 0 && inner > logColTime {
 			t.Errorf("inner=%d: sin sitio para el argv: %+v", inner, c)
+		}
+	}
+}
+
+// computeLogColumns degrada por columnas y en un ORDEN fijo (veredicto →
+// resultado → repo → kind). Los bordes importan: en el ancho donde las columnas
+// fijas + el argv mínimo caben EXACTAMENTE, no se degrada nada, y un "> " mal
+// puesto empezaría a tirar columnas sin necesidad.
+func TestLogColumnsEnElEncajeExacto(t *testing.T) {
+	// El ancho de holgura con las cinco columnas: 12+2+7+2+14+2+16+2+8 = 65.
+	holgura := logColTime + 4*logColSep + logColKind + logColRepo + logColOutcome + logColVerdict
+	if holgura != 65 {
+		t.Fatalf("precondición: el ancho de holgura son %d, el test mide 65", holgura)
+	}
+
+	// Encaje justo: cabe el argv mínimo y no se toca ninguna columna.
+	justo := holgura + logMinArgv
+	t.Run("encaje exacto, nada se degrada", func(t *testing.T) {
+		c := computeLogColumns(justo)
+		if c.kind != logColKind || c.repo != logColRepo || c.outcome != logColOutcome || c.verdict != logColVerdict {
+			t.Errorf("inner=%d: se degradó una columna que cabía: %+v", justo, c)
+		}
+		if c.argv != logMinArgv {
+			t.Errorf("inner=%d: argv = %d, want %d", justo, c.argv, logMinArgv)
+		}
+	})
+
+	// Una celda menos: la primera que cae es la de menos valor (el veredicto).
+	t.Run("una celda menos, cae el veredicto", func(t *testing.T) {
+		c := computeLogColumns(justo - 1)
+		if c.verdict != 0 {
+			t.Errorf("inner=%d: veredicto = %d, want 0 (es lo que menos vale)", justo-1, c.verdict)
+		}
+		for _, c2 := range []struct {
+			nombre string
+			got    int
+			want   int
+		}{{"kind", c.kind, logColKind}, {"repo", c.repo, logColRepo}, {"outcome", c.outcome, logColOutcome}} {
+			if c2.got != c2.want {
+				t.Errorf("inner=%d: %s = %d, want %d (no debía caer aún)", justo-1, c2.nombre, c2.got, c2.want)
+			}
+		}
+	})
+
+	// El argv nunca baja de logMinArgv mientras quepa el resto, y solo se queda
+	// sin argv cuando ya no queda ni la hora.
+	t.Run("argv al suelo, nunca menos", func(t *testing.T) {
+		for inner := justo - 1; inner >= logColTime+logColSep+logMinArgv; inner-- {
+			c := computeLogColumns(inner)
+			if c.argv < logMinArgv {
+				t.Errorf("inner=%d: argv = %d, want >= %d", inner, c.argv, logMinArgv)
+			}
+		}
+		// Ya sin sitio para el argv mínimo, se queda con lo que hay: nunca
+		// negativo y nunca inventando ancho (restando, no sumando).
+		for _, inner := range []int{logColTime + logColSep + logMinArgv - 1, 10, 5, 1, 0, -5} {
+			c := computeLogColumns(inner)
+			if c.argv < 0 {
+				t.Errorf("inner=%d: argv = %d, want >= 0", inner, c.argv)
+			}
+			if c.argv > max(0, inner-logColTime-logColSep) {
+				t.Errorf("inner=%d: argv = %d quiere más ancho del que hay (%d)",
+					inner, c.argv, max(0, inner-logColTime-logColSep))
+			}
+		}
+	})
+}
+
+// La cabecera y las líneas respetan las columnas que el reparto ha dejado: una
+// columna con ancho 0 no se rotula ni se pinta. Si la guarda fuera ">=" en vez
+// de ">", un terminal estrecho enseñaría cabeceras de columnas que ya no
+// existen (y el reparto se vería roto en la propia cabecera).
+func TestPanelLasColumnasDegradadasNoSePintan(t *testing.T) {
+	m, rec := logModel(t)
+	sembrar(rec, execEntry("api", "pull", "git pull", "fast-forward", 0))
+	m.logOpen = true
+
+	t.Run("ancho amplio, todas las columnas", func(t *testing.T) {
+		m.width = 200
+		header := m.logHeader(computeLogColumns(max(0, m.width-2)))
+		for _, quiere := range []string{"TIME", "KIND", "REPO", "COMMAND", "RESULT", "VERDICT"} {
+			if !strings.Contains(header, quiere) {
+				t.Errorf("con ancho amplio falta la columna %q: %q", quiere, header)
+			}
+		}
+	})
+
+	t.Run("ancho estrecho, solo las que quedan", func(t *testing.T) {
+		// A 40 de ancho solo caben hora, kind (4) y el argv.
+		m.width = 40
+		c := computeLogColumns(max(0, m.width-2))
+		if c.verdict != 0 || c.outcome != 0 || c.repo != 0 {
+			t.Fatalf("precondición: a width=40 deberían caer repo/resultado/veredicto: %+v", c)
+		}
+		header := m.logHeader(c)
+		for _, noDebe := range []string{"REPO", "RESULT", "VERDICT"} {
+			if strings.Contains(header, noDebe) {
+				t.Errorf("columna degradada %q todavía en la cabecera: %q", noDebe, header)
+			}
+		}
+		for _, quiere := range []string{"TIME", "KIND", "COMMAND"} {
+			if !strings.Contains(header, quiere) {
+				t.Errorf("con ancho estrecho falta %q: %q", quiere, header)
+			}
+		}
+		// La cabecera son exactamente las columnas que quedan, sin separadores
+		// fantasma: una columna de ancho 0 no deja ni su rótulo ni su hueco.
+		want := pad("TIME", logColTime) + pad("KIND", c.kind) + strings.Repeat(" ", logColSep) +
+			pad("COMMAND", c.argv) + strings.Repeat(" ", logColSep)
+		if header != want {
+			t.Errorf("cabecera = %q, want %q", header, want)
+		}
+		// Y el cuerpo de la línea: el comando se ve, y el repo (que ya no tiene
+		// columna) tampoco aparece.
+		lay := m.layout()
+		out := stripANSI(m.logSection(max(3, lay.bodyLines)))
+		if !strings.Contains(out, "git pull") {
+			t.Errorf("el comando no se ve con ancho estrecho:\n%s", out)
+		}
+		if strings.Contains(out, "api") {
+			t.Errorf("un repo sin columna se pintó igualmente:\n%s", out)
+		}
+	})
+
+	t.Run("sin sitio para el argv, no hay columna de comando", func(t *testing.T) {
+		// Solo cabe la hora: el argv se queda a 0 y no se rotula.
+		m.width = logColTime + logColSep // 14
+		c := computeLogColumns(max(0, m.width-2))
+		if c.argv != 0 {
+			t.Fatalf("precondición: a width=%d el argv debería quedar a 0: %+v", m.width, c)
+		}
+		header := m.logHeader(c)
+		if strings.Contains(header, "COMMAND") {
+			t.Errorf("columna de comando sin ancho en la cabecera: %q", header)
+		}
+		if !strings.Contains(header, "TIME") {
+			t.Errorf("la hora siempre está: %q", header)
+		}
+		lay := m.layout()
+		out := stripANSI(m.logSection(max(3, lay.bodyLines)))
+		if strings.Contains(out, "git pull") {
+			t.Errorf("el comando se pintó sin columna:\n%s", out)
+		}
+	})
+}
+
+// El offset del panel se recorta contra las líneas visibles: ni se sale del
+// rango (líneas en blanco al final) ni deja huecos. Los dos extremos son los
+// bordes de esa aritmética.
+func TestPanelOffsetEnLosExtremos(t *testing.T) {
+	m, rec := logModel(t)
+	for i := 0; i < 6; i++ {
+		sembrar(rec, execEntry("repo"+string(rune('a'+i)), "pull", "git pull", "fast-forward", 0))
+	}
+	m.logOpen = true
+
+	t.Run("offset 0 ve la cola", func(t *testing.T) {
+		m.logOffset = 0
+		out := stripANSI(m.logSection(4))
+		if !strings.Contains(out, "repoe") {
+			t.Errorf("con offset 0 no se ve la entrada más reciente:\n%s", out)
+		}
+	})
+	t.Run("scrollear arriba y volver abajo se recorta", func(t *testing.T) {
+		m.logOffset = 0
+		visible := 3
+		for range 20 {
+			m.logScroll(1, visible) // k: hacia atrás, hacia lo más antiguo
+		}
+		if m.logOffset == 0 {
+			t.Error("20 scrolls arriba no movieron el offset")
+		}
+		maxOffset := max(0, len(m.logEntries())-visible)
+		if m.logOffset > maxOffset {
+			t.Errorf("offset = %d, want <= %d (dejaría líneas en blanco)", m.logOffset, maxOffset)
+		}
+		if m.logOffset != maxOffset {
+			t.Errorf("offset = %d, want %d (el tope con 6 entradas y 3 visibles)", m.logOffset, maxOffset)
+		}
+		for range 40 {
+			m.logScroll(-1, visible) // j: hacia la cola
+		}
+		if m.logOffset != 0 {
+			t.Errorf("offset = %d al llegar abajo, want 0 (la cola siempre visible)", m.logOffset)
+		}
+		// Con el log entero en pantalla el offset es 0 aunque se inserte más.
+		m.logScroll(1, 100)
+		if m.logOffset != 0 {
+			t.Errorf("offset = %d con todas las entradas visibles, want 0", m.logOffset)
+		}
+	})
+	t.Run("la sección se rellena sin huecos ni panic con cualquier alto", func(t *testing.T) {
+		// Con 1 línea de cuerpo la sección se queda en 1 fila visible (es el
+		// suelo del log, para que la cabecera no se quede sola); el resto de
+		// alturas se rellenan exacto.
+		if got := strings.Count(stripANSI(m.logSection(1)), "\n") + 1; got < 1 {
+			t.Errorf("bodyLines=1: caja de %d líneas", got)
+		}
+		for bodyLines := 2; bodyLines <= 12; bodyLines++ {
+			for off := 0; off <= 8; off++ {
+				m.logOffset = off
+				out := m.logSection(bodyLines)
+				plano := stripANSI(out)
+				// Una caja de alto fijo: la cabecera de columnas + las filas
+				// visibles + los dos bordes, sin huecos al final.
+				want := bodyLines + 2 // 1 cabecera + (bodyLines-1) filas + 2 bordes
+				if got := strings.Count(plano, "\n") + 1; got != want {
+					t.Fatalf("bodyLines=%d offset=%d: caja de %d líneas, want %d", bodyLines, off, got, want)
+				}
+				for i, l := range strings.Split(plano, "\n") {
+					if w := ansi.StringWidth(l); w > m.width {
+						t.Errorf("bodyLines=%d offset=%d línea %d ancho = %d > %d", bodyLines, off, i, w, m.width)
+					}
+				}
+			}
+		}
+	})
+}
+
+// Una secuencia OSC sin cerrar que acaba en ESC no puede reventar: el salto de
+// índices al mirar el terminador ST tiene que comprobar el límite antes de
+// indexar, no después.
+func TestSanitizeLogTextNoReventaConSecuenciasSinCerrar(t *testing.T) {
+	casos := []struct {
+		nombre, in string
+		want       string
+	}{
+		{"OSC sin cerrar", "\x1b]0;title", ""},
+		{"OSC que acaba en ESC", "\x1b]0;abc\x1b", ""},
+		{"OSC con BEL", "\x1b]0;abc\x07cola", "cola"},
+		// Payload de UN byte: el escaneo tiene que arrancar en él, no después.
+		// Si se salta de más, "cola" se pierde y el argv del prompt del
+		// marcador se traga texto legítimo.
+		{"OSC de un byte con BEL", "x\x1b]\x07cola", "xcola"},
+		{"OSC de un byte con ST", "x\x1b]\x1b\\cola", "xcola"},
+		{"OSC de dos bytes", "x\x1b]a\x07cola", "xcola"},
+		{"OSC con ST completo", "\x1b]0;abc\x1b\\cola", "cola"},
+		{"CSI sin cerrar", "\x1b[38;5", ""},
+		{"CSI cerrado en @", "\x1b[@cola", "cola"},
+		{"CSI cerrado en ~", "\x1b[1~cola", "cola"},
+		// Un ESC que no abre CSI ni OSC se come a sí mismo y al carácter
+		// siguiente (un "ESC c" suelto no puede quedarse pegado al texto).
+		{"ESC suelto", "\x1bcola", "ola"},
+		{"ESC al final", "cola\x1b", "cola"},
+		{"ESC vacío", "\x1b", ""},
+		{"varios seguidos", "\x1b[\x1b]\x1b\\cola", "cola"},
+	}
+	for _, c := range casos {
+		if got := sanitizeLogText(c.in); got != c.want {
+			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.nombre, c.in, got, c.want)
+		}
+	}
+}
+
+// El veredicto se colorea por el resultado real del proceso: verde si salió 0,
+// rojo si no. Un exec exitoso pintado de rojo (o al revés) haría dudar de un
+// pull que sí funcionó.
+func TestPanelVerdictColoreadoPorElExit(t *testing.T) {
+	m, rec := logModel(t)
+	sembrar(rec,
+		execEntry("ok", "pull", "git pull", "fast-forward", 0),
+		execEntry("ko", "pull", "git pull", "diverged", 1),
+	)
+	for _, c := range []struct {
+		nombre string
+		e      cmdlog.Entry
+		want   lipglossStyle
+	}{
+		{"exit 0 es el estilo tranquilo", cmdlog.Entry{Exit: 0}, styleHint},
+		{"exit distinto de 0 es error", cmdlog.Entry{Exit: 1}, styleError},
+		{"exit 128 también", cmdlog.Entry{Exit: 128}, styleError},
+		{"sin exit (-1) es error", cmdlog.Entry{Exit: -1}, styleError},
+	} {
+		if got, want := m.logVerdictStyle(c.e).Render("x"), c.want.Render("x"); got != want {
+			t.Errorf("%s: estilo = %q, want %q", c.nombre, got, want)
 		}
 	}
 }

@@ -14,7 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -69,7 +69,10 @@ func Scan(cfg config.Config) ([]Project, error) {
 		projects = append(projects, ps...)
 	}
 
-	sort.Slice(projects, func(i, j int) bool { return projects[i].Path < projects[j].Path })
+	// slices.SortFunc en vez de sort.Slice: el comparador de tres vías es el
+	// idiomático y evita el `i, j` indexado (que además esconde la comparación
+	// de paths dentro de la closure).
+	slices.SortFunc(projects, func(a, b Project) int { return strings.Compare(a.Path, b.Path) })
 
 	var err error
 	if len(errs) > 0 {

@@ -253,10 +253,9 @@ func ParseWorktrees(out, mainPath string) []Worktree {
 			cur.Path = strings.TrimPrefix(line, "worktree ")
 		case strings.HasPrefix(line, "HEAD "):
 			sha := strings.TrimPrefix(line, "HEAD ")
-			if len(sha) >= 7 {
-				sha = sha[:7] // sha corto para UI compacta
-			}
-			cur.Head = sha
+			// sha corto para UI compacta; recortar a 7 es identidad cuando ya
+			// mide 7 o menos, por eso el clamp sustituye a la guarda.
+			cur.Head = sha[:min(len(sha), 7)]
 		case strings.HasPrefix(line, "branch "):
 			// refs/heads/feat → feat
 			ref := strings.TrimPrefix(line, "branch ")

@@ -117,25 +117,18 @@ func renderToast(to toast, maxWidth int) []string {
 			prefix = toastIcon(to.level) + " "
 		}
 		line := toastStyle(to.level).Render(prefix + seg)
-		if pad := width - ansi.StringWidth(line); pad > 0 {
-			line += strings.Repeat(" ", pad)
-		}
+		line += strings.Repeat(" ", max(0, width-ansi.StringWidth(line)))
 		out = append(out, line)
 	}
 	return out
 }
 
-// toastWidth es el ancho objetivo del toast: el del texto + 4, acotado por
-// abajo a toastMinWidth y por arriba a toastMaxWidth y al ancho disponible.
+// toastWidth es el ancho objetivo del toast: el del texto + 4 (icono, hueco y
+// margen), acotado por abajo a toastMinWidth y por arriba a toastMaxWidth y al
+// ancho disponible. Los dos clamps encadenados son los mismos que dos guardas,
+// y el de arriba gana si el terminal es más estrecho que el mínimo.
 func toastWidth(text string, maxWidth int) int {
-	w := ansi.StringWidth(text) + 4
-	if w < toastMinWidth {
-		w = toastMinWidth
-	}
-	if w > maxWidth {
-		w = maxWidth
-	}
-	return w
+	return min(max(ansi.StringWidth(text)+4, toastMinWidth), maxWidth)
 }
 
 func toastIcon(level toastLevel) string {
@@ -251,27 +244,25 @@ func overlayToasts(base string, blocks [][]string, width, height, reserved int) 
 			continue
 		}
 		bw := blockWidth(block)
-		x := width - bw - 1
-		if x < 0 {
-			x = 0
-		}
+		x := max(0, width-bw-1)
 		top := bottom - bh + 1
 		if top < 0 {
 			// El bloque no cabe entero: se dibujan sus últimas filas (el
 			// cierre del mensaje, que suele llevar el detalle accionable) en
 			// lugar de descartarlo.
-			keep := bottom + 1
-			if keep <= 0 {
-				break // sin ninguna fila libre: se priorizan los más recientes
-			}
-			block = block[bh-keep:]
-			top = 0
-		}
-		for j, b := range block {
-			y := top + j
-			if y >= len(lines) {
+			// Con keep <= 0 no queda ninguna fila libre: se priorizan los más
+			// recientes. El recorte con suelo en 0 cubre ese caso (deja el
+			// bloque vacío) sin una guarda más.
+			block = block[min(bh, max(0, bh-(bottom+1))):]
+			if len(block) == 0 {
 				break
 			}
+			top = 0
+		}
+		// Solo se pintan las filas que caen dentro de la vista: un bloque
+		// solapado por abajo se recorta en vez de salirse del splice.
+		for j, b := range block[:min(len(block), max(0, len(lines)-top))] {
+			y := top + j
 			lines[y] = ansi.Truncate(lines[y], x, "") + b + ansi.TruncateLeft(lines[y], x+bw, "")
 		}
 		bottom = top - 2 // una fila en blanco entre toasts apilados
@@ -279,14 +270,12 @@ func overlayToasts(base string, blocks [][]string, width, height, reserved int) 
 	return strings.Join(lines, "\n")
 }
 
-// clampBlock acota cada línea del bloque al ancho de terminal.
+// clampBlock acota cada línea del bloque al ancho de terminal. Recortar a un
+// ancho igual al suyo es identidad, así que el clamp sustituye a la guarda.
 func clampBlock(block []string, width int) []string {
 	out := make([]string, 0, len(block))
 	for _, line := range block {
-		if ansi.StringWidth(line) > width {
-			line = ansi.Truncate(line, width, "")
-		}
-		out = append(out, line)
+		out = append(out, ansi.Truncate(line, min(ansi.StringWidth(line), width), ""))
 	}
 	return out
 }
@@ -295,9 +284,7 @@ func clampBlock(block []string, width int) []string {
 func blockWidth(block []string) int {
 	w := 0
 	for _, line := range block {
-		if lw := ansi.StringWidth(line); lw > w {
-			w = lw
-		}
+		w = max(w, ansi.StringWidth(line))
 	}
 	return w
 }

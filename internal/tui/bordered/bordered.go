@@ -32,11 +32,9 @@ func RenderWithTitle(border lipgloss.Border, borderFg color.Color, title, conten
 // deja la línea completa de relleno. El ancho exterior es width (mínimo 2) y el
 // interior width-2; cada línea de contenido se recorta al interior.
 func RenderWithTitles(border lipgloss.Border, borderFg color.Color, topTitle string, topAlign int, bottomTitle string, bottomAlign int, content string, width int) string {
-	if width < 2 {
-		width = 2
-	}
+	width = max(width, 2) // el interior (width-2) nunca puede ser negativo
 
-	innerWidth := width - 2 // width >= 2 → nunca negativo
+	innerWidth := width - 2
 
 	var style *ansi.Style
 	if borderFg != nil {
@@ -61,10 +59,11 @@ func borderLine(style *ansi.Style, left, fill, right string, innerWidth, align i
 		fill = " "
 	}
 	titleWidth := ansi.StringWidth(title)
-	if titleWidth > innerWidth {
-		title = ansi.Truncate(title, innerWidth, "")
-		titleWidth = innerWidth
-	}
+	// Recortar a un ancho igual o mayor que el actual es identidad, así que el
+	// clamp sustituye a la guarda: el título largo se recorta, el corto no se
+	// toca (ni se le añade cola).
+	titleWidth = min(titleWidth, innerWidth)
+	title = ansi.Truncate(title, titleWidth, "")
 
 	remaining := innerWidth - titleWidth
 	var leftPad, rightPad int
@@ -98,12 +97,12 @@ func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerW
 	raw := strings.Split(content, "\n") // siempre >= 1 elemento
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
-		if w := ansi.StringWidth(line); w > innerWidth {
-			line = ansi.Truncate(line, innerWidth, "")
-		}
-		if pad := innerWidth - ansi.StringWidth(line); pad > 0 {
-			line += strings.Repeat(" ", pad)
-		}
+		// Recortar a un ancho igual o mayor que el actual es identidad, y
+		// `cut` nunca supera el ancho de la línea tras el recorte, así que el
+		// relleno es siempre >= 0. Un solo par de operaciones en vez de dos
+		// guardas que solo difieren en el borde exacto.
+		cut := min(ansi.StringWidth(line), innerWidth)
+		line = ansi.Truncate(line, cut, "") + strings.Repeat(" ", innerWidth-cut)
 		lines = append(lines, styled(style, leftChar)+line+styled(style, rightChar))
 	}
 	return lines

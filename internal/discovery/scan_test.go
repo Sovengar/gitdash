@@ -85,6 +85,80 @@ func TestNestedValid(t *testing.T) {
 	}
 }
 
+// Scan entrega los proyectos ordenados por ruta, no en el orden del walk (que
+// depende del sistema de ficheros). Sin esto, invertir el comparador no lo
+// detecta nadie: la TUI vería los repos reordenados entre escaneos.
+func TestScanOrdenaPorRuta(t *testing.T) {
+	root := t.TempDir()
+	// Se crean en orden inverso al que deben salir: el walk los devuelve en
+	// orden de lectura del directorio, no en orden alfabético.
+	creados := []string{"zeta", "alfa", "middle"}
+	for _, name := range creados {
+		dir := filepath.Join(root, name)
+		testutil.Init(t, dir)
+		testutil.Marker(t, dir, "", "", "", false)
+	}
+
+	projects, err := Scan(cfgRoots(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 3 {
+		t.Fatalf("projects = %d, want 3", len(projects))
+	}
+	want := []string{
+		filepath.Join(root, "alfa"),
+		filepath.Join(root, "middle"),
+		filepath.Join(root, "zeta"),
+	}
+	for i, w := range want {
+		if projects[i].Path != w {
+			t.Errorf("projects[%d] = %q, want %q (orden por ruta)", i, projects[i].Path, w)
+		}
+	}
+}
+
+// Con varios roots el orden global sigue siendo por ruta, no "root a root": un
+// root puede intercalar sus proyectos entre los del otro. Los roots se crean
+// bajo un padre común y en orden invertido a propósito, para que ese entrecruzado
+// sea observable: con el orden por root, "a-root" saldría al final y el test
+// fallaría.
+func TestScanOrdenaEntreRoots(t *testing.T) {
+	base := t.TempDir()
+	// "a-root" se escanea segundo pero ordena antes: sin el orden global por
+	// ruta, sus proyectos saldrían al final.
+	segundo := filepath.Join(base, "a-root")
+	primero := filepath.Join(base, "z-root")
+	for _, dir := range []string{
+		filepath.Join(primero, "b"),
+		filepath.Join(primero, "d"),
+		filepath.Join(segundo, "a"),
+		filepath.Join(segundo, "c"),
+	} {
+		testutil.Init(t, dir)
+		testutil.Marker(t, dir, "", "", "", false)
+	}
+
+	projects, err := Scan(cfgRoots(primero, segundo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 4 {
+		t.Fatalf("projects = %d, want 4", len(projects))
+	}
+	want := []string{
+		filepath.Join(segundo, "a"),
+		filepath.Join(segundo, "c"),
+		filepath.Join(primero, "b"),
+		filepath.Join(primero, "d"),
+	}
+	for i, w := range want {
+		if projects[i].Path != w {
+			t.Errorf("projects[%d] = %q, want %q", i, projects[i].Path, w)
+		}
+	}
+}
+
 func TestWorktree(t *testing.T) {
 	root := t.TempDir()
 	main := filepath.Join(root, "main-repo")

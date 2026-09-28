@@ -1,6 +1,7 @@
 package gitstatus
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -204,6 +205,150 @@ func TestCollectCorrupt(t *testing.T) {
 	}
 	if st.State(true) != StateError {
 		t.Errorf("state = %v, want error", st.State(true))
+	}
+}
+
+// El detalle está acotado: la lista de ficheros se corta en maxFiles aunque el
+// repo tenga más. El tope se comprueba en el exacto (100) y en el que lo pasa
+// (101), que es donde la guarda `len >= maxFiles` se puede equivocar.
+func TestParseListaFicherosAcotada(t *testing.T) {
+	for _, tc := range []struct{ lineas, want int }{
+		{maxFiles - 1, maxFiles - 1},
+		{maxFiles, maxFiles},
+		{maxFiles + 1, maxFiles},
+		{maxFiles + 25, maxFiles},
+	} {
+		var b strings.Builder
+		b.WriteString(porcelainClean)
+		for i := 0; i < tc.lineas; i++ {
+			b.WriteString("? file" + strconv.Itoa(i) + ".txt\n")
+		}
+		_, files := ParsePorcelain(b.String())
+		if len(files) != tc.want {
+			t.Errorf("con %d cambios files = %d, want %d (tope %d)", tc.lineas, len(files), tc.want, maxFiles)
+		}
+	}
+}
+
+// Una línea de entrada truncada (menos campos de los que el código exige) se
+// descarta: se parsea lo que se pueda sin indexar fuera del slice. Una línea "1 "
+// con 7 campos en vez de 8 es exactamente el borde de esa guarda.
+func TestParseLineaTruncadaSeDescarta(t *testing.T) {
+	casos := []struct {
+		nombre, body string
+		beforePath   int
+	}{
+		{"1 con 7 campos (le falta el path)", "M. NRM 100644 100644 100644 abc def", 7},
+		{"1 con 6 campos", "M. NRM 100644 100644 abc def", 7},
+		{"1 vacía", "", 7},
+		{"2 con 7 campos (le falta el path)", "R. N... 100644 100644 abc", 8},
+		{"u con 8 campos (le falta el path)", "UU N... 100644 100644 100644 abc def", 9},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			if _, ok := parseEntry(c.body, c.beforePath); ok {
+				t.Errorf("parseEntry(%q, %d) = true, want false (línea incompleta)", c.body, c.beforePath)
+			}
+		})
+	}
+	// Y el camino real: una línea "1 " truncada dentro del porcelain degrada con
+	// elegancia — el cambio cuenta (el repo está sucio de verdad) pero la línea
+	// no entra en la lista de ficheros ni revienta el parseo.
+	st, files := ParsePorcelain(porcelainClean + "1 .M NRM 100644 100644 100644 abc def\n")
+	if len(files) != 0 {
+		t.Errorf("files = %d, want 0 (línea truncada descartada)", len(files))
+	}
+	if st.TrackedChanges != 1 {
+		t.Errorf("tracked = %d, want 1 (el cambio cuenta aunque no se pueda detallar)", st.TrackedChanges)
+	}
+	if st.Derive() != StateDirty {
+		t.Errorf("derive = %v, want dirty (cambio truncado sigue contando)", st.Derive())
+	}
+}
+
+// Un repo sin ningún commit es un estado legítimo (recién hecho `git init`):
+// la recolección no debe explodear al no haber nada que tomar del log.
+func TestCollectSinCommits(t *testing.T) {
+	dir := t.TempDir()
+	testutil.Init(t, dir) // sin commit
+	st := Collect(t.Context(), dir, "")
+	if st.Err != "" {
+		t.Fatalf("err = %q", st.Err)
+	}
+	if st.LastCommit != 0 {
+		t.Errorf("LastCommit = %d, want 0 (sin commits)", st.LastCommit)
+	}
+	if len(st.Commits) != 0 {
+		t.Errorf("commits = %d, want 0", len(st.Commits))
+	}
+}
+
+// El log puede venir vacío con salida 0 (no es lo que hace un repo sin commits,
+// que falla, pero un git envuelto puede hacerlo): la fecha del último commit es
+// 0, no un índice fuera de rango.
+func TestLastCommitWhen(t *testing.T) {
+	casos := []struct {
+		nombre  string
+		commits []Commit
+		want    int64
+	}{
+		{"nil", nil, 0},
+		{"vacío", []Commit{}, 0},
+		{"uno", []Commit{{Sha: "a", When: 1700000000}}, 1700000000},
+		{"varios usa el primero", []Commit{{When: 99}, {When: 1}}, 99},
+	}
+	for _, c := range casos {
+		if got := lastCommitWhen(c.commits); got != c.want {
+			t.Errorf("%s: lastCommitWhen = %d, want %d", c.nombre, got, c.want)
+		}
+	}
+}
+
+// En detached sin rama, la columna de rama muestra el sha corto. El borde de
+// ese recorte son los 7 caracteres exactos: con menos no hay nada que enseñar y
+// con más se corta.
+func TestNormalizeBranchDetachedShaCorto(t *testing.T) {
+	casos := []struct {
+		nombre string
+		st     Status
+		want   string
+	}{
+		{"sha de 7", Status{Detached: true, OID: "abc1234"}, "abc1234"},
+		{"sha largo", Status{Detached: true, OID: "abc1234567890def"}, "abc1234"},
+		{"sha de 6 (no llega al mínimo)", Status{Detached: true, OID: "abc123"}, ""},
+		{"sin oid", Status{Detached: true}, ""},
+		{"attached con rama", Status{Branch: "main", OID: "abc1234"}, "main"},
+		{"attached con rama y sin o detached", Status{Branch: "main", OID: "abc1234", Detached: false}, "main"},
+		{"detached pero con rama", Status{Detached: true, Branch: "main"}, "main"},
+	}
+	for _, c := range casos {
+		if got := normalizeBranch(c.st); got != c.want {
+			t.Errorf("%s: normalizeBranch(%+v) = %q, want %q", c.nombre, c.st, got, c.want)
+		}
+	}
+}
+
+// El pool nunca baja de 1 worker: con concurrency <= 0 (config con un valor
+// inválido) tiene que recolectar igualmente, en serie, sin colgarse.
+func TestStreamPoolConcurrenciaInvalida(t *testing.T) {
+	dirs := make([]string, 3)
+	projects := make([]discovery.Project, 3)
+	for i := range dirs {
+		d, _ := testutil.NewRepo(t, false)
+		dirs[i] = d
+		projects[i] = discovery.Project{Path: d, HasRepo: true}
+	}
+	for _, c := range []int{0, -1, 1, 2} {
+		var mu sync.Mutex
+		got := map[string]bool{}
+		StreamPool(t.Context(), projects, "", c, func(path string, _ Snapshot) {
+			mu.Lock()
+			got[path] = true
+			mu.Unlock()
+		})
+		if len(got) != len(projects) {
+			t.Errorf("concurrency %d: emit = %d, want %d", c, len(got), len(projects))
+		}
 	}
 }
 

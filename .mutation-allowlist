@@ -7,25 +7,86 @@
 # conscious, accepted risk. Adding a real test gap here hides a real risk, and
 # mutation testing exists precisely to surface those.
 #
-# Seeded from a full-module `go tool gremlins unleash` run. Entries are keyed by
-# LINE NUMBER, so inserting code above an entry shifts it and will surface a new
-# red on purpose: re-verify the gap and update this file, do not regenerate it
-# wholesale (that would silently re-hide real gaps).
-ARITHMETIC_BASE internal/config/ai.go:25
-CONDITIONALS_BOUNDARY internal/config/config.go:141
-CONDITIONALS_BOUNDARY internal/config/config.go:146
-CONDITIONALS_BOUNDARY internal/config/config.go:272
-CONDITIONALS_BOUNDARY internal/discovery/scan.go:72
-CONDITIONALS_BOUNDARY internal/tui/bordered/bordered.go:101
-CONDITIONALS_BOUNDARY internal/tui/bordered/bordered.go:104
-CONDITIONALS_BOUNDARY internal/tui/bordered/bordered.go:35
-CONDITIONALS_BOUNDARY internal/tui/bordered/bordered.go:64
-CONDITIONALS_NEGATION internal/config/config.go:121
-CONDITIONALS_NEGATION internal/config/config.go:127
-CONDITIONALS_NEGATION internal/config/config.go:130
-CONDITIONALS_NEGATION internal/config/config.go:133
-CONDITIONALS_NEGATION internal/config/config.go:244
-CONDITIONALS_NEGATION internal/config/config.go:272
-CONDITIONALS_NEGATION internal/discovery/scan.go:72
-CONDITIONALS_NEGATION internal/tui/bordered/bordered.go:42
-CONDITIONALS_NEGATION internal/tui/bordered/bordered.go:60
+# Entries are keyed by LINE NUMBER, so inserting code above an entry shifts it and
+# will surface a new red on purpose: re-verify the gap and update this file, do
+# not regenerate it wholesale (that would silently re-hide real gaps).
+#
+# ---------------------------------------------------------------------------
+# ESTADO
+# Partimos de 172 mutantes vivos en 157 líneas. Cerrados ~130:
+#   - con tests nuevos donde el hueco era real (bordes exactos, claves ausentes
+#     vs vacías, encajes justos de alto y ancho, ventanas de scroll),
+#   - con reescrituras min/max donde la mutación es IDENTIDAD por construcción
+#     (truncar a un ancho >= el suyo, rellenar con Repeat(s, 0), clamps de
+#     capacidad, guards cuyo borde reasigna el mismo valor). Un test no puede
+#     matar esas: lo honesto es quitar el sitio mutado, no allowlistarlo.
+#
+# Las 11 entradas de abajo son las que quedan, todas con demostración de por qué
+# no son matables con un test.
+# ---------------------------------------------------------------------------
+
+# --- tui/detail.go --------------------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/detail.go:31
+#   `if avail < minListBlockLines { return 0, false }` de listBudget. Con
+#   avail == minListBlockLines los DOS caminos devuelven lo mismo: room == 0, y
+#   entonces `n <= room` solo es cierto con n == 0, mientras que `room < 1`
+#   devuelve (0, false) para cualquier n. La función entera vale (0, false) en
+#   todo avail <= minListBlockLines, así que mover el borde un paso no la cambia.
+
+# --- tui/toast.go ---------------------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/toast.go:175
+#   `for ansi.StringWidth(w) > maxWidth` del word-wrap. Solo difiere con una
+#   palabra de ancho EXACTO maxWidth, y en ese caso el resultado es el mismo: la
+#   palabra ocupaba una línea entera de todos modos. Con la mutación el corte
+#   devuelve (w, "") y la línea se cierra igual. Es la misma clase que truncar a
+#   un ancho >= el suyo.
+
+CONDITIONALS_BOUNDARY internal/tui/toast.go:232
+CONDITIONALS_NEGATION internal/tui/toast.go:236
+#   Las dos guardas de entrada de overlayToasts. Con width == 0 (y no < 0) el
+#   splice es una identidad pura: x == 0 y bw == 0, así que
+#   `Truncate(l,0) + bloque + TruncateLeft(l,0)` reconstruye la línea. Con
+#   height == len(lines) las dos ramas asignan el mismo valor (height ya está
+#   acotado). Ni width == 0 ni height == len(lines) cambian nada observable.
+
+CONDITIONALS_BOUNDARY internal/tui/toast.go:249
+#   `if top < 0` del bloque que no cabe entero. Solo difiere con top == 0, donde
+#   keep == bottom+1 == bh: el recorte `block[bh-keep:]` deja el bloque entero.
+#   Es la guarda de "no cabe" writa al revés por un paso, y en el borde exacto
+#   no recorta nada.
+
+# --- tui/cmdlogpanel.go ---------------------------------------------------
+ARITHMETIC_BASE internal/tui/cmdlogpanel.go:101
+INVERT_NEGATIVES internal/tui/cmdlogpanel.go:101
+#   El segundo clamp del offset: `min(m.logOffset, max(0, len(entries)-visible))`.
+#   logOffset ya está acotado a [0, maxOffset] en logScroll, así que este clamp
+#   es la red de seguridad para cuando cambia `visible` (un resize) y el offset
+#   guardado se queda pasado. Ampliar ese techo con la mutación no cambia nada
+#   observable: el offset que llega aquí nunca lo supera, y el único sitio donde
+#   se usa es `len(entries)-visible-offset`, cuyo recorte por start ya lo acota.
+
+CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:127
+CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
+#   La guarda `c.kind > 0` de la columna KIND, en la cabecera y en la línea. El
+#   ladder de computeLogColumns baja kind de 7 a 4 y ahí para: el
+#   `case c.kind > 4` es justamente la salida del bucle, así que kind ∈ {7, 4} y
+#   la guarda nunca puede ser falsa — `>= 0` da el mismo resultado. La guarda NO
+#   se borra a propósito: `pad(s, 0)` devuelve s sin truncar (n >= w), así que sin
+#   ella un cambio futuro del ladder que bajara kind a 0 pintaría un "KIND" de
+#   ancho 0 en vez de omitir la columna.
+
+# --- gitstatus/status.go --------------------------------------------------
+ARITHMETIC_BASE internal/gitstatus/status.go:144
+#   El tope de workers del pool (`runtime.NumCPU()*4`). El clamp solo limita
+#   cuántos subprocess git corren a la vez: resultados, orden y snapshots son
+#   idénticos con 1 worker o con 9999 (el semáforo serializa, no cambia el
+#   resultado). Ningún test puede observar la concurrencia: mutar el 4 no rompe
+#   nada observable, solo el consumo de recursos. Riesgo consciente.
+#   (Las guardas que SÍ eran mutables —0, negativos y el `> del tope`— ya no
+#   existen: ahora es un clamp min/max.)
+
+# ---------------------------------------------------------------------------
+# Backlog real, aún sin test (NO se allowlistean: se van cerrando uno a uno):
+#   internal/tui/app.go      ~13  guardas de acciones, handoffs y scroll
+#   internal/tui/table.go    ~18  anchos de columna, celdas y scroll
+#   internal/tui/update.go   ~12  enrutado de teclas y estados armados

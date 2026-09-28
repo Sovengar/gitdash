@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,139 @@ timeout = "nope"
 	}
 	if cfg.FetchConcurrency != 4 || cfg.FetchTimeout != 30*time.Second {
 		t.Errorf("valores inválidos no ignorados: %+v", cfg)
+	}
+}
+
+// El mínimo válido de concurrency es 1 (un único fetch a la vez), no 0 ni 2: el
+// borde de la guarda `c >= 1` es exactamente este valor.
+func TestFetchConcurrencyMinimoAceptado(t *testing.T) {
+	path := write(t, "[fetch]\nconcurrency = 1\n")
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warn inesperado: %q", warn)
+	}
+	if cfg.FetchConcurrency != 1 {
+		t.Errorf("concurrency = %d, want 1 (mínimo válido aceptado)", cfg.FetchConcurrency)
+	}
+}
+
+// Un timeout de 0 (o negativo) es tan inválido como "nope": cae al default. El
+// borde de la guarda `d > 0` es el 0, así que es 0 y no "un valor raro".
+func TestFetchTimeoutNoPositivoIgnorado(t *testing.T) {
+	for _, timeout := range []string{"0s", "0", "-1s", "-30m"} {
+		t.Run(timeout, func(t *testing.T) {
+			path := write(t, "[fetch]\ntimeout = "+quote(timeout)+"\n")
+			cfg, _ := LoadFrom(path)
+			if cfg.FetchTimeout != 30*time.Second {
+				t.Errorf("timeout %q → %s, want el default 30s", timeout, cfg.FetchTimeout)
+			}
+		})
+	}
+}
+
+func quote(s string) string { return `"` + s + `"` }
+
+// Una clave ausente conserva su default: el `nil` del puntero y la ausencia de
+// la clave son la misma cosa, y el valor por defecto sobrevive a cualquier
+// config parcial.
+func TestClavesAusentesConservanDefaults(t *testing.T) {
+	path := write(t, `roots = ["/tmp"]`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warn inesperado: %q", warn)
+	}
+	if cfg.Marker != DefaultMarker {
+		t.Errorf("marker = %q, want %q", cfg.Marker, DefaultMarker)
+	}
+	if !reflect.DeepEqual(cfg.Exclude, DefaultExclude) {
+		t.Errorf("exclude = %v, want los defaults %v", cfg.Exclude, DefaultExclude)
+	}
+	if cfg.Editor != Defaults().Editor {
+		t.Errorf("editor = %q, want %q", cfg.Editor, Defaults().Editor)
+	}
+	if cfg.SyncBranch != "main" {
+		t.Errorf("sync_branch = %q, want main", cfg.SyncBranch)
+	}
+}
+
+// Una clave presente pero vacía conserva el default: escribir `marker = ""` no
+// es "quitar el marcador", es no decir nada.
+func TestValoresVaciosConservanDefaults(t *testing.T) {
+	path := write(t, `
+marker = ""
+editor = ""
+sync_branch = ""
+`)
+	cfg, _ := LoadFrom(path)
+	if cfg.Marker != DefaultMarker {
+		t.Errorf("marker = %q, want %q", cfg.Marker, DefaultMarker)
+	}
+	if cfg.Editor != Defaults().Editor {
+		t.Errorf("editor = %q, want %q", cfg.Editor, Defaults().Editor)
+	}
+	if cfg.SyncBranch != "main" {
+		t.Errorf("sync_branch = %q, want main", cfg.SyncBranch)
+	}
+}
+
+// `exclude = []` es una intención explícita (no podar nada) y sustituye a los
+// defaults igual que cualquier otra lista: es lo que distingue "clave ausente"
+// de "lista vacía".
+func TestExcludeVacioDesactivaPodas(t *testing.T) {
+	path := write(t, "exclude = []\n")
+	cfg, _ := LoadFrom(path)
+	if len(cfg.Exclude) != 0 {
+		t.Errorf("exclude = %v, want vacío (podas desactivadas)", cfg.Exclude)
+	}
+}
+
+// El editor por defecto sale de $EDITOR y solo cae a "vi" cuando no hay ninguno.
+func TestEditorDefaultDesdeEntorno(t *testing.T) {
+	t.Run("con EDITOR", func(t *testing.T) {
+		t.Setenv("EDITOR", "nano -w")
+		if got := Defaults().Editor; got != "nano -w" {
+			t.Errorf("editor = %q, want nano -w", got)
+		}
+	})
+	t.Run("sin EDITOR", func(t *testing.T) {
+		t.Setenv("EDITOR", "")
+		if got := Defaults().Editor; got != "vi" {
+			t.Errorf("editor = %q, want vi", got)
+		}
+	})
+}
+
+// expandAll solo toca un `~` seguido de separador, y solo cuando hay algo detrás
+// o nada: `~/x` y `~/` se expanden; `~`, `~user` y las rutas absolutas no.
+func TestExpandAll(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("sin home: %v", err)
+	}
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"~/dev", filepath.Join(home, "dev")},
+		{"~/", home},
+		{"~", "~"},
+		{"~user/dev", "~user/dev"},
+		{"/opt/dev", "/opt/dev"},
+		{"dev", "dev"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		got := expandAll([]string{c.in})
+		if len(got) != 1 || got[0] != c.want {
+			t.Errorf("expandAll(%q) = %v, want [%q]", c.in, got, c.want)
+		}
+	}
+}
+
+// roots con `~` se expanden al cargarlos; la lista vacía no inventa entradas.
+func TestExpandAllListaVacia(t *testing.T) {
+	if got := expandAll(nil); len(got) != 0 {
+		t.Errorf("expandAll(nil) = %v, want vacío", got)
 	}
 }
 

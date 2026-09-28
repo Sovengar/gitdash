@@ -1,5 +1,5 @@
 // Vista del command log: qué se ha ejecutado de verdad, con qué resultado y
-// por qué. Es un view mode más (como detailOpen), no un overlay: necesita
+// por qué. Es un view mode más, no un overlay: necesita
 // scroll y muchas líneas, y tapar la tabla obligaría a reservar su alto igual
 // que hacen los toasts.
 package tui
@@ -97,11 +97,8 @@ func (m *Model) logSection(bodyLines int) string {
 	// El scroll parte de las últimas N líneas que caben (una para la
 	// cabecera), y se recorta para que el desplazamiento nunca deje huecos
 	// al final.
-	visible := bodyLines - 1
+	visible := max(1, bodyLines-1)
 	offset := min(m.logOffset, max(0, len(entries)-visible))
-	if visible < 1 {
-		visible = 1
-	}
 	start := max(0, len(entries)-visible-offset)
 
 	rows := make([]string, 0, visible)
@@ -254,12 +251,14 @@ func skipEscape(s string, i int) int {
 		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 			j++
 		}
-		if j < len(s) {
-			j++
-		}
-		return j
+		// min() y no un "j++": una secuencia sin cerrar deja j == len(s) y el
+		// índice devuelto nunca puede pasar del final de la cadena.
+		return min(j+1, len(s))
 	case ']': // OSC
-		j++
+		// El escaneo arranca en el PRIMER byte del payload: ni el ESC ni el ']'
+		// son terminadores, pero el payload sí forma parte de la secuencia, así
+		// que saltar más allá perdería texto legítimo del argv.
+		j = i + 2
 		for j < len(s) {
 			if s[j] == 0x07 {
 				return j + 1

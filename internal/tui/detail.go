@@ -41,7 +41,7 @@ func listBudget(avail, n int) (shown int, rest bool) {
 	return room - 1, true
 }
 
-// asOrDash devuelva el texto o "-" si vacío.
+// asOrDash devuelve el texto o "-" si vacío.
 func asOrDash(s string) string {
 	if s == "" {
 		return "-"
@@ -134,6 +134,18 @@ func (m *Model) renderDetail(r row, rows int) string {
 	// Es lo que permite que el panel enseñe "… N más" en vez de cortar la lista
 	// a media: el presupuesto se reparte entre las listas que sí quepan.
 	avail := max(0, rows-detailHeadLines)
+	// Las tres listas COMPITEN por el mismo hueco: sin descontar, cada una se
+	// creería con el presupuesto entero y la ficha se saldría de la caja
+	// (luego la recorta fitLines por arriba, sin avisar, que es justo lo que la
+	// lista de "… N más" evita). Cada bloque gasta el hueco + la cabecera + sus
+	// elementos + el aviso.
+	consumido := func(shown int, rest bool) int {
+		n := minListBlockLines + shown // hueco + cabecera
+		if rest {
+			n++ // el aviso "… N más"
+		}
+		return n
+	}
 
 	// worktrees del repo: rama, sha y ruta (relativa al
 	// repo cuando sea posible, absoluta en caso contrario).
@@ -152,6 +164,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
 		}
+		avail -= consumido(shown, rest)
 	}
 
 	if p.MarkerErr != "" {
@@ -170,6 +183,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
 		}
+		avail -= consumido(shown, rest)
 	}
 
 	if n := len(r.snap.Commits); n > 0 && avail >= minListBlockLines {
@@ -182,6 +196,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 				truncate(c.Subject, max(20, m.width-24)),
 			)
 		}
+		// Es la última lista: nobody lee ya el presupuesto.
 	}
 
 	if act, ok := m.lastAction[p.Path]; ok {
@@ -258,10 +273,11 @@ func actionTail(out string, n int) string {
 		return ""
 	}
 	lines := strings.Split(out, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
+	// Las últimas n líneas, con los dos bordes resueltos sin guardas: con n <= 0
+	// no queda cola, y con n >= len(lines) se queda todo. El suelo en 0 evita el
+	// índice negativo que sí era un panic (un n negativo aquí reventaba).
+	desde := min(len(lines), max(0, len(lines)-n))
+	return strings.Join(lines[desde:], "\n")
 }
 
 // indent antepone prefix a cada línea.

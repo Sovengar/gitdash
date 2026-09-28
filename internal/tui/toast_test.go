@@ -272,6 +272,187 @@ func TestToastConSaltosDeLineaNoRompeSplice(t *testing.T) {
 	}
 }
 
+// Toast con duración 0 (o negativa) está expirado de inmediato: el tick no lo
+// puede dejar vivo. El borde de la guarda de expiración es exactamente esa
+// duración mínima, no un segundo antes.
+func TestToastDuracionCeroExpiraYa(t *testing.T) {
+	var tm toastManager
+	tm.showInfo("vivo")
+	tm.toasts = append(tm.toasts, toast{text: "instantaneo", level: toastInfo, created: time.Now(), duration: 0})
+	tm.toasts = append(tm.toasts, toast{text: "caducado", level: toastInfo, created: time.Now().Add(-time.Minute), duration: -time.Second})
+
+	tm.update()
+	for _, to := range tm.toasts {
+		if to.duration <= 0 {
+			t.Errorf("un toast de duración %v sobrevivió al update: %q", to.duration, to.text)
+		}
+	}
+	if len(tm.toasts) != 1 {
+		t.Fatalf("vivos = %d, want 1 (solo el de duración normal)", len(tm.toasts))
+	}
+}
+
+// El ancho del toast es el del texto más el chrome (icono, hueco y margen), con
+// suelo y techo. Ese +4 es el contrato: si se calculara al revés, un mensaje de
+// 30 celdas daría un toast de 26 y el texto se saldría de la caja.
+func TestToastWidthEsTextoMasChrome(t *testing.T) {
+	for _, c := range []struct {
+		nombre   string
+		text     string
+		maxWidth int
+		want     int
+	}{
+		{"texto corto, al suelo", "ok", toastMaxWidth, toastMinWidth},
+		{"texto medio, chrome incluido", strings.Repeat("x", 30), toastMaxWidth, 34},
+		{"texto largo, al techo", strings.Repeat("x", 200), toastMaxWidth, toastMaxWidth},
+		{"terminal estrecho", strings.Repeat("x", 200), 20, 20},
+		{"terminal más estrecho que el suelo", "ok", 10, 10},
+		{"sin ancho", "ok", 0, 0},
+	} {
+		if got := toastWidth(c.text, c.maxWidth); got != c.want {
+			t.Errorf("%s: toastWidth(%d chars, max %d) = %d, want %d",
+				c.nombre, ansi.StringWidth(c.text), c.maxWidth, got, c.want)
+		}
+	}
+}
+
+// El wrap con ancho 0 o negativo no parte el texto: sin ancho no hay nada que
+// respectar, así que se devuelve entero. Es el borde de la guarda inicial.
+func TestWrapTextSinAnchoDevuelveElTextoEntero(t *testing.T) {
+	for _, w := range []int{0, -1, -100} {
+		got := wrapText("hola mundo entero", w)
+		if len(got) != 1 || got[0] != "hola mundo entero" {
+			t.Errorf("wrapText(_, %d) = %q, want el texto entero en una línea", w, got)
+		}
+	}
+}
+
+// Una palabra que cabe JUSTO no se parte (ni deja una línea vacía detrás): el
+// borde del wrap es el ancho exacto, no ancho-1.
+func TestWrapTextPalabraQueCabeJustaNoSeParte(t *testing.T) {
+	for _, c := range []struct {
+		nombre, text string
+		w            int
+		want         []string
+	}{
+		{"una palabra del ancho exacto", "hola", 4, []string{"hola"}},
+		{"dos palabras que caben justas", "a b", 3, []string{"a b"}},
+		{"las dos palabras llenan el ancho exacto", "hola mundo", 10, []string{"hola mundo"}},
+		{"una más de las que caben", "a b", 2, []string{"a", "b"}},
+		{"la segunda no cabe ni partiéndose en palabras", "hola mundo", 4, []string{"hola", "mund", "o"}},
+	} {
+		got := wrapText(c.text, c.w)
+		if !equalStrings(got, c.want) {
+			t.Errorf("%s: wrapText(%q, %d) = %q, want %q", c.nombre, c.text, c.w, got, c.want)
+		}
+	}
+}
+
+// Una palabra larga detrás de otra no se come la línea pendiente: lo que ya
+// estaba en curso se cierra antes de partir la que no cabe.
+func TestWrapTextCierraLaLineaAntesDePartirLaLarga(t *testing.T) {
+	larga := strings.Repeat("z", 25)
+	got := wrapText("corta "+larga, 10)
+	plano := collapse(strings.Join(got, " "))
+	if !strings.Contains(plano, "corta") {
+		t.Errorf("la palabra corta se perdió al partir la larga: %q", got)
+	}
+	if !strings.Contains(plano, "zzz") {
+		t.Errorf("la palabra larga no se partió: %q", got)
+	}
+	for i, l := range got {
+		if w := ansi.StringWidth(l); w > 10 {
+			t.Errorf("línea %d ancho = %d > 10: %q", i, w, l)
+		}
+	}
+	// La palabra corta va en su propia línea, no pegada a un trozo de la larga.
+	if !equalStrings(got[:1], []string{"corta"}) {
+		t.Errorf("primera línea = %q, want solo la palabra corta", got[0])
+	}
+}
+
+// splitWidth parte por el mayor prefijo que cabe. El encaje exacto es el
+// contrato: una cadena que llena el ancho se devuelve ENTERA, no con la última
+// runa empujada a la cola.
+func TestSplitWidth(t *testing.T) {
+	for _, c := range []struct {
+		nombre, in string
+		w          int
+		wantHead   string
+		wantTail   string
+	}{
+		{"cabe entero", "abc", 3, "abc", ""},
+		{"cabe con holgura", "abc", 5, "abc", ""},
+		{"corta por el final", "abcd", 2, "ab", "cd"},
+		{"runa ancha con hueco 1", "日本", 3, "日", "本"},
+		{"runa más ancha que el ancho", "日", 1, "日", ""},
+		{"ancho 0, una runa", "ab", 0, "a", "b"},
+		{"vacío", "", 3, "", ""},
+	} {
+		head, tail := splitWidth(c.in, c.w)
+		if head != c.wantHead || tail != c.wantTail {
+			t.Errorf("%s: splitWidth(%q, %d) = (%q, %q), want (%q, %q)", c.nombre, c.in, c.w, head, tail, c.wantHead, c.wantTail)
+		}
+	}
+	// La partición siempre reconstruye el original: al partir no se pierde ni se
+	// duplica texto.
+	for _, s := range []string{"日本語", "abcdef", "a b c", "x"} {
+		for w := 0; w <= 6; w++ {
+			head, tail := splitWidth(s, w)
+			if head+tail != s {
+				t.Errorf("splitWidth(%q, %d) no reconstruye el original: %q + %q", s, w, head, tail)
+			}
+		}
+	}
+}
+
+// Un bloque que cabe JUSTO desde la fila 0 se dibuja entero: si el recorte por
+// arriba se midiera con "> " en vez de "<", un toast que llena el hueco se
+// quedaría solo con su última línea.
+func TestOverlayBloqueQueCabeDesdeArriba(t *testing.T) {
+	base := strings.Join([]string{"l0", "l1", "l2", "l3"}, "\n")
+	block := []string{"t0", "t1", "t2"} // 3 filas de bloque y 3 libres: top == 0 exacto
+	plano := stripANSI(overlayToasts(base, [][]string{block}, 20, 4, 1))
+	for _, quiere := range []string{"t0", "t1", "t2"} {
+		if !strings.Contains(plano, quiere) {
+			t.Errorf("el bloque que cabía justo no se pintó entero, falta %q:\n%s", quiere, plano)
+		}
+	}
+	// Con una fila menos de hueco, solo sobrevive el cierre del bloque.
+	outPoco := stripANSI(overlayToasts(base, [][]string{block}, 20, 4, 2))
+	if !strings.Contains(outPoco, "t2") {
+		t.Errorf("con un hueco de 2 filas debía quedar el cierre del bloque:\n%s", outPoco)
+	}
+	if strings.Contains(outPoco, "t0") {
+		t.Errorf("con un hueco de 2 filas no cabía el principio del bloque:\n%s", outPoco)
+	}
+}
+
+// Un alto 0 (o menor que el de la base) se interpreta como "toda la vista
+// disponible": el toast se apila en la última fila en vez de perderse.
+func TestOverlayAltoCeroUsaLaVistaEntera(t *testing.T) {
+	base := strings.Join([]string{"l0", "l1", "l2"}, "\n")
+	for _, h := range []int{0, -1} {
+		out := stripANSI(overlayToasts(base, [][]string{{"TOAST"}}, 20, h, 0))
+		if !strings.Contains(out, "TOAST") {
+			t.Errorf("height=%d: el toast no se dibujó en la última fila:\n%s", h, out)
+		}
+	}
+}
+
+// El splice nunca se sale de la vista, pase lo que pase con las filas
+// reservadas: un reserved negativo (el layout nunca lo da, pero la función no lo
+// restringe) tiene que recortar el bloque, no escribir por debajo del final.
+func TestOverlayConReservedNegativoNoSeSaleDeLaVista(t *testing.T) {
+	base := strings.Join([]string{"l0", "l1", "l2"}, "\n")
+	for _, reserved := range []int{-1, -5} {
+		out := overlayToasts(base, [][]string{{"t0", "t1"}}, 20, 3, reserved)
+		if lines := strings.Split(out, "\n"); len(lines) != 3 {
+			t.Errorf("reserved=%d: la vista cambió de alto: %d líneas", reserved, len(lines))
+		}
+	}
+}
+
 // sliceOf repite s n veces.
 func sliceOf(s string, n int) []string {
 	out := make([]string, n)
