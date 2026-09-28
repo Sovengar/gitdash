@@ -565,7 +565,7 @@ func (m *Model) nameCell(r row) (string, lipglossStyle) {
 	}
 	// Indicador de worktrees del repo principal;
 	// glyph de expansión `▸/▾` junto al contador. Misma guarda que
-	// `expandable` (HIGH-1): un worktree huérfano (kindRepo +
+	// `expandable`: un worktree huérfano (kindRepo +
 	// IsWorktree) no es expandible, así que no debe mostrar glyph ni
 	// contador (dead affordance).
 	if m.expandable(r) {
@@ -716,11 +716,11 @@ func truncate(s string, w int) string {
 
 // pad rellena a la derecha midiendo runes (solo texto plano, sin ANSI).
 func pad(s string, w int) string {
-	n := utf8.RuneCountInString(s)
-	if n >= w {
-		return s
-	}
-	return s + strings.Repeat(" ", w-n)
+	// Rellenar de más es identidad (Repeat de 0 es "") y rellenar de menos
+	// también lo es: pad NUNCA trunca, solo completa el ancho. Por eso el
+	// clamp en vez de una guarda cuyo borde (`n >= w` vs `n > w`) no
+	// distingue ningún caso.
+	return s + strings.Repeat(" ", max(0, w-utf8.RuneCountInString(s)))
 }
 
 func orDash(s string) string {

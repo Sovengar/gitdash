@@ -27,6 +27,11 @@ func newTestModel(t *testing.T, projects []discovery.Project, states map[string]
 	m.store = state.NewStoreAt(t.TempDir())
 	m.collapsed = map[string]bool{}
 	m.expanded = map[string]bool{}
+	// Cancelar el contexto al terminar el test mata el trabajo en vuelo (fetch
+	// por repo, acciones, handoffs) ANTES de que el siguiente test instale su
+	// recorder: si no, una goroutine suelta registra sus lecturas de git en el
+	// log del test siguiente y lo hace fallar por lo que hizo otro.
+	t.Cleanup(m.cancel)
 	return m
 }
 

@@ -93,3 +93,39 @@ func TestActionNotePushIgnoresRebaseFlag(t *testing.T) {
 		t.Errorf("actionNote push = %q, no debe mencionar rebase", got)
 	}
 }
+
+// El argv resuelto acompaña al veredicto cuando existe: es lo único que dice
+// qué política aplicó git (con `p` sin flags, eso lo decide el gitconfig). Y si
+// no hay argv, el mensaje no inventa uno.
+func TestActionNoteMuestraElArgvSoloSiExiste(t *testing.T) {
+	t.Run("con argv en éxito", func(t *testing.T) {
+		got := actionNote("pull", "api", "git pull --rebase", "", "", false)
+		if !strings.Contains(got, "git pull --rebase") {
+			t.Errorf("nota = %q, want el argv", got)
+		}
+	})
+	t.Run("sin argv en éxito", func(t *testing.T) {
+		got := actionNote("pull", "api", "", "", "", false)
+		if strings.Contains(got, "git ") || strings.Contains(got, "()") {
+			t.Errorf("nota = %q, want sin argv ni paréntesis vacíos", got)
+		}
+	})
+	t.Run("con argv en fallo", func(t *testing.T) {
+		got := actionNote("pull", "api", "git pull --rebase", "", "could not apply abc", false)
+		if !strings.Contains(got, "git pull --rebase") {
+			t.Errorf("nota = %q, want el argv y el motivo", got)
+		}
+		if !strings.Contains(got, "could not apply") {
+			t.Errorf("nota = %q, want el motivo de git", got)
+		}
+	})
+	t.Run("sin argv en fallo", func(t *testing.T) {
+		got := actionNote("push", "api", "", "", "permission denied", false)
+		if strings.Contains(got, "—  ") {
+			t.Errorf("nota = %q, want sin un guion colgando", got)
+		}
+		if !strings.Contains(got, "permission denied") {
+			t.Errorf("nota = %q, want el motivo", got)
+		}
+	})
+}

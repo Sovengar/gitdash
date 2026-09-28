@@ -306,7 +306,7 @@ type Model struct {
 	cmdOpen  bool
 	cmdInput textinput.Model
 
-	// lastCmd guarda la salida del último comando `!` por repo (S-! :
+	// lastCmd guarda la salida del último comando `!` por repo (uno en vuelo:
 	// capturado, queda visible hasta el próximo comando o cierre).
 	lastCmd map[string]cmdResult
 }
@@ -865,7 +865,7 @@ func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) 
 
 // openCmdCmd lanza el comando tipeado con `!` en el directorio del repo con
 // $SHELL -c y captura la salida: queda visible en el detail hasta el
-// próximo comando (S-!: nvim-style, no handoff de terminal, así no se
+// próximo comando (y el anterior, nvim-style, no handoff de terminal, así no se
 // pierde de vista). Aliases y config del shell quedan cargados; las
 // abreviaciones de fish no aplican porque no hay sesión de edición.
 func (m *Model) openCmdCmd(path, command string) tea.Cmd {
@@ -873,10 +873,7 @@ func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = "cmd"
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	shell := userShell()
 	appCtx := m.ctx
 	events := m.events
 	go func() {
@@ -901,14 +898,23 @@ func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	return nil
 }
 
+// userShell resuelve la shell de los handoffs: la del usuario ($SHELL), que es
+// lo que hace que la sesión cargue sus aliases y su rc, y /bin/sh solo si no
+// hay ninguna. Vive aparte porque la usan DOS caminos (el comando `!` y la
+// shell interactiva) y porque el handoff interactivo no se puede ejercitar en
+// un test: tea.ExecProcess no corre sin TTY.
+func userShell() string {
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	return "/bin/sh"
+}
+
 // openShellCmd abre una shell interactiva ($SHELL) en el repo con handoff
 // de terminal: la sesión carga config.fish/.bashrc, así que abreviaciones,
 // aliases y aliases de fish funcionan (tecla ! con input vacío).
 func (m *Model) openShellCmd(path string) tea.Cmd {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	shell := userShell()
 	if _, err := exec.LookPath(shell); err != nil {
 		return m.toastCmd(toastWarning, "shell not found")
 	}
@@ -999,7 +1005,10 @@ func (m *Model) saveCollapsed() {
 	if m.store == nil {
 		return
 	}
-	combined := make(map[string]bool, len(m.collapsed)+len(m.expanded))
+	// Sin pista de capacidad: el mapa lleva un puñado de grupos, y sumarlas
+	// (collapsed+expanded) como pista se convertía en un tamaño NEGATIVO
+	// —panic de runtime— al tener más worktrees expandidos que grupos plegados.
+	combined := make(map[string]bool)
 	for k, v := range m.collapsed {
 		combined[k] = v
 	}

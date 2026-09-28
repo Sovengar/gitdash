@@ -843,3 +843,193 @@ func nonEmptyLines(lines []string) []string {
 	}
 	return out
 }
+
+// syncOffset es pura y su contrato tiene tres bordes: la ventana entera cabe
+// (offset a 0), el cursor justo en la última fila visible (NO debe scrollear:
+// si no, la fila saltaría al moving) y el cursor fuera de la ventana.
+func TestSyncOffsetBordes(t *testing.T) {
+	casos := []struct {
+		nombre             string
+		total, window      int
+		cursor, offsetPrev int
+		want               int
+	}{
+		{"todo cabe", 3, 5, 2, 4, 0},
+		{"todo cabe justo", 5, 5, 4, 3, 0},
+		{"cursor en la primera fila visible", 10, 5, 3, 3, 3},
+		{"cursor en la última fila visible", 10, 5, 7, 3, 3},
+		{"una por debajo de la última", 10, 5, 8, 3, 4},
+		{"cursor por encima de la ventana", 10, 5, 1, 4, 1},
+		{"scrolleado al fondo, cursor al inicio", 10, 5, 0, 5, 0},
+		{"ventana de 1", 10, 1, 4, 3, 4},
+		{"sin filas", 0, 5, 0, 2, 0},
+	}
+	for _, c := range casos {
+		m := newTestModel(t, nil, nil)
+		m.cursor, m.offset = c.cursor, c.offsetPrev
+		m.syncOffset(c.total, c.window)
+		if m.offset != c.want {
+			t.Errorf("%s: offset = %d, want %d (cursor %d, total %d, window %d)",
+				c.nombre, m.offset, c.want, c.cursor, c.total, c.window)
+		}
+	}
+}
+
+// `esc` cancela TODOS los borrados en vuelo, y SOLO esc: cualquier otra tecla
+// sigue su curso y deja el borrado en marcha. La guarda `len > 0` es solo el
+// atajo para no hacer un clear() vacío — como `&&` cortocircuita, no protege
+// nada más.
+func TestEscCancelaLosBorradosYOtrasTeclasNo(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, "enter") // despliega los worktrees
+
+	// Armar y confirmar un borrado deja un token en vuelo.
+	m, _ = press(m, "down") // sub-fila
+	m, _ = press(m, "D")
+	if m.armed == nil {
+		t.Fatal("D no armó el borrado")
+	}
+	m, _ = press(m, "D")
+	if len(m.removeTokens) == 0 {
+		t.Fatal("la confirmación no dejó token en vuelo")
+	}
+	token := m.removeTokens["/tmp/multi"]
+
+	// Una tecla que no sea esc no toca los tokens.
+	m, _ = press(m, "j")
+	if m.removeTokens["/tmp/multi"] != token {
+		t.Errorf("una tecla normal canceló el borrado en vuelo: %v", m.removeTokens)
+	}
+
+	// esc sí los limpia todos.
+	m, _ = press(m, "esc")
+	if len(m.removeTokens) != 0 {
+		t.Errorf("esc no canceló los borrados en vuelo: %v", m.removeTokens)
+	}
+}
+
+// El token de cada intento de borrado sale de un contador MONOTÓNICO y es el
+// propio valor del contador: es lo que descarta el resultado tardío de un
+// intento anterior. Si el contador no avanzara (o retrocediera), dos intentos
+// podrían compartir token y el segundo aceptaría el resultado del primero.
+func TestTokenDeBorradoSaleDeUnContadorMonotonico(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down") // sub-fila del worktree
+
+	antes := m.removeGen
+	m, _ = press(m, "D")
+	if m.armed == nil {
+		t.Fatal("D no armó el borrado")
+	}
+	m, _ = press(m, "D")
+	if m.removeGen <= antes {
+		t.Errorf("removeGen = %d, want > %d (contador monotónico)", m.removeGen, antes)
+	}
+	if tok := m.removeTokens["/tmp/multi"]; tok != m.removeGen {
+		t.Errorf("token = %d, want el contador %d", tok, m.removeGen)
+	}
+}
+
+// El filtro se limpia con esc SOLO si el input está vacío: esc con texto
+// escrito es "cancelo la edición, no el filtro". El input de `/` se siembra con
+// el filtro actual (para poder editarlo), así que "vacío" hay que provocarlo.
+func TestEscLimpiaElFiltroSoloConElInputVacio(t *testing.T) {
+	nuevoModelo := func() (Model, discovery.Project, map[string]gitstatus.Snapshot) {
+		projects, states := fixtureProjects()
+		m := newTestModel(t, projects, states)
+		m.search = "viejo"
+		return m, projects[0], states
+	}
+
+	t.Run("input vacío, esc limpia el filtro", func(t *testing.T) {
+		m, _, _ := nuevoModelo()
+		m, _ = press(m, "/")
+		for range len("viejo") {
+			m, _ = press(m, "backspace")
+		}
+		m, _ = press(m, "esc")
+		if m.search != "" {
+			t.Errorf("esc con el input vacío dejó el filtro %q", m.search)
+		}
+	})
+
+	t.Run("input con texto, esc conserva el filtro", func(t *testing.T) {
+		m, _, _ := nuevoModelo()
+		m, _ = press(m, "/")
+		if m.search != "viejo" {
+			t.Fatalf("el input no se sembró con el filtro actual: %q", m.search)
+		}
+		m, _ = press(m, "esc")
+		if m.search != "viejo" {
+			t.Errorf("esc con texto en el input tiró el filtro: %q", m.search)
+		}
+		if m.searchActive {
+			t.Error("esc con texto en el input dejó la edición activa")
+		}
+	})
+}
+
+// `e` sobre un repo con el marcador roto avisa en vez de abrir el editor: abrir
+// el editor no arregla un TOML inválido y se pierde lo que el usuario iba a
+// cambiar.
+func TestEditorConMarcadorRotoAvisa(t *testing.T) {
+	bueno := proj("ok", "/tmp/ok", true)
+	roto := proj("roto", "/tmp/roto", true)
+	roto.MarkerErr = "línea 3: valor inválido"
+	states := map[string]gitstatus.Snapshot{"/tmp/ok": snapClean(), "/tmp/roto": snapClean()}
+	m := newTestModel(t, []discovery.Project{bueno, roto}, states)
+
+	// En el repo sano sí abre el editor (el comando no es nil).
+	m = cursorOn(t, m, "/tmp/ok")
+	if _, cmd := press(m, "e"); cmd == nil {
+		t.Error("e en un repo sano no lanzó el editor")
+	}
+
+	// En el roto: toast de aviso, y el launcher del editor no se llama.
+	m = cursorOn(t, m, "/tmp/roto")
+	_, cmd := press(m, "e")
+	if cmd == nil {
+		t.Fatal("e con marcador roto no devolvió comando (debería ser el toast)")
+	}
+	// El aviso viaja como notifyMsg en el comando devuelto (los toasts se
+	// pintan en el overlay de View, no en el cuerpo del dashboard).
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "marker error") {
+		t.Errorf("e con marcador roto no avisó: %#v", cmd())
+	}
+}
+
+// El estado del fetch se resuelve por su valor: "fetching" es el único que
+// mantiene el spinner, "failed" muestra el fallo y "ok" limpia la columna. Si la
+// guarda se invirtiera, el spinner se quedaría pegado con un fetch ya terminado.
+func TestFetchStatePorSuValor(t *testing.T) {
+	projects, states := fixtureProjects()
+	path := "/tmp/old-clean"
+
+	for _, c := range []struct {
+		estado       string
+		quiereGiro   bool
+		quiereFallo  bool
+		quiereQuieto bool
+	}{
+		{"fetching", true, false, false},
+		{"failed", false, true, false},
+		{"ok", false, false, true},
+	} {
+		m := newTestModel(t, projects, states)
+		out, _ := m.Update(fetchStateMsg{path: path, state: c.estado, err: "sin red"})
+		plano := stripANSI(out.(Model).renderDashboard())
+		if got := strings.Contains(plano, "fetching"); got != c.quiereGiro {
+			t.Errorf("%s: 'fetching' presente = %v, want %v", c.estado, got, c.quiereGiro)
+		}
+		if got := strings.Contains(plano, "✗ fetch"); got != c.quiereFallo {
+			t.Errorf("%s: fallo presente = %v, want %v", c.estado, got, c.quiereFallo)
+		}
+		if got := strings.Contains(plano, "⟳ fetch"); got != c.quiereGiro {
+			t.Errorf("%s: giro presente = %v, want %v", c.estado, got, c.quiereGiro)
+		}
+		_ = c.quiereQuieto
+	}
+}

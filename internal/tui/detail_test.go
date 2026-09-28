@@ -448,3 +448,89 @@ func TestFichaLasListasCompartenElPresupuesto(t *testing.T) {
 		t.Errorf("las listas siguientes pintaron cabecera sin hueco:\n%s", out)
 	}
 }
+
+// El aviso "N más" cuenta lo que falta en CADA lista, no solo en la de
+// ficheros: los worktrees compiten por el mismo hueco y su cuenta también
+// tiene que cuadrar (3 pintados de 8 → "5 más", no "11 más").
+func TestFichaElAvisoCuentaLosWorktreesQueFaltan(t *testing.T) {
+	path := "/tmp/api"
+	snap := snapClean()
+	const total = 8
+	for i := 0; i < total; i++ {
+		snap.Worktrees = append(snap.Worktrees, gitstatus.Worktree{
+			Path:   path + "/wt",
+			Branch: fmt.Sprintf("feat-%d", i),
+			Head:   "abc1234",
+		})
+	}
+	m, r := detailRowWith(t, path, snap)
+
+	// Con hueco para la cabecera + 3 elementos, se pintan 3 y avisan 5.
+	rows := detailHeadLines + minListBlockLines + 4
+	out := stripANSI(m.renderDetail(r, rows))
+	if !strings.Contains(out, fmt.Sprintf("worktrees (%d)", total)) {
+		t.Errorf("la cabecera no cuenta los worktrees:\n%s", out)
+	}
+	if want := fmt.Sprintf("… %d más", total-3); !strings.Contains(out, want) {
+		t.Errorf("el aviso de worktrees no dice %q:\n%s", want, out)
+	}
+}
+
+// La lista de ficheros entra sola con el hueco mínimo: si no hay worktrees que
+// se lo queden antes, son ellos los que la usan.
+func TestFichaElHuecoMinimoLoGastaLaPrimeraLista(t *testing.T) {
+	path := "/tmp/api"
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, r := detailRowWith(t, path, snap) // sin worktrees ni commits
+
+	// avail == 2 justo: la cabecera de la lista entra (y no hay dónde pintar el
+	// elemento). Con la guarda "> " en vez de ">=" la lista desaparecería entera.
+	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines))
+	if !strings.Contains(out, "files (1)") {
+		t.Errorf("con el hueco mínimo no salió la cabecera de ficheros:\n%s", out)
+	}
+}
+
+// La ficha mínima de un worktree nombra su repo padre cuando lo tiene: sin esa
+// línea, un worktree suelto no dice de qué repo es.
+func TestFichaMinimaWorktreeNombraSuRepo(t *testing.T) {
+	wt := gitstatus.Worktree{Path: "/tmp/multi/wt-feat", Branch: "feat", Head: "abc1234"}
+	p := discovery.Project{Path: "/tmp/multi", Name: "multi", HasRepo: true}
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{p.Path: snapClean()})
+	e := tableEntry{kind: kindWorktree, wt: wt, parent: "/tmp/multi"}
+
+	if out := stripANSI(m.renderWorktreeDetail(e, 20)); !strings.Contains(out, "multi") {
+		t.Errorf("la ficha no nombró el repo padre:\n%s", out)
+	}
+	// Sin padre conocido, esa línea no se inventa.
+	e.parent = ""
+	if out := stripANSI(m.renderWorktreeDetail(e, 20)); strings.Contains(out, "repo ") {
+		t.Errorf("sin repo padre se pintó la línea repo:\n%s", out)
+	}
+}
+
+// orDash es el guion de los datos ausentes (head de un worktree, upstream…):
+// vacío es "-", cualquier valor es el valor.
+func TestOrDash(t *testing.T) {
+	if got := orDash(""); got != "-" {
+		t.Errorf("orDash(\"\") = %q, want -", got)
+	}
+	if got := orDash("abc1234"); got != "abc1234" {
+		t.Errorf("orDash = %q, want el valor", got)
+	}
+}
+
+// Igual que el hueco mínimo de ficheros, el de commits: si no hay listas antes
+// que se lo queden, son los commits los que pueden usar el hueco mínimo entero.
+func TestFichaElHuecoMinimoParaLosCommits(t *testing.T) {
+	path := "/tmp/api"
+	snap := snapClean()
+	snap.Commits = []gitstatus.Commit{{Sha: "abc1234", When: 1700000000, Subject: "fix"}}
+	m, r := detailRowWith(t, path, snap) // sin worktrees ni ficheros
+
+	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines))
+	if !strings.Contains(out, "commits") {
+		t.Errorf("con el hueco mínimo no salió la cabecera de commits:\n%s", out)
+	}
+}

@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"gitdash/internal/cmdlog"
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/state"
+	"gitdash/internal/testutil"
 )
 
 func TestRunShellCmdCapturaSalidaYExit(t *testing.T) {
@@ -241,4 +245,295 @@ func lastNonEmpty(lines []string) string {
 		}
 	}
 	return ""
+}
+
+// Un handoff (lazygit, editor, shell) que falla tiene que ENSEÑAR el motivo: el
+// toast es lo único que ve el usuario, porque la terminal ya se ha cerrado. Con
+// la guarda invertida, un handoff correcto avisaría de un error que no hubo, y
+// uno fallido no diría nada.
+func TestHandoffConErrorAvisa(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+
+	for _, c := range []struct {
+		nombre   string
+		err      error
+		quiere   string
+		quiereNo string
+	}{
+		{"fallido avisa el motivo", errHandoff("no such file or directory"), "command", ""},
+		{"correcto no avisa nada", nil, "", "command:"},
+	} {
+		out, _ := m.Update(execDoneMsg{path: "/tmp/old-clean", action: "lazygit", err: c.err})
+		plano := stripANSI(out.(Model).View().Content)
+		if c.quiere != "" && !strings.Contains(plano, c.quiere) {
+			t.Errorf("%s: no se ve %q:\n%s", c.nombre, c.quiere, plano)
+		}
+		if c.quiereNo != "" && strings.Contains(plano, c.quiereNo) {
+			t.Errorf("%s: avisó %q sin motivo:\n%s", c.nombre, c.quiereNo, plano)
+		}
+	}
+}
+
+type errHandoff string
+
+func (e errHandoff) Error() string { return string(e) }
+
+// El recuento del fetch distingue lo que fue de lo que falló: un fetch que
+// falla en un repo no puede terminar diciendo "todo ok". Los contadores se
+// publican en fetchDoneMsg, que es lo que la barra y el toast resumen.
+func TestFetchDoneReportaOkYFailed(t *testing.T) {
+	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 2, failed: 1})
+	m := out.(Model)
+	plano := stripANSI(m.View().Content)
+	if !strings.Contains(plano, "2 ok") && !strings.Contains(plano, "ok 2") {
+		t.Errorf("el resumen no dice cuántos fueron bien:\n%s", plano)
+	}
+	if !strings.Contains(plano, "1 failed") && !strings.Contains(plano, "failed 1") {
+		t.Errorf("el resumen no dice cuántos fallaron:\n%s", plano)
+	}
+	// Sin fallos no hay línea de fallo: la tabla está quieta.
+	out, _ = newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 3})
+	plano = stripANSI(out.(Model).View().Content)
+	if strings.Contains(plano, "failed") {
+		t.Errorf("sin fallos se pintó la línea de fallo:\n%s", plano)
+	}
+}
+
+// El recuento del fetch distingue lo que fue de lo que falló: con un repo roto
+// entre los que se barren, el resumen tiene que decir "1 failed", no "todo ok".
+// Los contadores se publican en fetchDoneMsg, que es lo que la barra resume.
+func TestFetchAllCuentaLosQueFallan(t *testing.T) {
+	bueno, _ := testutil.NewRepo(t, false)
+	roto, _ := testutil.NewRepo(t, false)
+	testutil.BreakGit(t, roto) // el fetch de este repo falla
+	projects := []discovery.Project{
+		proj("bueno", bueno, true),
+		proj("roto", roto, true),
+	}
+	states := map[string]gitstatus.Snapshot{bueno: snapClean(), roto: snapClean()}
+	m := newTestModel(t, projects, states)
+
+	m, _ = press(m, "F") // fetch_all
+	deadline := time.After(30 * time.Second)
+	var done fetchDoneMsg
+	for done.ok == 0 && done.failed == 0 {
+		select {
+		case ev := <-m.events:
+			if fd, ok := ev.(fetchDoneMsg); ok {
+				done = fd
+			}
+		case <-deadline:
+			t.Fatal("no se observó fetchDoneMsg")
+		}
+	}
+	if done.ok != 1 || done.failed != 1 {
+		t.Errorf("fetchDoneMsg = %+v, want ok=1 failed=1", done)
+	}
+}
+
+// El plegado persistido se guarda como un mapa único: las claves de grupo tal
+// cual y los worktrees expandidos bajo su prefijo. Un repo expandido sin ningún
+// grupo plegado es el caso donde una pista de capacidad mal calculada se
+// convertiría en un tamaño negativo.
+func TestSaveCollapsedConMasExpandidosQuePlegados(t *testing.T) {
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m.expanded = map[string]bool{"/tmp/multi": true, "/tmp/otro": true, "/tmp/tercero": true}
+	m.collapsed = map[string]bool{} // ningún grupo plegado: hint negativo si se resta
+
+	m.saveCollapsed()
+
+	got := m.store.LoadCollapsed()
+	if len(got) != 3 {
+		t.Fatalf("persistidos = %v, want 3 claves", got)
+	}
+	for _, path := range []string{"/tmp/multi", "/tmp/otro", "/tmp/tercero"} {
+		key := state.WorktreePrefix + path
+		if !got[key] {
+			t.Errorf("falta la clave del worktree expandido %q: %v", key, got)
+		}
+	}
+}
+
+// Una acción de git CORRIENDO de verdad: el ciclo completo tiene que cerrar —
+// el comando ejecuta con un timeout que no lo mata de entrada, publica su
+// resultado con el motivo real de git y, si fue bien, re-colecciona el estado
+// del repo. Un timeout de 0 (o un "solo re-colecta si falló") se ven aquí.
+func TestAccionDeGitCorreYReColecciona(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)         // con upstream
+	testutil.PushUpstreamCommits(t, origin, 1, "up") // el repo local está detrás
+	testutil.FetchLocal(t, dir)                      // con eso, ff limpio
+	states := map[string]gitstatus.Snapshot{dir: snapClean()}
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)}, states)
+	m = cursorOn(t, m, dir)
+
+	m, _ = press(m, "p") // arma el selector
+	m, _ = press(m, "p") // variante default → git pull
+
+	// El re-collect va DESPUÉS del resultado, en la misma goroutine: hay que
+	// seguir leyendo después de ver la acción.
+	deadline := time.After(60 * time.Second)
+	var acc *actionMsg
+	var huboStatus bool
+	for acc == nil || !huboStatus {
+		select {
+		case ev := <-m.events:
+			switch e := ev.(type) {
+			case actionMsg:
+				cp := e
+				acc = &cp
+			case statusMsg:
+				huboStatus = true
+			}
+		case <-deadline:
+			t.Fatalf("la acción no cerró el ciclo (acc=%v status=%v)", acc != nil, huboStatus)
+		}
+	}
+	if acc.err != "" {
+		t.Fatalf("un pull que debía integrar falló: %q (output %q)", acc.err, acc.output)
+	}
+	if acc.kind != "pull" {
+		t.Errorf("kind = %q, want pull", acc.kind)
+	}
+	if !huboStatus {
+		t.Error("tras una acción correcta no se re-colectó el estado del repo")
+	}
+}
+
+// Un pull --rebase que choca no es un fallo limpio: deja el rebase a medias. El
+// mensaje tiene que llevar esa marca (rebaseInProgress), porque es lo que
+// cambia el consejo de "reintenta" por "resuelve el rebase". El flag se calcula
+// SOLO si la acción falló y era un pull: con la guarda al revés se consultaría
+// en los pulls correctos (donde nunca hay rebase) y nunca en los que chocan.
+func TestPullQueChocaMarcaElRebaseAMedias(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	// El remoto cambia un fichero y el local el mismo con otro contenido: el
+	// pull --rebase no puede reconciliarlo.
+	testutil.PushUpstreamFile(t, origin, "conflicto.txt", "remoto", "remote")
+	testutil.CommitFiles(t, dir, map[string]string{"conflicto.txt": "local"}, "local")
+	testutil.FetchLocal(t, dir)
+	// Y el rebase a medias ya presente (lo que deja el intento anterior).
+	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]gitstatus.Snapshot{dir: snapClean()}
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)}, states)
+	m = cursorOn(t, m, dir)
+
+	m, _ = press(m, "p")
+	m, _ = press(m, "r") // variante rebase explícita
+
+	deadline := time.After(60 * time.Second)
+	var acc *actionMsg
+	for acc == nil {
+		select {
+		case ev := <-m.events:
+			if e, ok := ev.(actionMsg); ok {
+				cp := e
+				acc = &cp
+			}
+		case <-deadline:
+			t.Fatal("el pull no publicó su resultado")
+		}
+	}
+	if acc.err == "" {
+		t.Fatal("un pull en conflicto no falló (el fixture no choca)")
+	}
+	if !acc.rebaseInProgress {
+		t.Errorf("rebaseInProgress = false con rebase a medias: %+v", acc)
+	}
+}
+
+// La shell de `!` y del handoff es la del usuario ($SHELL), no /bin/sh por
+// defecto: es lo que hace que sus aliases y su configuración carguen. El argv
+// que queda en el command log es lo que lo demuestra, así que se mira ahí.
+func TestShellDelHandoffEsLaDelUsuario(t *testing.T) {
+	// La ruta del repo tiene que existir: la acción corre `sh -c` con ese cwd.
+	dir := t.TempDir()
+	proyectos, states := fixtureProjects()
+	states[dir] = snapClean()
+	proyectos = append(proyectos, proj("cwd", dir, true))
+
+	escribir := func(m Model, texto string) Model {
+		for _, k := range texto {
+			m, _ = press(m, string(k))
+		}
+		return m
+	}
+
+	t.Run("con SHELL en el entorno", func(t *testing.T) {
+		bash := filepath.Join(t.TempDir(), "mishell")
+		if err := os.WriteFile(bash, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SHELL", bash)
+		m := newTestModel(t, proyectos, states)
+		rec := cmdlog.Active()
+		t.Cleanup(func() { cmdlog.SetRecorder(nil) })
+		m = cursorOn(t, m, dir)
+
+		m, _ = press(m, m.cfg.KeyFor("command"))
+		if !m.cmdOpen {
+			t.Fatal("la tecla ! no abrió el input de comando")
+		}
+		m = escribir(m, "hola")
+		m, _ = press(m, "enter") // lanza el comando con la shell del usuario
+		assertUltimoArgvShell(t, rec, bash, "cmd")
+	})
+
+	t.Run("sin SHELL, cae a /bin/sh", func(t *testing.T) {
+		t.Setenv("SHELL", "")
+		m := newTestModel(t, proyectos, states)
+		rec := cmdlog.Active()
+		t.Cleanup(func() { cmdlog.SetRecorder(nil) })
+		m = cursorOn(t, m, dir)
+
+		m, _ = press(m, m.cfg.KeyFor("command"))
+		m = escribir(m, "hola")
+		m, _ = press(m, "enter")
+		assertUltimoArgvShell(t, rec, "/bin/sh", "cmd")
+	})
+
+}
+
+// userShell es la resolución compartida por los DOS handoffs (`!` con texto y
+// la shell interactiva del input vacío). El interactivo no se puede ejercitar
+// aquí —tea.ExecProcess no corre sin TTY—, así que la función pura es la que
+// ata la garantía para los dos caminos.
+func TestUserShell(t *testing.T) {
+	t.Run("con SHELL", func(t *testing.T) {
+		t.Setenv("SHELL", "/opt/homebrew/bin/fish")
+		if got := userShell(); got != "/opt/homebrew/bin/fish" {
+			t.Errorf("userShell = %q, want la del usuario", got)
+		}
+	})
+	t.Run("sin SHELL", func(t *testing.T) {
+		t.Setenv("SHELL", "")
+		if got := userShell(); got != "/bin/sh" {
+			t.Errorf("userShell = %q, want /bin/sh", got)
+		}
+	})
+}
+
+// assertUltimoArgvShell comprueba la shell con la que se registró el handoff de
+// la acción indicada (`cmd` para `!`, `shell` para la interactiva).
+func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, accion string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		for _, e := range rec.Entries() {
+			if e.Action != accion || len(e.Argv) == 0 {
+				continue
+			}
+			if e.Argv[0] != want {
+				t.Errorf("argv[0] = %q, want la shell %q", e.Argv[0], want)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no se registró el handoff %q con la shell %q", accion, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

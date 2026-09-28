@@ -720,10 +720,11 @@ func (m Model) removePrompt() string {
 // que aquí no hay una vista alternativa que componer; el command log sí lo es
 // (toma el cuerpo entero) y lo resuelve renderDashboard.
 func (m Model) View() tea.View {
-	content := m.renderDashboard()
-	if toasts := m.toasts.blocksFor(m.width); len(toasts) > 0 {
-		content = overlayToasts(content, toasts, m.width, m.height, m.toastReserve())
-	}
+	// Sin la guarda "if hay toasts": overlayToasts ya es un no-op con la lista
+	// vacía (devuelve la base intacta), y duplicar la comprobación era un sitio
+	// más donde un ">=" escondía la diferencia entre "no hay nada que pintar" y
+	// "pintar sobre la base sin cambios".
+	content := overlayToasts(m.renderDashboard(), m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
@@ -762,10 +763,9 @@ func (m *Model) syncOffset(total, window int) {
 		m.offset = 0
 		return
 	}
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+window {
-		m.offset = m.cursor - window + 1
-	}
+	// Dos clamps en vez de dos guardas: el cursor nunca por encima de la
+	// primera fila visible, ni por debajo de la última. El borde "cursor justo
+	// en la primera fila" reasignaría el mismo valor, así que la guarda sobra.
+	m.offset = min(m.offset, m.cursor)
+	m.offset = max(m.offset, m.cursor-window+1)
 }

@@ -21,7 +21,7 @@
 #     capacidad, guards cuyo borde reasigna el mismo valor). Un test no puede
 #     matar esas: lo honesto es quitar el sitio mutado, no allowlistarlo.
 #
-# Las 11 entradas de abajo son las que quedan, todas con demostración de por qué
+# Las 16 entradas de abajo son las que quedan, todas con demostración de por qué
 # no son matables con un test.
 # ---------------------------------------------------------------------------
 
@@ -75,6 +75,40 @@ CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
 #   ella un cambio futuro del ladder que bajara kind a 0 pintaría un "KIND" de
 #   ancho 0 en vez de omitir la columna.
 
+# --- tui/table.go --------------------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/table.go:267
+CONDITIONALS_BOUNDARY internal/tui/table.go:270
+#   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
+#   negación de la comparación que devuelve, así que dentro de la rama `sa` y
+#   `sb` son distintos por construcción: `>` y `>=` dan lo mismo. Idéntico con
+#   LastCommit (línea 270). La TERCERA clave (el nombre, línea 272) sí está
+#   cubierta: ahí no hay guarda que lacompare antes, y un `<=` invierte el orden
+#   de dos repos con el mismo nombre.
+
+# --- tui/update.go -------------------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/update.go:259
+#   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
+#   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
+#   una operación real sobre tokens en vuelo. Para el resto de teclas no se
+#   ejecuta nada, diga lo que diga la guarda. Con `>= 0` el resultado es idéntico
+#   en los tres casos (con tokens, sin tokens, y tecla distinta de esc).
+
+# --- tui/app.go ----------------------------------------------------------
+CONDITIONALS_NEGATION internal/tui/app.go:368
+CONDITIONALS_NEGATION internal/tui/app.go:369
+#   Las dos guardas de nil del store en New: el store lo crea state.NewStore()
+#   dentro del propio New y su error se descarta, así que llegar a New con un
+#   store nil no tiene camino desde la app (no hay constructor que lo acepte).
+#   Invertir la primera cargaría el estado con un store inexistente (panic) y la
+#   segunda entraría con persisted nil. Sin costura de inyección no hay forma de
+#   observar ninguno de los dos: no es un hueco de test, es unreachable.
+
+CONDITIONALS_NEGATION internal/tui/app.go:955
+#   `if cmdlog.Active() == nil { return }` en logIntent. Invertida, la función
+#   llamaría a cmdlog.RecordIntent sin recorder, y RecordIntent ES un no-op sin
+#   recorder (`if current.Load() != nil`). Dos capas de guarda para lo mismo: la
+#   exterior es una optimización, la interior la garantía.
+
 # --- gitstatus/status.go --------------------------------------------------
 ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   El tope de workers del pool (`runtime.NumCPU()*4`). El clamp solo limita
@@ -86,7 +120,8 @@ ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   existen: ahora es un clamp min/max.)
 
 # ---------------------------------------------------------------------------
-# Backlog real, aún sin test (NO se allowlistean: se van cerrando uno a uno):
-#   internal/tui/app.go      ~13  guardas de acciones, handoffs y scroll
-#   internal/tui/table.go    ~18  anchos de columna, celdas y scroll
-#   internal/tui/update.go   ~12  enrutado de teclas y estados armados
+# Backlog real, aún sin test: ninguno. Los 43 mutantes vivos de app.go, table.go
+# y update.go se cerraron con tests (orden de filas, reparto de columnas en el
+# encaje exacto, celdas, scroll, fetchAll con recuento de fallos, ciclo completo
+# de una acción con git real, shell del usuario, token de borrado, esc) y con
+# reescrituras donde la mutación era identidad.
