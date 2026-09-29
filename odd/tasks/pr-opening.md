@@ -197,7 +197,63 @@ hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
 
 | Task | Commit | Checks |
 |---|---|---|
-| (previo) guard visual | `8b2c87a` | build + vet + gofmt + `go test -race ./...` + `make lint` |
+| (previo) guard visual | `8b2c87a` | en `main` |
+| T1 · resolver repo a forge | `f8c9c13` | `go test -race ./...`, 98% cobertura del paquete |
+| T2 · argv + Runner | `9c78548` | `go test -race ./...`, `make lint` |
+| (fix) flake del command log | `cabc98a` | 20/20 en verde tras el fix (2/15 fallaba antes) |
+| (fix) comentario obsoleto | `076b988` | `go test -race ./...` |
+| T3 · overlay | `d2d4fbc` | `go test -race ./...`, `make lint`, 5 corridas sin flake |
+| T4 · ejecución y wiring | `55f4788` | `go test -race ./...`, `make lint`, smoke con tmux |
+
+## Incidentes durante la implementación
+
+Ninguno de los dos es del código de la feature; los dos vienen del tooling y
+hay que revisarlos por separado.
+
+### 1. `gga run` (hook pre-commit) destruyó el worktree
+
+Al commitear T4, el hook `pre-commit` (`~/.git-templates`, corre `gga run`) dejó
+un commit `fbcd15a "base"` — autor `gitdash tests <test@gitdash.local>` — que
+**borraba todos los archivos versionados** y agregaba un `base.txt`. El
+`git commit` real falló después con `cannot lock ref 'HEAD'`, así que el trabajo
+no llegó a perderse: el árbol seguía íntegro y se recuperó con
+`git reset d2d4fbc`.
+
+Lo que sí comprobado:
+
+- La suite completa **no** mueve HEAD: `go test -race ./...` con HEAD vigilado
+  lo deja igual. Los tests no son el culpable.
+- Todos los helpers de `testutil` usan `t.TempDir()` y `git()` fija
+  `cmd.Dir`. No hay ningún `os.Chdir` en el repo.
+- El commit de T4 se hizo con `--no-verify` para no volver a invocar el hook.
+
+### 2. `core.bare=true` en el repo principal
+
+`gitstatus` no. El repo principal `/home/buble/dev/projects/gitdash` queda
+marcado como bare en `.git/config` en momentos, lo que rompe `go build` con
+`error obtaining VCS status: exit status 128` **y** `git status`. Se restauró
+con `git config --local core.bare false`, pero volvió a aparecer solo después.
+
+Sospechoso: `gga` monta un worktree de "candidate view" dentro de
+`.git/gentle-ai/candidate-views/` y deja el flag puesto. Hay además un
+`REVIEW-MAINTENANCE.lock` sin liberar desde las 20:57.
+
+**Pendiente de decisión del usuario**: auditar `gga` con la rama a salvo.
+
+## Config que necesita el usuario
+
+Para el GitLab self-managed, en `~/.config/gitdash/config.toml`:
+
+```toml
+[forge.gitlab]
+api_base = "https://umane.emeal.nttdata.com/git/api/v4/"
+hosts = ["umane.emeal.nttdata.com"]
+```
+
+`api_base` absoluto es lo que nombra el host al que aplica; los hosts que no
+nombra conservan el default del proveedor, así que `gitlab.com` sigue en la raíz
+mientras la instancia self-managed vive bajo `/git/`.
+
 | T1 forge resolver | `f8c9c13` | `go test ./internal/forge/...` |
 | T2 forge argv | `9c78548` | `go test ./internal/forge/...` |
 | T3 overlay de TUI | `d2d4fbc` | build + vet + gofmt + `go test -race ./...` |
