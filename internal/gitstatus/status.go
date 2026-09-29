@@ -39,7 +39,7 @@ type Snapshot struct {
 // Worktree es un worktree registrado del repo, listo para el detalle.
 type Worktree struct {
 	Path   string // ruta absoluta del worktree
-	Branch string // refs/heads/x o "" si detached/bare
+	Branch string // nombre de la rama ("x"), o "" si detached/bare
 	Head   string // sha corto de HEAD ("" si vacío/prunable)
 }
 
