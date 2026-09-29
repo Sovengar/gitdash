@@ -85,15 +85,7 @@ func runPrint(cfg config.Config) {
 	}
 
 	// mismo orden que la TUI: atención-primero, actividad, nombre
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].score != rows[j].score {
-			return rows[i].score > rows[j].score
-		}
-		if rows[i].lastCommit != rows[j].lastCommit {
-			return rows[i].lastCommit > rows[j].lastCommit
-		}
-		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
-	})
+	sortPrintRows(rows)
 
 	// GROUP se conserva en print (tabla plana, sin headers de
 	// grupo); WT = working tree; WTS = contador de worktrees (renombrado
@@ -106,6 +98,23 @@ func runPrint(cfg config.Config) {
 			r.name, r.group, r.branch, r.state, r.upDown, r.sync, r.wt, r.activity, r.path)
 	}
 	_ = w.Flush()
+}
+
+// sortPrintRows ordena la tabla como la TUI: atención-primero (score), luego el
+// commit más reciente, luego el nombre sin distinguir mayúsculas. Vive aparte
+// porque es la única forma de probar el orden con filas fabricate: sobre repos
+// reales los commits caen en el mismo segundo y el desempate por fecha no se
+// puede fijar.
+func sortPrintRows(rows []printRow) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].score != rows[j].score {
+			return rows[i].score > rows[j].score
+		}
+		if rows[i].lastCommit != rows[j].lastCommit {
+			return rows[i].lastCommit > rows[j].lastCommit
+		}
+		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
+	})
 }
 
 // hasProject reporta si algún proyecto descubierto tiene esa ruta.
@@ -147,14 +156,19 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	if s.Dirty() == 0 {
 		return ""
 	}
-	// mismo formato que dirtyTail de la TUI: el 0 de tracked se
-	// omite → solo untracked es "?1", no "0 ?1".
+	// mismo formato que dirtyTail de la TUI: el 0 de tracked se omite y el
+	// separador solo aparece si hay algo delante → solo untracked es "?1", no
+	// "0 ?1" ni " ?1" (con el espacio inicial la celda se desalinea y parece
+	// que hay un número que no existe).
 	var b strings.Builder
 	if s.TrackedChanges > 0 {
 		fmt.Fprintf(&b, "%d", s.TrackedChanges)
 	}
 	if s.Untracked > 0 {
-		fmt.Fprintf(&b, " ?%d", s.Untracked)
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, "?%d", s.Untracked)
 	}
 	return b.String()
 }

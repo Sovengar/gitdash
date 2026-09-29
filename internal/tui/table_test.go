@@ -347,3 +347,69 @@ func TestSyncOfYNombreResuelvenElPathQueCorresponde(t *testing.T) {
 		}
 	}
 }
+
+// worktreeIndent es la sangría que las sub-filas suman a la de las filas de
+// repo: el glyph "  ↳ " va dentro de la celda NAME, y la caja se indenta una
+// celda más para que el worktree se lea como hijo de su repo.
+const worktreeIndent = 2
+
+// La cabecera y las filas deben PINTAR LAS MISMAS COLUMNAS. Es el invariante
+// que sostiene la legibilidad de la tabla: si la fila calculara su ancho con
+// otro criterio que la cabecera, cada dato caería debajo de una columna que no
+// existe (o la fila se saldría del borde, que es lo que tapa el box).
+func TestCabeceraYFilasCabenLasMismasColumnas(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	entries := m.entries()
+
+	for _, width := range []int{24, 30, 40, 55, 60, 80, 120, 200} {
+		m.width = width
+		// La fila se compone con 2 de sangría + el ancho de sus columnas; la
+		// cabecera, solo con el de las suyas. Si eligen distinto número de
+		// columnas, los anchos no cuadran.
+		anchoCabecera := len([]rune(headerColumns(width)))
+		for _, e := range entries {
+			if e.kind != kindRepo {
+				continue
+			}
+			fila := stripANSI(m.renderRow(e.r, false))
+			if got := len([]rune(fila)) - 2; got != anchoCabecera {
+				t.Errorf("width=%d: la fila de %s compone %d celdas y la cabecera %d",
+					width, e.r.project.Name, got, anchoCabecera)
+			}
+		}
+	}
+
+	// La sub-fila de worktree compone las suyas por su cuenta (con su sangría
+	// y su glyph), así que necesita su propio fixture: un modelo sin worktrees
+	// no tiene entradas de ese tipo y la comprobación no miraría nada.
+	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	mw := newTestModel(t, []discovery.Project{p}, st)
+	mw, _ = press(mw, "enter") // despliega los worktrees
+	var vistas int
+	for _, e := range mw.entries() {
+		if e.kind != kindWorktree {
+			continue
+		}
+		vistas++
+		for _, width := range []int{24, 40, 60, 80, 120} {
+			mw.width = width
+			fila := stripANSI(mw.renderWorktreeRow(e.wt, false))
+			// La sub-fila es la fila de repo con la misma sangría ("  ") más el
+			// glyph ↳ ya dentro de NAME, así que mide lo mismo que la suma de las
+			// columnas + 2. Comparar contra la suma (y no contra la longitud de
+			// otra fila) es lo que ata este ancho al reparto.
+			esperado := worktreeIndent
+			for _, c := range tableColumns[:fitColumns(width-4)] {
+				esperado += c.width
+			}
+			if len([]rune(fila)) != esperado {
+				t.Errorf("width=%d: la fila de worktree mide %d, want %d (columnas + sangría): %q",
+					width, len([]rune(fila)), esperado, fila)
+			}
+		}
+	}
+	if vistas == 0 {
+		t.Fatal("el fixture no produjo sub-filas de worktree: la comprobación sería vacía")
+	}
+}

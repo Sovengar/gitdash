@@ -1033,3 +1033,31 @@ func TestFetchStatePorSuValor(t *testing.T) {
 		_ = c.quiereQuieto
 	}
 }
+
+// El panel de preview también se reparte cuando hay un filtro activo, y ahí el
+// alto libre depende de la sección de filtro: si esa resta no contara, el panel
+// se llevaría altura que no existe y la caja se saldría de la terminal. Con
+// filtro, el panel tiene que ENTRAR en lo que queda.
+func TestPreviewConFiltroActivoRespetaElAlto(t *testing.T) {
+	for _, h := range []int{24, 30, 40, 41, 50, 60, 80} {
+		lay := computeLayout(h, true, defaultHintLines, false)
+		libre := h - (tableChrome + filterSectionLines + statsSectionLines +
+			keybindsChrome + defaultHintLines + previewChrome)
+		if lay.previewLines > libre {
+			t.Errorf("h=%d con filtro: el panel pide %d de %d líneas libres",
+				h, lay.previewLines, libre)
+		}
+		// Y con hueco, la ficha más lo que la acompaña llenan la terminal
+		// EXACTA: si el alto libre no descontara la sección de filtro, el panel
+		// se llevaría celdas que el filtro ya ocupa y la suma no quadraría.
+		usado := tableChrome + filterSectionLines + statsSectionLines +
+			keybindsChrome + defaultHintLines + previewChrome
+		if !lay.showStats {
+			usado -= statsSectionLines
+		}
+		if total := usado + lay.previewLines + lay.bodyLines; total != h {
+			t.Errorf("h=%d con filtro: las secciones suman %d, want %d (el panel se llevo celdas del filtro)",
+				h, total, h)
+		}
+	}
+}

@@ -479,18 +479,28 @@ func TestWorktreeFetchPath(t *testing.T) {
 
 	m, _ = press(m, "f")
 	// El batch corre en goroutine: esperamos el evento con el path del worktree.
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(30 * time.Second)
+	visto := false
 	for {
 		select {
 		case ev := <-m.events:
-			if fs, ok := ev.(fetchStateMsg); ok && filepath.Clean(fs.path) == "/tmp/wt-a" {
-				if fs.state != "fetching" {
-					t.Errorf("primer estado = %q, want fetching", fs.state)
+			switch e := ev.(type) {
+			case fetchStateMsg:
+				if filepath.Clean(e.path) == "/tmp/wt-a" && e.state == "fetching" && !visto {
+					visto = true
+				}
+			case fetchDoneMsg:
+				// El lote termina aquí: sin esperar a fetchDoneMsg el test
+				// deja la goroutine viva y sus lecturas de git caen en el
+				// recorder GLOBAL del test siguiente, que falla por lo que hizo
+				// este.
+				if !visto {
+					t.Error("no se observó fetchStateMsg fetching para /tmp/wt-a")
 				}
 				return
 			}
 		case <-deadline:
-			t.Fatal("no se observó fetchStateMsg para el path del worktree")
+			t.Fatal("el fetch no terminó (no se observó fetchDoneMsg)")
 		}
 	}
 }

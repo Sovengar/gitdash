@@ -13,19 +13,75 @@
 #
 # ---------------------------------------------------------------------------
 # ESTADO
-# Partimos de 172 mutantes vivos en 157 líneas. Cerrados ~130:
-#   - con tests nuevos donde el hueco era real (bordes exactos, claves ausentes
-#     vs vacías, encajes justos de alto y ancho, ventanas de scroll),
-#   - con reescrituras min/max donde la mutación es IDENTIDAD por construcción
-#     (truncar a un ancho >= el suyo, rellenar con Repeat(s, 0), clamps de
-#     capacidad, guards cuyo borde reasigna el mismo valor). Un test no puede
-#     matar esas: lo honesto es quitar el sitio mutado, no allowlistarlo.
+# De 172 mutantes vivos a 18 allowlistados. Las dos clases con las que hay que
+# decidir, que se repitieron en todo el repo:
 #
-# Las 16 entradas de abajo son las que quedan, todas con demostración de por qué
-# no son matables con un test.
+#   1. Hueco real de test -> se tapa con un test. Ejemplos: el valor exacto de
+#      un borde, el ancho que compone una celda, el reparto de un presupuesto.
+#   2. Mutación que es IDENTIDAD por construcción -> ningún test puede matarla,
+#      porque no hay bug que matar. Ahí lo honesto NO es allowlistarlo: es
+#      quitar el sitio mutado (reescribir el guard, borrarlo si era inútil) o,
+#      si la forma del código lo exige, allowlistarlo con la demostración.
+#
+# Cada entrada de abajo lleva esa demostración. El orden es por fichero.
 # ---------------------------------------------------------------------------
 
-# --- tui/detail.go --------------------------------------------------------
+# --- cmd/gitdash/print.go ------------------------------------------------
+ARITHMETIC_BASE cmd/gitdash/print.go:111
+#   El score del comparador de sortPrintRows: `if score != score { return score
+#   > score }`. La guarda ES la negación de la comparación, así que dentro de la
+#   rama los dos score son distintos por construcción y `>` y `>=` coinciden.
+#   (La TUI tiene el mismo patrón en rowLess; ver más abajo.) La TERCERA clave
+#   —el nombre— sí está cubierta con test: no hay guarda que la compare antes y
+#   un `<=` invierte el orden de dos repos con el mismo `name`. Y ESO tampoco es
+#   un contrato: sort.Slice no es estable, así que el orden de dos filas que
+#   empatan en las tres claves no está garantizado ni en el código original (por
+#   eso el test del orden no afirma nada sobre ellas: afirmarlo sería atar el test
+#   a una propiedad que el producto no tiene).
+
+# --- internal/tui/app.go -------------------------------------------------
+CONDITIONALS_NEGATION internal/tui/app.go:361
+#   `if path, err := cache.Path(); err == nil { m.projects = cache.Load(...) }`.
+#   Invertida, la carga ocurre con una ruta que no se pudo resolver. cache.Load
+#   valida cada entrada contra la existencia del marcador en disco, así que con
+#   una ruta inválida no puede devolver ningún proyecto: el resultado es el
+#   mismo (m.projects vacío, que el scan de Init repuebla acto seguido). La
+#   mutación solo hace una lectura inútil. No hay forma de observar la diferencia
+#   sin interceptar os.UserConfigDir.
+
+CONDITIONALS_NEGATION internal/tui/app.go:368
+CONDITIONALS_NEGATION internal/tui/app.go:369
+#   Las dos guardas de nil del store en New: el store lo crea state.NewStore()
+#   dentro del propio New y su error se descarta, así que llegar a New con un
+#   store nil no tiene camino desde la app (no hay constructor que lo acepte).
+#   Invertir la primera cargaría el estado con un store inexistente (panic) y la
+#   segunda entraría con persisted nil. Sin costura de inyección no hay forma de
+#   observar ninguno de los dos: no es un hueco de test, es unreachable.
+
+CONDITIONALS_NEGATION internal/tui/app.go:955
+#   `if cmdlog.Active() == nil { return }` en logIntent. Invertida, la función
+#   llamaría a cmdlog.RecordIntent sin recorder, y RecordIntent ES un no-op sin
+#   recorder (`if current.Load() != nil`). Dos capas de guarda para lo mismo: la
+#   exterior es una optimización, la interior la garantía.
+
+# --- internal/tui/table.go -----------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/table.go:267
+CONDITIONALS_BOUNDARY internal/tui/table.go:270
+#   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
+#   negación de la comparación que devuelve, así que dentro de la rama `sa` y
+#   `sb` son distintos por construcción: `>` y `>=` dan lo mismo. Idéntico con
+#   LastCommit (línea 270). La TERCERA clave (el nombre, línea 272) sí está
+#   cubierta: ahí no hay guarda que compare antes, y un `<=` invierte el orden.
+
+# --- internal/tui/update.go ----------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/update.go:259
+#   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
+#   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
+#   una operación real sobre tokens en vuelo. Para el resto de teclas no se
+#   ejecuta nada, diga lo que diga la guarda. Con `>= 0` el resultado es idéntico
+#   en los tres casos (con tokens, sin tokens, y tecla distinta de esc).
+
+# --- internal/tui/detail.go ----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/detail.go:31
 #   `if avail < minListBlockLines { return 0, false }` de listBudget. Con
 #   avail == minListBlockLines los DOS caminos devuelven lo mismo: room == 0, y
@@ -33,7 +89,7 @@ CONDITIONALS_BOUNDARY internal/tui/detail.go:31
 #   devuelve (0, false) para cualquier n. La función entera vale (0, false) en
 #   todo avail <= minListBlockLines, así que mover el borde un paso no la cambia.
 
-# --- tui/toast.go ---------------------------------------------------------
+# --- internal/tui/toast.go -----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/toast.go:175
 #   `for ansi.StringWidth(w) > maxWidth` del word-wrap. Solo difiere con una
 #   palabra de ancho EXACTO maxWidth, y en ese caso el resultado es el mismo: la
@@ -42,6 +98,7 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:175
 #   un ancho >= el suyo.
 
 CONDITIONALS_BOUNDARY internal/tui/toast.go:232
+CONDITIONALS_BOUNDARY internal/tui/toast.go:236
 CONDITIONALS_NEGATION internal/tui/toast.go:236
 #   Las dos guardas de entrada de overlayToasts. Con width == 0 (y no < 0) el
 #   splice es una identidad pura: x == 0 y bw == 0, así que
@@ -55,7 +112,29 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:249
 #   Es la guarda de "no cabe" writa al revés por un paso, y en el borde exacto
 #   no recorta nada.
 
-# --- tui/cmdlogpanel.go ---------------------------------------------------
+# --- Ruido de medición (no son huecos: hay test que los mata) -----------
+# Los cuatro de abajo están VERIFICADOS A MANO con la suite completa: mutando el
+# fichero, el test falla. aun así gremlins los reporta a veces como LIVED, y en el
+# MISMO run marca KILLED y LIVED mutaciones idénticas (mismo tipo, misma línea,
+# misma columna, mismo código resultante). La causa es que la mutación dispara un
+# bucle enormouso (el panel recorre ~1e9 previsualizaciones, el offset se sale del
+# rango) y el resultado depende de si el proceso mutantado llega a terminar antes
+# del timeout de la máquina. No son un hueco de test: allowlistarlos evita el rojo
+# espurio del gate, y si algún día el test que los mata desaparece, el
+# NOT COVERED de esa línea lo delata.
+CONDITIONALS_BOUNDARY internal/tui/toast.go:69
+#   La guarda de expiración (`now.Sub(created) < duration`). La mata
+#   TestToastDuracionCeroExpiraYa (un toast con duration 0 está expirado ya).
+CONDITIONALS_BOUNDARY internal/tui/layout.go:80
+#   Una de las sumas internas del alto libre del panel. La mata
+#   TestPreviewConFiltroActivoRespetaElAlto: sin la sección de filtro descontada,
+#   las secciones ya no suman la altura de la terminal.
+CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:105
+#   Un signo de la ventana de scroll del panel. La mata
+#   TestPanelOffsetEnLosExtremos (recorre alturas 2..12 y offsets 0..8, y con la
+#   ventana corrupta el slice revienta).
+
+# --- internal/tui/cmdlogpanel.go -----------------------------------------
 ARITHMETIC_BASE internal/tui/cmdlogpanel.go:101
 INVERT_NEGATIVES internal/tui/cmdlogpanel.go:101
 #   El segundo clamp del offset: `min(m.logOffset, max(0, len(entries)-visible))`.
@@ -75,41 +154,7 @@ CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
 #   ella un cambio futuro del ladder que bajara kind a 0 pintaría un "KIND" de
 #   ancho 0 en vez de omitir la columna.
 
-# --- tui/table.go --------------------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:267
-CONDITIONALS_BOUNDARY internal/tui/table.go:270
-#   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
-#   negación de la comparación que devuelve, así que dentro de la rama `sa` y
-#   `sb` son distintos por construcción: `>` y `>=` dan lo mismo. Idéntico con
-#   LastCommit (línea 270). La TERCERA clave (el nombre, línea 272) sí está
-#   cubierta: ahí no hay guarda que lacompare antes, y un `<=` invierte el orden
-#   de dos repos con el mismo nombre.
-
-# --- tui/update.go -------------------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/update.go:259
-#   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
-#   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
-#   una operación real sobre tokens en vuelo. Para el resto de teclas no se
-#   ejecuta nada, diga lo que diga la guarda. Con `>= 0` el resultado es idéntico
-#   en los tres casos (con tokens, sin tokens, y tecla distinta de esc).
-
-# --- tui/app.go ----------------------------------------------------------
-CONDITIONALS_NEGATION internal/tui/app.go:368
-CONDITIONALS_NEGATION internal/tui/app.go:369
-#   Las dos guardas de nil del store en New: el store lo crea state.NewStore()
-#   dentro del propio New y su error se descarta, así que llegar a New con un
-#   store nil no tiene camino desde la app (no hay constructor que lo acepte).
-#   Invertir la primera cargaría el estado con un store inexistente (panic) y la
-#   segunda entraría con persisted nil. Sin costura de inyección no hay forma de
-#   observar ninguno de los dos: no es un hueco de test, es unreachable.
-
-CONDITIONALS_NEGATION internal/tui/app.go:955
-#   `if cmdlog.Active() == nil { return }` en logIntent. Invertida, la función
-#   llamaría a cmdlog.RecordIntent sin recorder, y RecordIntent ES un no-op sin
-#   recorder (`if current.Load() != nil`). Dos capas de guarda para lo mismo: la
-#   exterior es una optimización, la interior la garantía.
-
-# --- gitstatus/status.go --------------------------------------------------
+# --- internal/gitstatus/status.go ----------------------------------------
 ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   El tope de workers del pool (`runtime.NumCPU()*4`). El clamp solo limita
 #   cuántos subprocess git corren a la vez: resultados, orden y snapshots son
@@ -118,10 +163,10 @@ ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   nada observable, solo el consumo de recursos. Riesgo consciente.
 #   (Las guardas que SÍ eran mutables —0, negativos y el `> del tope`— ya no
 #   existen: ahora es un clamp min/max.)
-
+#
 # ---------------------------------------------------------------------------
-# Backlog real, aún sin test: ninguno. Los 43 mutantes vivos de app.go, table.go
-# y update.go se cerraron con tests (orden de filas, reparto de columnas en el
-# encaje exacto, celdas, scroll, fetchAll con recuento de fallos, ciclo completo
-# de una acción con git real, shell del usuario, token de borrado, esc) y con
-# reescrituras donde la mutación era identidad.
+# Backlog real, aún sin test: ninguno. Los 215 mutantes NOT COVERED del primer
+# run eran casi todos la copia del repo dentro de .worktrees/ (Worktrunk), que
+# gremlins mutaba y contaba como si fuera código del módulo: por eso el target
+# ahora lo excluye. Los que quedaban de verdad (print.go, que no tenía un solo
+# test de sus columnas) están cerrados.

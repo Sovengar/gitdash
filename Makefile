@@ -77,14 +77,20 @@ smoke: build ## Smoke test de la TUI en tmux con config aislada y fixtures
 tidy: ## go mod tidy
 	go mod tidy
 
+# MUTATE_EXCLUDE deja fuera lo que NO es codigo del modulo. Sin esto, gremlins
+# recorre .worktrees/ (Worktrunk) y mide una COPIA completa del repo en otro
+# commit: duplica el informe, infla el "not covered" y mezcla codigo viejo. El
+# patron se ancla al path, no al nombre del directorio.
+MUTATE_EXCLUDE ?= '\.worktrees/'
+
 mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
-	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --output report.json
+	go tool gremlins unleash --exclude-files $(MUTATE_EXCLUDE) --workers 4 --timeout-coefficient 3 --output report.json
 
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — advisory
 	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 3 --output report.json; \
+		go tool gremlins unleash --diff $(MUTATE_BASE) --exclude-files $(MUTATE_EXCLUDE) --workers 4 --timeout-coefficient 3 --output report.json; \
 	else \
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi

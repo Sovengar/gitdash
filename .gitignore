@@ -21,3 +21,5 @@ testdata/playground/
 # Mutation testing (gremlins)
 report.json
 .gremlins*
+# Local Pi runtime state
+.atl/

@@ -490,9 +490,10 @@ func (m *Model) groupStats(key string) groupStats {
 		if r.snap.Status.Behind > 0 {
 			st.behind++
 		}
-		if n := len(r.snap.Worktrees); n > 0 {
-			st.worktrees += n
-		}
+		// Sin guarda: sumar 0 no cambia nada, y `n > 0` solo servía para que un
+		// repo sin worktrees no llegara al +=. Era una guarda innecesaria y un
+		// sitio donde un ">=" no se notaba.
+		st.worktrees += len(r.snap.Worktrees)
 	}
 	return st
 }
