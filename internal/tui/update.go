@@ -188,6 +188,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toasts.show(msg.text, msg.level)
 		return m, nil
 
+	// Lanza lo que el overlay de PR aceptó. Va como mensaje propio (y no
+	// como efecto de la tecla de submit) para que aceptar y ejecutar sean dos
+	// pasos: el envío queda observable en m.prPending sin que haya salido
+	// ningún proceso.
+	case prStartMsg:
+		return m, m.prCreateCmd()
+
+	// El desenlace. reject != "" significa que no se ejecutó nada, así que no
+	// hay exec que registrar ni estado que re-colectar: solo el aviso, que dice
+	// qué falta para poder hacerlo.
+	case prResultMsg:
+		delete(m.running, msg.path)
+		if msg.reject != "" {
+			// No hubo proceso: ni entrada en el command log ni recollect.
+			m.toasts.showWarning(msg.reject)
+			return m.withPump(nil)
+		}
+		level, note := prNote(m.nameOf(msg.path), msg)
+		if level == toastSuccess {
+			m.toasts.showSuccess(note)
+		} else {
+			m.toasts.showError(note)
+		}
+		// La creación puede haber pusheado la rama (gh empuja si el head no
+		// tiene upstream), así que el ahead/behind del snapshot puede haber
+		// cambiado: re-colecta pase lo que pase, como con los handoffs.
+		return m.withPump(m.recollectCmd(msg.path))
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -442,11 +470,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// El panel del log es un view mode y dentro `a` es su filtro: no se arman
 	// ahí los selectores (su aviso no se pintaría y la tecla quedaría
 	// shadowed). Abrir el panel ya suelta los estados armados; esto evita
-	// rearmarlos mientras siga abierto. Va DESPUÉS de los inputs: con el filtro
-	// o el modo comando activos la tecla es texto, no una acción.
+	// rearmarlos mientras siga abierto. `pr` va aquí aunque no sea un selector
+	// de variante: abrir el overlay con el panel delante no dibujaría el
+	// formulario (openPR lo rechaza), así que sin esta guarda la pulsación
+	// solo dejaría una intención de "pr" en el log por algo que no ocurrió.
+	// Va DESPUÉS de los inputs: con el filtro o el modo comando activos la
+	// tecla es texto, no una acción.
 	if m.logOpen {
 		switch m.actionForKey(key) {
-		case "pull", "visual":
+		case "pull", "visual", "pr":
 			return m, nil
 		}
 	}
@@ -472,16 +504,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.cursor = max(0, len(m.entries())-1)
 		return m, nil
-	}
-
-	// La tecla del overlay de PR todavía no está registrada como acción en la
-	// config (eso es T4), así que no llega por actionForKey y se comprueba
-	// sobre la tecla cruda. Va aquí, después de los inputs (con el filtro o el
-	// input de `!` activos la tecla es texto, no una acción) y antes de
-	// resolver la acción. Cuando `pr` entre en DefaultKeybindings este bloque
-	// desaparece y lo hace el `case prKey` de más abajo, por la vía normal.
-	if key == prKey {
-		return m.openPR()
 	}
 
 	// Resolver acción desde keybindings configurados.
@@ -542,10 +564,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			behind:   r.snap.Status.Behind,
 		}
 		return m, nil
-	case prKey:
-		// Punto de entrada de T4: cuando la acción `pr` esté registrada en la
-		// config, este case es el que despacha (y el bloque de la tecla cruda
-		// de arriba sobra). El cuerpo vive en openPR.
+	case "pr":
+		// Abre el overlay de creación. Como `pull` y `visual`, no ejecuta: la
+		// tecla solo recoge los parámetros y es el submit del formulario quien
+		// lanza gh/glab (ver proverlay/prSubmit y prcreate.go).
 		return m.openPR()
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
@@ -637,7 +659,7 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true, "push": true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
-	"command": true, "worktree_remove": true, "visual": true,
+	"command": true, "worktree_remove": true, "visual": true, "pr": true,
 }
 
 // launchesCommand reporta si la acción acaba en un proceso.
@@ -649,7 +671,7 @@ func launchesCommand(action string) bool { return commandActions[action] }
 var rowActions = map[string]bool{
 	"fetch": true, "pull": true, "push": true, "lazygit": true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
-	"visual": true,
+	"visual": true, "pr": true,
 }
 
 // actionNeedsRow reporta si la acción requiere una fila seleccionada.

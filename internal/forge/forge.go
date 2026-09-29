@@ -54,6 +54,19 @@ func ForgeForHost(host string) (string, bool) {
 	return forge, ok
 }
 
+// PublicHosts devuelve una copia de la tabla de hosts públicos, host → forge.
+// Existe para que el runtime la consuma sin duplicar la lista: la config declara
+// los hosts públicos de por defecto y la copia es la que sale de aquí, así que
+// un host añadido en un sitio no puede faltar en el otro. Copia y no la tabla
+// entera porque quien la lee la mezcla con lo declarado por el usuario.
+func PublicHosts() map[string]string {
+	out := make(map[string]string, len(publicHosts))
+	for host, forge := range publicHosts {
+		out[host] = forge
+	}
+	return out
+}
+
 // WebURL arma la URL web del repo aplicando el prefijo de subcarpeta de la
 // instancia. Es la URL que se abre en el navegador y la base sobre la que se
 // arma un enlace de comparación. Una ref sin host o sin project devuelve ""

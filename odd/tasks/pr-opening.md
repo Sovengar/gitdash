@@ -151,6 +151,37 @@ tabla de paquetes.
 **Done when** `make lint` en verde, suite completa en verde, `make install`
 hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
 
+**Implementado** (rama `feat/pr-opening`, sin commit todavía):
+
+- `internal/config/forge.go`: `[forge.github]` / `[forge.gitlab]` con `hosts` y
+  `api_base`, más `Config.ForgeHosts()` / `Config.ForgePrefixes()`, que son los
+  dos mapas que consume `ParseRemoteURL`. El `api_base` **absoluto nombra el
+  host** al que aplica y de su path sale el prefijo de subcarpeta
+  (`forge.PrefixFromAPIBase`); un relativo aplica a todo el proveedor. Los hosts
+  públicos vienen de `forge.PublicHosts()` (nueva), así que la lista no puede
+  duplicarse entre paquetes. Un proveedor no soportado avisa al cargar.
+- `internal/gitstatus.RemoteURL(ctx, dir)`: `git remote get-url origin` por
+  `runGit`, `ClassRead`, on demand (NO en `Collect`).
+- `internal/tui/prcreate.go`: el flujo (remote → forge → argv → `LookPath` →
+  `forge/tool.Runner`). Los cuatro rechazos cortan ANTES de ejecutar y son
+  toast + `running` liberado + sin exec en el log + sin recollect. El exec se
+  registra a mano (gh/glab no son git) con `Dur` medido y el argv CRUDO: lo sanea
+  quien pinta (`sanitizeLogText` en el panel), como manda la regla del log.
+- **Aceptar y ejecutar son dos pasos**: `prSubmit` publica `m.prPending` y
+  devuelve el `tea.Cmd` que emite `prStartMsg`; `prCreateCmd` lo consume. El
+  seam de T3 se conserva (los tests de T3 siguen verdes sin tocarlos).
+- `proverlay.go`: fuera la constante `prKey` y su bloque en `handleKey` (la
+  acción `pr` resuelve por `actionForKey` como cualquier otra), `prPrompt` pide
+  la tecla a `m.cfg.KeyFor("pr")`, y `pr` está también en el guard que impide
+  overlays con el panel del log abierto (si no, deja una intención fantasma).
+- Tests: ciclo completo con stub de `gh` en `t.TempDir()` (argv resuelto con
+  `-R`, `ClassAction`, exit y `Dur`), GitLab self-managed en `/git/` desde un
+  `config.toml` real (el proyecto sale sin el prefijo), los tres rechazos sin
+  ejecutar nada, el argv del panel saneado con un OSC y con caracteres de
+  formato, el head desde el snapshot, `RemoteURL` por `runGit` con `ClassRead`,
+  y la config de forges.
+- Pendiente del padre: commit (y `make install`, que escribe fuera del repo).
+
 ## Riesgos
 
 - **`gh`/`glab` no instalados**: `exec.LookPath` + toast, sin handoff. Es el
@@ -169,4 +200,5 @@ hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
 | (previo) guard visual | `8b2c87a` | build + vet + gofmt + `go test -race ./...` + `make lint` |
 | T1 forge resolver | `f8c9c13` | `go test ./internal/forge/...` |
 | T2 forge argv | `9c78548` | `go test ./internal/forge/...` |
-| T3 overlay de TUI | (sin commit: lo abre el padre) | build + vet + gofmt + `go test -race ./...` |
+| T3 overlay de TUI | `d2d4fbc` | build + vet + gofmt + `go test -race ./...` |
+| T4 ejecución y wiring | (sin commit: lo abre el padre) | build + vet + gofmt + `make lint` + `go test -race ./...` + smoke tmux |

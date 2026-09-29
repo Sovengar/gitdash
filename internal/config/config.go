@@ -59,11 +59,24 @@ type Config struct {
 	// del marcador commiteado (input no confiable). Sin plantilla, la acción
 	// AI no se puede lanzar.
 	AICommands map[string]string
+	// Forges mapea nombre de proveedor (github, gitlab) → dónde vive. Sin
+	// esta declaración, todo remote devuelve "forge desconocido" y la acción
+	// de abrir un PR falla en silencio: los hosts públicos vienen de
+	// DefaultForges, así que lo que hay que declarar son las instancias
+	// self-managed.
+	Forges map[string]ForgeConfig
 }
 
 // aiActionConfig es la sección [ai.<acción>] del config.toml crudo.
 type aiActionConfig struct {
 	Command string `toml:"command"`
+}
+
+// forgeConfig refleja la sección [forge.<nombre>] del TOML crudo. Los punteros
+// distinguen "ausente" (conservar lo declarado/default) de "vacío".
+type forgeConfig struct {
+	Hosts   []string `toml:"hosts"`
+	APIBase *string  `toml:"api_base"`
 }
 
 // fetchConfig refleja la sección [fetch] del TOML, con punteros para
@@ -85,6 +98,7 @@ type fileConfig struct {
 	Keybindings map[string]string         `toml:"keybindings"`
 	Commands    map[string]string         `toml:"commands"`
 	AI          map[string]aiActionConfig `toml:"ai"`
+	Forge       map[string]forgeConfig    `toml:"forge"`
 }
 
 // Load lee la config del path estándar XDG. Devuelve la config resuelta y
@@ -179,6 +193,22 @@ func LoadFrom(path string) (Config, string) {
 			cfg.AICommands[k] = v.Command
 		}
 	}
+	// Forge: merge sobre los defaults (ver addForge). Un proveedor que no
+	// soportamos avisa en vez de aceptarse en silencio: con él, sus hosts
+	// resuelven a un forge sin puerta y cada PR falla con un motivo que no
+	// señala la config.
+	var unknownForges []string
+	for name, f := range fc.Forge {
+		if !supportedForge(name) {
+			unknownForges = append(unknownForges, name)
+			continue
+		}
+		cfg.addForge(name, f)
+	}
+	if len(unknownForges) > 0 {
+		sort.Strings(unknownForges)
+		warns = append(warns, "config: forge no soportado, se ignora: "+strings.Join(unknownForges, ", "))
+	}
 	return cfg, strings.Join(warns, "; ")
 }
 
@@ -222,6 +252,10 @@ func DefaultKeybindings() Keybindings {
 		// elige pull/merge/rebase). Es un camino paralelo al de `p`: no ejecuta
 		// git, cede la terminal a git-sim.
 		"visual": "v",
+		// Overlay de creación de PR/MR: recoge título, cuerpo, base y draft,
+		// y lanza gh/glab. Es un view mode (vive N pulsaciones) y no un
+		// selector de variante como `p` o `v`.
+		"pr": "O",
 	}
 }
 
@@ -262,6 +296,7 @@ func Defaults() Config {
 		// Sin binario AI por defecto: la feature es opt-in; sin `command` la
 		// acción AI solo puede avisar.
 		AICommands: map[string]string{},
+		Forges:     DefaultForges(),
 	}
 }
 
@@ -343,6 +378,10 @@ var hintLabels = map[string]string{
 	"worktree_remove": "remove wt",
 	// acción de preview visual: etiqueta sin la tecla, que la antepone HintBarLines.
 	"visual": "visual",
+	// acción de creación de PR/MR: la etiqueta no lleva la tecla dentro (la
+	// antepone HintBarLines) y coincide con el rótulo del overlay, para que el
+	// hint y el título del formulario sean la misma palabra.
+	"pr": "new PR",
 }
 
 // HintBarLines devuelve las líneas de hints agrupadas por categoría,
@@ -357,6 +396,7 @@ func (c Config) HintBarLines() []string {
 		"dirty", "search", "fetch", "fetch_all", "pull",
 		"push", "lazygit", "editor", "rescan", "recollect",
 		"fold", "command", "log", "quit", "worktree_remove", "visual",
+		"pr",
 	} {
 		key, ok := c.Keybindings[action]
 		if !ok {

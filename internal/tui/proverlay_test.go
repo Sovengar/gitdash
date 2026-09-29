@@ -51,6 +51,21 @@ func resize(m Model, width, height int) Model {
 	return out.(Model)
 }
 
+// formPainted dice si la CAJA del formulario está en la vista. Se busca el
+// título con su borde y no la palabra "new PR" a secas: desde que `pr` es una
+// acción, los hints de keybinds traen "O new PR" siempre, así que la búsqueda
+// laxa daría un falso positivo con el overlay cerrado y dejaría sin comprobar
+// justo lo que estos tests quieren comprobar.
+func formPainted(t *testing.T, m Model) bool {
+	t.Helper()
+	for _, l := range strings.Split(stripANSI(m.View().Content), "\n") {
+		if strings.Contains(l, "╭ new PR · ") {
+			return true
+		}
+	}
+	return false
+}
+
 // focusField mueve el foco con tab hasta el campo pedido.
 func focusField(t *testing.T, m Model, want prField) Model {
 	t.Helper()
@@ -340,8 +355,8 @@ func TestPROverlayEnvioValidoCierraYPublica(t *testing.T) {
 	if got := m.prPending.params.Title; got != "Add the sync branch base" {
 		t.Errorf("Title = %q", got)
 	}
-	if out := stripANSI(m.View().Content); strings.Contains(out, "new PR") {
-		t.Errorf("el panel del formulario sigue pintado:\n%s", out)
+	if formPainted(t, m) {
+		t.Errorf("el panel del formulario sigue pintado:\n%s", stripANSI(m.View().Content))
 	}
 }
 
@@ -658,8 +673,8 @@ func TestPROverlayNoAbreEnTerminalPequeña(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no hubo aviso de que no cabe")
 	}
-	if out := stripANSI(m.View().Content); strings.Contains(out, "new PR") {
-		t.Errorf("se pintó un overlay que no cabe:\n%s", out)
+	if formPainted(t, m) {
+		t.Errorf("se pintó un overlay que no cabe:\n%s", stripANSI(m.View().Content))
 	}
 }
 
@@ -692,8 +707,8 @@ func TestPROverlayResizeSuficienteNoCierra(t *testing.T) {
 	if got := m.prParams().Title; got != "sigue aquí" {
 		t.Errorf("el resize perdió el texto: %q", got)
 	}
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "new PR") {
-		t.Errorf("el overlay no se pinta tras el resize:\n%s", out)
+	if !formPainted(t, m) {
+		t.Errorf("el overlay no se pinta tras el resize:\n%s", stripANSI(m.View().Content))
 	}
 }
 

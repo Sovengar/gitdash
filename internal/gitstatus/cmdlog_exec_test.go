@@ -152,6 +152,74 @@ func TestCollectRegistraLasLecturasComoRead(t *testing.T) {
 	}
 }
 
+// El remote se lee ON DEMAND (al abrir un PR), no en el scan: por eso es el
+// único verbo de lectura que no sale de Collect. Y sale por runGit, así que
+// deja entrada en el command log como ClassRead (es una lectura, aunque la
+// pulse una persona).
+func TestRemoteURLSalePorRunGitYQuedaEnElLog(t *testing.T) {
+	rec := installRecorder(t)
+	dir, origin := testutil.NewRepo(t, true)
+
+	got, err := RemoteURL(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteURL: %v", err)
+	}
+	if got != origin {
+		t.Errorf("RemoteURL = %q, want %q (el origin del repo)", got, origin)
+	}
+	e := lastEntry(t, rec)
+	if want := "git remote get-url origin"; e.Command() != want {
+		t.Errorf("Command() = %q, want %q", e.Command(), want)
+	}
+	if e.Class != cmdlog.ClassRead {
+		t.Errorf("Class = %v, want %v", e.Class, cmdlog.ClassRead)
+	}
+	if e.Exit != 0 {
+		t.Errorf("Exit = %d, want 0", e.Exit)
+	}
+}
+
+// La URL viene recortada: el remoto de git trae el salto de línea, y sin
+// TrimSpace el host que se busca en el mapa de forges no casaría con ninguno.
+func TestRemoteURLRecortaLaSalida(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, true)
+
+	got, err := RemoteURL(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteURL: %v", err)
+	}
+	if got != strings.TrimSpace(got) || strings.ContainsAny(got, "\n\r") {
+		t.Errorf("RemoteURL = %q, want la URL sin saltos", got)
+	}
+}
+
+// Un repo sin `origin` falla con el motivo de git: el toast lo necesita para
+// decir qué falta en vez de un "no se pudo" sin más.
+func TestRemoteURLSinRemoteFallaConElMotivo(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false) // sin upstream ni remote
+
+	if _, err := RemoteURL(context.Background(), dir); err == nil {
+		t.Fatal("RemoteURL en un repo sin origin debería fallar")
+	} else if !strings.Contains(err.Error(), "remote") {
+		t.Errorf("err = %q, want el motivo de git sobre el remote", err)
+	}
+}
+
+// Y no aparece en Collect: el scan no gana un `git remote get-url` por repo y
+// por ciclo solo para un dato que casi nadie mira.
+func TestCollectNoLeeElRemote(t *testing.T) {
+	rec := installRecorder(t)
+	dir, _ := testutil.NewRepo(t, true)
+
+	Collect(context.Background(), dir, "main")
+
+	for _, e := range rec.Entries() {
+		if strings.Contains(e.Command(), "remote") {
+			t.Errorf("Collect lanzó una lectura de remote: %q", e.Command())
+		}
+	}
+}
+
 // RemoveWorktreeArgv es la fuente única del argv: el log y RemoveWorktree no
 // pueden discrepar, que es lo único que hace fiable el log.
 func TestRemoveWorktreeArgv(t *testing.T) {

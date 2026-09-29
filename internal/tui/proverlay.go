@@ -24,17 +24,13 @@ import (
 	"gitdash/internal/forge"
 )
 
-// prKey es la tecla que abre el overlay. Va fija en el paquete y no en la
-// config a propósito: registrar la acción `pr` en DefaultKeybindings y en
-// las listas de acciones es trabajo de T4. Cuando ocurra, lo único que sobra
-// son esta constante y el case que la despacha: la acción ya resolverá por
-// actionForKey como cualquier otra.
-const prKey = "O"
-
 // prSubmitKey envía el formulario. No es `enter`: en el cuerpo `enter` es un
 // salto de línea, y en los campos de una línea se esperaría que cerraran. Con
 // texto siendo la actividad principal del overlay, la única tecla que puede
 // significar "enviar" y no "escribir" es una con modificador.
+//
+// NO es una acción de la config: no se rebindea, y por eso es la única tecla
+// del overlay que el aviso escribe literal.
 const prSubmitKey = "ctrl+s"
 
 const (
@@ -108,6 +104,10 @@ type prDraft struct {
 // prSubmission es un envío que el overlay aceptó y que todavía nadie ha
 // ejecutado. Vive en el modelo para que la ejecución sea un paso aparte,
 // testeable sin lanzar procesos: la UI recoge, forge/tool corre.
+//
+// Lo consume prCreateCmd, que llega con un mensaje propio (prStartMsg): aceptar
+// el formulario y ejecutarlo son dos pasos, y entre ellos el envío se puede
+// inspeccionar sin que ningún proceso haya salido.
 type prSubmission struct {
 	path   string
 	params forge.Params
@@ -118,6 +118,9 @@ type prSubmission struct {
 // propio y su rama sale del inventario del padre). El foco arranca en el
 // título: es lo primero que se escribe y lo único que no tiene un valor por
 // defecto útil.
+//
+// La guarda del panel del log no va aquí: este constructor no sabe si el
+// formulario se va a poder dibujar.
 func newPROverlay(r row, head, base string) *prDraft {
 	title := textinput.New()
 	// Sin prompt: el que trae el input ("> ") duplicaría el rótulo de la
@@ -154,7 +157,8 @@ func (d *prDraft) baseValue() string {
 	return strings.TrimSpace(d.baseIn.Value())
 }
 
-// openPR arma el overlay sobre la fila del cursor.
+// openPR arma el overlay sobre la fila del cursor. La tecla es la de la acción
+// `pr` de la config, así que un rebind la mueve sin tocar este archivo.
 //
 // La fila se resuelve y se captura AQUÍ, y no al enviar: la tecla que abre y
 // la que envía son distintas y entre medias el usuario puede mover el cursor,
@@ -162,8 +166,9 @@ func (d *prDraft) baseValue() string {
 // que la fila señalaba al abrir.
 func (m Model) openPR() (tea.Model, tea.Cmd) {
 	// El log ya es el cuerpo del dashboard: dos overlays a la vez no tienen
-	// sitio ni sentido. La guarda va aquí y no en la config porque la tecla
-	// todavía no está registrada como acción.
+	// sitio ni sentido. La tecla de `pr` ya está frenada antes, en el enrutado
+	// (está en el guard de m.logOpen), así que esta es la segunda red: el
+	// switch de acciones que la despacha no sabe qué hay abierto.
 	if m.logOpen {
 		return m, nil
 	}
@@ -297,8 +302,7 @@ func (m Model) handlePRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	case "shift+tab":
 		return m, m.prFocus(m.pr.focus.next(-1)), true
 	case prSubmitKey:
-		m.prSubmit()
-		return m, nil, true
+		return m, m.prSubmit(), true
 	}
 
 	switch m.pr.focus {
@@ -328,13 +332,16 @@ func (m Model) handlePRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-// prSubmit valida y captura los parámetros. NO ejecuta nada: el argv lo compone
-// forge.BuildCreateArgv y lo corre forge/tool, que es otro paso.
+// prSubmit valida y publica los parámetros. NO ejecuta nada: el argv lo compone
+// forge.BuildCreateArgv y lo corre forge/tool, que es otro paso (y otro
+// mensaje, prStartMsg).
 //
 // Publicar el envío en m.prPending es lo que permite que ese paso exista: la
-// UI vuelve al dashboard con los parámetros recogidos y es T4 quien los ejecuta
-// y avisa, igual que cualquier otra acción deja su resultado en el log.
-func (m *Model) prSubmit() {
+// UI vuelve al dashboard con los parámetros recogidos y es prCreateCmd quien los
+// ejecuta y avisa, igual que cualquier otra acción deja su resultado en el log.
+// El Cmd que devuelve es el salto al paso siguiente, y nil cuando la validación
+// falla (ahí el aviso va en la línea del formulario, no en un toast).
+func (m *Model) prSubmit() tea.Cmd {
 	p := m.prParams()
 	// El aviso va a la línea del formulario, no a un toast: un toast expira a
 	// los 3 s y se va justo cuando el usuario está mirando el campo culpable.
@@ -343,13 +350,14 @@ func (m *Model) prSubmit() {
 	switch {
 	case p.Title == "":
 		m.pr.err = "title required"
-		return
+		return nil
 	case p.Base == "":
 		m.pr.err = "base branch required"
-		return
+		return nil
 	}
 	m.prPending = &prSubmission{path: m.pr.path, params: p}
 	m.closePR()
+	return func() tea.Msg { return prStartMsg{} }
 }
 
 // prParams recoge los parámetros del overlay abierto, sin validar ni publicar:
@@ -452,10 +460,15 @@ func (d *prDraft) draftLabel() string {
 // prPrompt es el aviso persistente del overlay, pintado en la sección de
 // keybinds en lugar de las hints. Comparte función con ellas ("qué hago
 // ahora") y comparte su vida: existe mientras el overlay está abierto.
+//
+// La tecla que abre la resuelve la config (KeyFor), no una constante del
+// paquete: con un rebind de `pr` un aviso escrito a mano dejaría al usuario
+// leyendo una tecla que ya no abre nada. La de enviar NO sale de la config
+// porque no es una acción rebindeable (ver prSubmitKey).
 func (m Model) prPrompt() string {
 	if m.pr == nil {
 		return ""
 	}
-	return fmt.Sprintf("new PR %s: %s → %s · tab field · %s create · %s back",
-		m.pr.name, m.pr.head, m.pr.baseValue(), prSubmitKey, "esc")
+	return fmt.Sprintf("new PR %s: %s → %s · %s opens · tab field · %s create · %s back",
+		m.pr.name, m.pr.head, m.pr.baseValue(), m.cfg.KeyFor("pr"), prSubmitKey, "esc")
 }
