@@ -113,6 +113,31 @@ solo, `computeLayout` recibe el presupuesto.
 **Done when** `esc` cierra sin crear, submit valida (título no vacío, base no
 vacía), y el prompt aparece en la sección keybinds. **Checks:** `go test ./internal/tui/...`
 
+**Implementado** (rama `feat/pr-opening`, sin commit todavía):
+
+- `internal/tui/proverlay.go`: el overlay entero. Estado `m.pr *prDraft`
+  (nil = cerrado: un flag aparte podría quedar a true sin formulario detrás) y
+  `m.prPending *prSubmission`, el seam que T4 ejecuta.
+- Es un **view mode**, no un prefix-key: `handlePRKey` se consulta al principio
+  de `handleKey` y se lleva el teclado entero. Única excepción: `ctrl+c`, que
+  sigue cerrando la app como en el panel del log.
+- Teclas: `O` abre, `tab`/`shift+tab` recorren los campos, `space`/`enter`
+  giran el draft, `ctrl+s` envía, `esc` cancela. El envío es `ctrl+s` y no
+  `enter` porque `enter` en el cuerpo es un salto de línea.
+- El aviso de validación (título o base vacíos) va en una **línea del panel**,
+  no en un toast: un toast expira a los 3 s y caduca cuando el usuario está
+  mirando el campo culpable. La línea está reservada siempre, para que el
+  textarea no cambie de alto al aparecer.
+- El presupuesto entra por `computeLayout(..., formMin)`: con el overlay
+  abierto no se busca panel de preview (el cuerpo es el formulario) y la caja
+  no se dibuja por debajo de `prMinBodyLines`. Si no cabe, **no se abre**; si
+  un resize deja sin sitio, se cierra con aviso.
+- **T4**: la tecla `O` está fija en `internal/tui` (no se puede tocar
+  `internal/config` desde T3). Al registrar `pr` en la config sobran la
+  constante `prKey` y su bloque en `handleKey`; ojo con añadir también `"pr"`
+  al guard que impide armar selectores con el panel del log abierto.
+
+
 ### T4 — Ejecución, wiring y docs
 Registrar `pr` en `DefaultKeybindings`, `hintLabels`, la lista de
 `HintBarLines`, `commandActions`, `rowActions`. Conectar el argv con el Runner,
@@ -142,3 +167,6 @@ hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
 | Task | Commit | Checks |
 |---|---|---|
 | (previo) guard visual | `8b2c87a` | build + vet + gofmt + `go test -race ./...` + `make lint` |
+| T1 forge resolver | `f8c9c13` | `go test ./internal/forge/...` |
+| T2 forge argv | `9c78548` | `go test ./internal/forge/...` |
+| T3 overlay de TUI | (sin commit: lo abre el padre) | build + vet + gofmt + `go test -race ./...` |

@@ -18,6 +18,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// Un overlay que ya no cabe no se deja a medias: se cierra y se avisa.
+		// Quedarse con el teclado capturado y sin formulario visible sería
+		// escribir a ciegas.
+		if m.pr != nil && !m.prFits() {
+			m.closePR()
+			m.toasts.showWarning("terminal too small — closed the PR form")
+		}
+		m.prFit()
 		return m, nil
 
 	case spinner.TickMsg:
@@ -251,6 +259,20 @@ func (m *Model) clampCursor() {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// El overlay de creación de PR es un view mode y se lleva el teclado
+	// entero: se consulta AL PRINCIPIO del enrutado, antes que los selectores
+	// armados, los inputs y la tabla, porque el usuario está escribiendo y
+	// "p" o "f" son letras, no acciones. Es justo lo que lo separa de
+	// pullArmed y visualArmed, que son prefix-key de una sola pulsación. La
+	// única excepción es ctrl+c, que sigue su curso normal y cierra la app
+	// (igual que dentro del panel del log): tragar el abort del terminal
+	// dejaría al usuario sin salida.
+	if m.pr != nil {
+		if out, cmd, handled := m.handlePRKey(msg); handled {
+			return out, cmd
+		}
+	}
+
 	// esc cancela de forma definitiva TODOS los borrados en vuelo, no solo uno:
 	// limpia el mapa completo de tokens para que cualquier resultado tardío se
 	// descarte sin re-armar el forzado ni tocar el banner (su running residual
@@ -452,6 +474,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// La tecla del overlay de PR todavía no está registrada como acción en la
+	// config (eso es T4), así que no llega por actionForKey y se comprueba
+	// sobre la tecla cruda. Va aquí, después de los inputs (con el filtro o el
+	// input de `!` activos la tecla es texto, no una acción) y antes de
+	// resolver la acción. Cuando `pr` entre en DefaultKeybindings este bloque
+	// desaparece y lo hace el `case prKey` de más abajo, por la vía normal.
+	if key == prKey {
+		return m.openPR()
+	}
+
 	// Resolver acción desde keybindings configurados.
 	action := m.actionForKey(key)
 
@@ -510,6 +542,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			behind:   r.snap.Status.Behind,
 		}
 		return m, nil
+	case prKey:
+		// Punto de entrada de T4: cuando la acción `pr` esté registrada en la
+		// config, este case es el que despacha (y el bloque de la tecla cruda
+		// de arriba sobra). El cuerpo vive en openPR.
+		return m.openPR()
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -751,14 +788,17 @@ func (m Model) View() tea.View {
 // tabla, panel con la ficha del repo bajo el cursor y keybinds. Las entradas se
 // calculan una vez y se comparten entre la tabla y el panel.
 //
-// Con el command log abierto el cuerpo NO es la tabla: es el log, y la ficha no
-// se dibuja (layout ya le devolvió su alto). El log es una vista a la que se va
-// a mirar, no información ambiente como la ficha, así que no se reparte el
-// espacio con la tabla: se sustituye.
+// Con el command log o con el overlay de PR abiertos el cuerpo NO es la tabla:
+// es el log o el formulario, y la ficha no se dibuja (layout ya le devolvió su
+// alto). Los dos son vistas a las que se va a mirar, no información ambiente
+// como la ficha, así que no se reparten el espacio con la tabla: la sustituyen.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
 	if m.logOpen {
 		return m.compose(lay, m.logSection(lay.bodyLines), "")
+	}
+	if m.pr != nil {
+		return m.compose(lay, m.prSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
 	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))

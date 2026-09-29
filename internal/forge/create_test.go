@@ -353,9 +353,7 @@ func parseEchoedArgs(t *testing.T, out string) []string {
 	}
 	// El NUL final es el que deja el printf del stub; se quita para no
 	// inventar un argumento vacío.
-	if strings.HasSuffix(payload, "\x00") {
-		payload = strings.TrimSuffix(payload, "\x00")
-	}
+	payload = strings.TrimSuffix(payload, "\x00")
 	return strings.Split(payload, "\x00")
 }
 

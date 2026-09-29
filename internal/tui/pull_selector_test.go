@@ -21,7 +21,14 @@ func newPullModel(t *testing.T) Model {
 func cursorOn(t *testing.T, m Model, path string) Model {
 	t.Helper()
 	for i, e := range m.entries() {
+		// También las sub-filas de worktree: se localizan por el path del
+		// worktree y no por su parent, porque es la sub-fila la que señala el
+		// repo sobre el que se actúa.
 		if e.kind == kindRepo && e.r.project.Path == path {
+			m.cursor = i
+			return m
+		}
+		if e.kind == kindWorktree && e.wt.Path == path {
 			m.cursor = i
 			return m
 		}
