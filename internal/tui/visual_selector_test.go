@@ -149,15 +149,15 @@ func TestVisualDespachaCadaVariante(t *testing.T) {
 	for _, key := range []string{"p", "m", "r"} {
 		withVisualEnv(t)
 		m := newPullModel(t)
-		m = cursorOn(t, m, "/tmp/old-clean")
+		m = cursorOn(t, m, "/tmp/behind-web")
 		m, _ = press(m, "v")
 
 		m, cmd := press(m, key)
 		if m.visualArmed != nil {
 			t.Errorf("v%s dejó el selector armado", key)
 		}
-		if m.running["/tmp/old-clean"] != "visual" {
-			t.Errorf("v%s → running = %q, want visual", key, m.running["/tmp/old-clean"])
+		if m.running["/tmp/behind-web"] != "visual" {
+			t.Errorf("v%s → running = %q, want visual", key, m.running["/tmp/behind-web"])
 		}
 		if cmd == nil {
 			t.Errorf("v%s no devolvió tea.Cmd", key)
@@ -250,6 +250,76 @@ func TestVisualSinUpstream(t *testing.T) {
 	m, cmd := press(m, "p")
 	if cmd == nil || m.running["/tmp/no-up-cli"] != "visual" {
 		t.Errorf("p sin upstream no lanzó: running=%v", m.running)
+	}
+}
+
+// Con el upstream ya integrado (behind == 0) merge y rebase avisan y NO ceden
+// la terminal: git-sim abortaría con "already included in the history", un error
+// que el snapshot ya anticipaba. Ahead > 0 sin behind también bloquea: el ref
+// sigue estando contenido en HEAD, que es la condición que comprueba git-sim.
+func TestVisualBloqueaNadaQueIntegrar(t *testing.T) {
+	for _, path := range []string{"/tmp/old-clean", "/tmp/ahead-lib"} {
+		for _, key := range []string{"m", "r"} {
+			withVisualEnv(t)
+			m := newPullModel(t)
+			m = cursorOn(t, m, path)
+			m, _ = press(m, "v")
+			if m.visualArmed == nil || m.visualArmed.behind != 0 {
+				t.Fatalf("precondición: armado = %+v", m.visualArmed)
+			}
+
+			m, cmd := press(m, key)
+			if m.visualArmed != nil {
+				t.Errorf("v%s dejó el selector armado", key)
+			}
+			if _, busy := m.running[path]; busy {
+				t.Errorf("v%s cedió la terminal sin nada que integrar: running=%v", key, m.running)
+			}
+			if cmd == nil {
+				t.Fatalf("v%s sin nada que integrar debería avisar", key)
+			}
+			nm, ok := cmd().(notifyMsg)
+			if !ok || !strings.Contains(nm.text, "nothing to simulate") {
+				t.Errorf("v%s notificación = %v", key, cmd())
+			}
+		}
+	}
+}
+
+// El bloqueo es de merge/rebase, no del selector: `pull` de git-sim clona y
+// simula de verdad, sin ese chequeo, así que con behind == 0 sí se lanza.
+func TestVisualPullNoBloqueaConBehindCero(t *testing.T) {
+	withVisualEnv(t)
+	m := newPullModel(t)
+	m = cursorOn(t, m, "/tmp/old-clean")
+	m, _ = press(m, "v")
+
+	m, cmd := press(m, "p")
+	if cmd == nil || m.running["/tmp/old-clean"] != "visual" {
+		t.Errorf("p con behind 0 no lanzó: running=%v", m.running)
+	}
+}
+
+// El aviso nombra la tecla de fetch CONFIGURADA: el dato de behind viene del
+// último fetch, así que si el remote-tracking está viejo la simulación bloqueada
+// sí tenía contenido. Un "f" hardcodeado mentiría tras un rebind.
+func TestVisualAvisoNombraLaTeclaDeFetch(t *testing.T) {
+	withVisualEnv(t)
+	m := newPullModel(t)
+	m.cfg.Keybindings["fetch"] = "F"
+	m = cursorOn(t, m, "/tmp/old-clean")
+	m, _ = press(m, "v")
+	_, cmd := press(m, "m")
+
+	nm, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("notificación = %v", cmd())
+	}
+	if !strings.Contains(nm.text, "F to fetch") {
+		t.Errorf("el aviso no nombra la tecla configurada: %q", nm.text)
+	}
+	if strings.Contains(nm.text, "f to fetch") {
+		t.Errorf("el aviso hardcodeó la tecla por defecto: %q", nm.text)
 	}
 }
 
@@ -401,7 +471,7 @@ func TestVisualExecDoneRegistra(t *testing.T) {
 func TestVisualIntencionRegistrada(t *testing.T) {
 	withVisualEnv(t)
 	m, rec := logModel(t)
-	m = cursorOn(t, m, "/tmp/old-clean")
+	m = cursorOn(t, m, "/tmp/behind-web")
 	m, _ = press(m, "v")
 	_, _ = press(m, "m")
 
@@ -415,7 +485,7 @@ func TestVisualIntencionRegistrada(t *testing.T) {
 	if variantIntent == nil {
 		t.Fatal("no se registró la intención de la variante")
 	}
-	if variantIntent.Action != "visual" || variantIntent.Repo != "old-clean" {
+	if variantIntent.Action != "visual" || variantIntent.Repo != "behind-web" {
 		t.Errorf("intención = %+v", variantIntent)
 	}
 }
@@ -432,8 +502,11 @@ func TestVisualNoBloqueaPorRebaseEnCurso(t *testing.T) {
 		t.Fatal("precondición: el repo no reporta rebase en curso")
 	}
 
+	// El snapshot va con behind > 0 a propósito: con behind == 0 el guard de
+	// no-op bloquea antes de llegar al rebase, y el test probaría el bloqueo
+	// equivocado.
 	p := proj("demo", dir, true)
-	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snapClean()})
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snapBehind(1)})
 	m = cursorOn(t, m, dir)
 	m, _ = press(m, "v")
 	m, cmd := press(m, "m")

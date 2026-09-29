@@ -208,12 +208,13 @@ type armedPull struct {
 }
 
 // armedVisual es el selector de preview visual (git-sim) pendiente (nil =
-// ninguno). Captura path y upstream al armar para que el argv de la variante
-// sea determinista respecto a la fila elegida, no a la que esté bajo el cursor
-// después.
+// ninguno). Captura path, upstream y behind al armar para que el argv de la
+// variante y el guard de no-op sean deterministas respecto a la fila elegida,
+// no a la que esté bajo el cursor después.
 type armedVisual struct {
 	path     string
 	upstream string
+	behind   int // commits del upstream ausentes en HEAD, tal como los vio el scan
 }
 
 // armedRemoval es la confirmación pendiente de borrado de un worktree (nil =

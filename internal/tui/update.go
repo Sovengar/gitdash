@@ -326,6 +326,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if o.needsUpstream && armed.upstream == "" {
 				return m, m.toastCmd(toastWarning, "no upstream")
 			}
+			// Nada que integrar: git-sim aborta con "Branch ... is already
+			// included in the history of active branch" (merge.py/rebase.py
+			// salen con 1) cuando el ref ya está en HEAD, que es exactamente
+			// lo que behind == 0 dice. Ceder la terminal para ver un error que
+			// ya sabemos es tirar el repo del dashboard. El dato viene del
+			// último fetch, así que el aviso nombra la tecla de fetch: si el
+			// remote-tracking está viejo, la simulación que se bloquea sí
+			// podía tener contenido.
+			if o.needsUpstream && armed.behind == 0 {
+				return m, m.toastCmd(toastWarning, fmt.Sprintf(
+					"%s already in HEAD — nothing to simulate (%s to fetch)",
+					armed.upstream, m.cfg.KeyFor("fetch")))
+			}
 			cmdlog.RecordIntent(cmdlog.Entry{
 				Class:  cmdlog.ClassAction,
 				Repo:   m.nameOf(armed.path),
@@ -491,7 +504,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !ok || !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		}
-		m.visualArmed = &armedVisual{path: r.project.Path, upstream: r.snap.Status.Upstream}
+		m.visualArmed = &armedVisual{
+			path:     r.project.Path,
+			upstream: r.snap.Status.Upstream,
+			behind:   r.snap.Status.Behind,
+		}
 		return m, nil
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {

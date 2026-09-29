@@ -302,6 +302,34 @@ Reglas del panel (`internal/tui/cmdlogpanel.go`):
   `git pull --ff-only`) el comando se lee a medias, que es lo que el panel existe
   para evitar.
 
+## Gotcha de diseño: el guard de no-op del preview visual (`v m` / `v r`)
+
+git-sim **aborta con código 1** cuando el ref que le pasas ya está contenido en
+HEAD: `merge.py` y `rebase.py` imprimen `Branch 'origin/main' is already
+included in the history of active branch 'main'` y salen. Eso no es un bug de
+gitdash, es la respuesta correcta, pero reproducirla en pantalla cuesta un
+handoff completo de terminal para leer un error que el snapshot ya anticipaba:
+`Status.Behind == 0` **es** la condición que git-sim comprueba
+(`git branch --contains <ref>`).
+
+Por eso el selector bloquea con toast antes de ceder la terminal, y por eso
+`armedVisual` captura `behind` **al armar**, junto al path y al upstream: el
+guard tiene que decidirse sobre la fila elegida, no sobre la que esté bajo el
+cursor cuando llegue la segunda tecla.
+
+- **El guard es de las variantes con ref (`merge`/`rebase`), no del selector.**
+  `pull` no lleva argumento posicional y git-sim `pull` clona y simula de
+  verdad, sin ese chequeo: con `behind == 0` se lanza igual. Guardarlo sería
+  inventar una restricción que la herramienta no tiene.
+- **`ahead` no afloja el bloqueo**: un repo con `↑2 ↓0` sigue teniendo el
+  upstream contenido en HEAD, así que git-sim fallaría igual.
+- **El aviso nombra la tecla de fetch con `cfg.KeyFor("fetch")`**, nunca un
+  `f` hardcodeado: `behind` viene del último fetch, así que si el
+  remote-tracking está viejo la simulación bloqueada sí tenía contenido y el
+  aviso tiene que decir cómo arreglarlo. Los hints del dashboard se pintan
+  igual (etiqueta sin tecla, la antepone `HintBarLines`); un toast no pasa por
+  ahí, y es el único sitio donde la tecla se escribe a mano.
+
 ## Gotcha de diseño: pull con IA (`p a`)
 
 El selector de `p` tiene una quinta variante, `a`, que hace handoff al comando AI
