@@ -204,6 +204,32 @@ hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
 | (fix) comentario obsoleto | `076b988` | `go test -race ./...` |
 | T3 · overlay | `d2d4fbc` | `go test -race ./...`, `make lint`, 5 corridas sin flake |
 | T4 · ejecución y wiring | `55f4788` | `go test -race ./...`, `make lint`, smoke con tmux |
+| T5 · gate de mutation testing | (sin commit: lo abre el padre) | `make mutate-diff MUTATE_BASE=origin/main` → 0 supervivientes nuevos |
+
+### T5 — Cerrar la gate de mutation testing
+
+La CI corre gremlins sobre el diff y bloquea el merge si queda un mutante vivo
+que no esté en `.mutation-allowlist`. La feature entró con 19.
+
+**Bug latente encontrado por el camino**: `prFits` solo miraba el alto, así que
+en un terminal angosto y alto el overlay abría con los inputs a un ancho
+negativo (lo tapaba el `max(1, …)` de `prFit`). Ahora `prFits` exige también
+`prMinWidth`, y el ancho de los inputs se deriva de esa constante
+(`prValueWidth`): el mínimo es `2 + prLabelWidth + prValueSlack + prMinValueWidth`
+(27), que deja una columna de valor de 12 —la misma que la de rótulos—.
+
+**Supervivientes cerrados con test (15)**: el borde exacto del alto y del ancho
+(`prFits`, `prSection`), los rótulos que se resaltan al mover el foco, el nivel
+del aviso del desenlace, el reparto del hueco entre los widgets (`prFit`), el
+`Blur` de `closePR`, el remote scp con la `@` en la posición 0, y la guarda de
+nil de `prFit`. Cada test se comprobó mutando el código a mano: falla con la
+mutación y pasa sin ella.
+
+**Allowlistados con demostración (4)**: las pistas de capacidad de los dos
+`make` de `internal/config/forge.go` y el de `internal/forge/tool/tool.go`, y el
+`colon < 0` de `ParseRemoteURL`, equivalente dado el contrato del mapa de hosts
+(`config.ForgeHosts` se salta los vacíos). Los comentarios están en
+`.mutation-allowlist`.
 
 ## Incidentes durante la implementación
 

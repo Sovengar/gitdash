@@ -52,6 +52,16 @@ func TestParseRemoteURL(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			// La @ en la posición 0: el usuario vacío es legal en scp (ssh
+			// toma el usuario actual) y es justo el borde de `at >= 0`. Con un
+			// `at > 0` esta remote cae al caso "sin usuario@host" y se pierde
+			// un repo que sí tiene forge.
+			name:   "scp con usuario vacío",
+			raw:    "@github.com:acme/widget.git",
+			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
+			wantOK: true,
+		},
+		{
 			name:   "https",
 			raw:    "https://github.com/acme/widget.git",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},

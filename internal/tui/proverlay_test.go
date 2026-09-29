@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -394,6 +395,85 @@ func TestPROverlayDraftToggle(t *testing.T) {
 
 // --- el foco ---
 
+// formLines devuelve las líneas CRUDAS (con ANSI) de la caja del formulario. La
+// caja se localiza por su texto sin ANSI y se lee el crudo, que es donde vive
+// el estilo: el rótulo con el foco y el que no solo se distinguen por el color.
+func formLines(t *testing.T, m Model) []string {
+	t.Helper()
+	all := strings.Split(m.View().Content, "\n")
+	start := -1
+	for i, l := range all {
+		if strings.Contains(stripANSI(l), "╭ new PR · "+m.pr.name+" ") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("no está la caja del formulario en la vista:\n%s", stripANSI(m.View().Content))
+	}
+	for i := start; i < len(all); i++ {
+		if strings.Contains(stripANSI(all[i]), "╯") {
+			return all[start : i+1]
+		}
+	}
+	t.Fatalf("la caja del formulario no se cierra en la vista:\n%s", stripANSI(m.View().Content))
+	return nil
+}
+
+// highlightedLabels devuelve los rótulos de campo que el formulario pinta con
+// el estilo del foco, en el orden del formulario. Se mira el ANSI de la vista y
+// no el texto: los rótulos llevan SIEMPRE la etiqueta, así que sin el estilo
+// esta comprobación no distinguiría nada.
+func highlightedLabels(t *testing.T, m Model) []string {
+	t.Helper()
+	raw := formLines(t, m)
+	var out []string
+	for _, label := range []string{"title", "base", "head", "draft", "body"} {
+		for _, line := range raw {
+			if !strings.Contains(stripANSI(line), label) {
+				continue
+			}
+			if strings.Contains(line, styleWarn.Bold(true).Render(pad(label, 7))) {
+				out = append(out, label)
+			}
+			break
+		}
+	}
+	return out
+}
+
+// El rótulo del campo con el foco se resalta, y SOLO ese: es la mitad del
+// lenguaje del formulario que el cursor del input no puede dar —el cursor
+// parpadea y en una captura ni se ve—. Recorrer los cuatro campos con tab fija
+// que el del foco es el suyo: un `focus == prFieldX` invertido marcaría el
+// equivocado y dejaría sin marcar el que sí lo tiene.
+func TestPROverlayResaltaElRotuloDelCampoConElFoco(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+
+	for _, want := range []prField{prFieldTitle, prFieldBase, prFieldDraft, prFieldBody} {
+		m = focusField(t, m, want)
+		if got := highlightedLabels(t, m); !reflect.DeepEqual(got, []string{prLabelFor(want)}) {
+			t.Errorf("con el foco en %q se resalta %v, want solo [%q]", prLabelFor(want), got, prLabelFor(want))
+		}
+	}
+}
+
+// prLabelFor es el rótulo pintado de cada campo: los nombres del enum son los
+// de los widgets, no los de lo que se ve en el formulario.
+func prLabelFor(f prField) string {
+	switch f {
+	case prFieldTitle:
+		return "title"
+	case prFieldBase:
+		return "base"
+	case prFieldDraft:
+		return "draft"
+	case prFieldBody:
+		return "body"
+	}
+	return "head"
+}
+
 // tab recorre los campos en orden y vuelve al primero; shift+tab va al revés.
 // El foco da la vuelta por aritmética, no por una lista: un campo nuevo que no
 // se summoneda a la lista sería invisible.
@@ -590,6 +670,54 @@ func TestPROverlayAbrirSueltaLosSelectoresArmados(t *testing.T) {
 	}
 }
 
+// Cerrar el overlay suelta el foco de sus widgets. Con el teclado capturado, un
+// campo que se queda con el foco después de cerrar deja el cursor parpadeando
+// en algo que ya no se escribe, y la struct entera se suelta acto seguido: por
+// eso la única forma de mirar es quedarse con el widget ANTES de cerrar.
+func TestPROverlayCerrarSueltaElFocoDeLosCampos(t *testing.T) {
+	for _, c := range []struct {
+		nombre string
+		foco   prField
+	}{
+		{"el título", prFieldTitle},
+		{"la base", prFieldBase},
+		{"el cuerpo", prFieldBody},
+	} {
+		t.Run(c.nombre, func(t *testing.T) {
+			m := focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), c.foco)
+			// Puntero al widget, no su valor: m.pr pasa a ser nil al cerrar y
+			// lo que hay que mirar es el widget sobre el que se hizo Blur. El
+			// cierre lee el widget A TRAVÉS del puntero, no con un valor de
+			// método: `w.Focused` se vincularía a una copia del widget y
+			// respondería lo mismo siempre.
+			var conFoco func() bool
+			switch c.foco {
+			case prFieldTitle:
+				w := &m.pr.title
+				conFoco = func() bool { return w.Focused() }
+			case prFieldBase:
+				w := &m.pr.baseIn
+				conFoco = func() bool { return w.Focused() }
+			default:
+				w := &m.pr.body
+				conFoco = func() bool { return w.Focused() }
+			}
+			if !conFoco() {
+				t.Fatalf("precondición: %s no tenía el foco", c.nombre)
+			}
+
+			m, _ = press(m, "esc")
+
+			if m.pr != nil {
+				t.Fatal("esc no cerró el overlay")
+			}
+			if conFoco() {
+				t.Errorf("%s sigue con el foco tras cerrar", c.nombre)
+			}
+		})
+	}
+}
+
 // --- el presupuesto de alto y el render ---
 
 // El overlay es una caja más del dashboard: aparece en la sección del
@@ -675,6 +803,161 @@ func TestPROverlayNoAbreEnTerminalPequeña(t *testing.T) {
 	}
 	if formPainted(t, m) {
 		t.Errorf("se pintó un overlay que no cabe:\n%s", stripANSI(m.View().Content))
+	}
+}
+
+// Un terminal ANGOSTO y alto es el caso que el alto solo no ve: el alto del
+// cuerpo da de sobra y el formulario se abría con los inputs a un ancho que la
+// resta de la columna de rótulos hacía negativo. Sin el mínimo de ancho el
+// `max(1, …)` de prFit era lo único entre el usuario y una caja inservible; con
+// prMinWidth el formulario no abre y avisa, como cuando no cabe el alto.
+func TestPROverlayNoAbreEnTerminalAngosta(t *testing.T) {
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	// Alto de sobra a propósito: el único motivo del rechazo es el ancho.
+	m.width, m.height = prMinWidth-1, 40
+	if m.layout().bodyLines < prMinBodyLines {
+		t.Skipf("precondición: a %d líneas el alto no llega (%d)", m.height, m.layout().bodyLines)
+	}
+
+	_, cmd := press(m, "O")
+
+	if m.pr != nil {
+		t.Errorf("se abrió un overlay de ancho %d con un mínimo de %d", m.width, prMinWidth)
+	}
+	if cmd == nil {
+		t.Fatal("no hubo aviso de que no cabe")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "too small") {
+		t.Errorf("aviso = %v, want el de que no cabe", cmd())
+	}
+	if formPainted(t, m) {
+		t.Errorf("se pintó un overlay que no cabe:\n%s", stripANSI(m.View().Content))
+	}
+}
+
+// El ancho mínimo es un borde y no un "más o menos": en él abre, y el input
+// queda con la columna de valor mínima (ni una celda menos, ni el clamp a 1 de
+// una resta que salió negativa).
+func TestPROverlayAbreEnElAnchoMinimo(t *testing.T) {
+	m := resize(newPROverlayModel(t, "/tmp/dirty-api"), prMinWidth, 40)
+
+	m, _ = press(m, "O")
+
+	if m.pr == nil {
+		t.Fatalf("no abrió en el ancho mínimo (%d)", prMinWidth)
+	}
+	if got := m.pr.title.Width(); got != prMinValueWidth {
+		t.Errorf("ancho del input = %d, want %d (la columna de valor mínima)", got, prMinValueWidth)
+	}
+	if got := m.prValueWidth(); got != prMinValueWidth {
+		t.Errorf("prValueWidth = %d, want %d", got, prMinValueWidth)
+	}
+	if !formPainted(t, m) {
+		t.Errorf("el overlay abierto no se pinta:\n%s", stripANSI(m.View().Content))
+	}
+}
+
+// El alto también es un borde y no un "más o menos": el primer alto que abre es
+// el que deja el cuerpo JUSTO en el mínimo del formulario, y una línea menos no
+// abre. Un `>` en esa comparación rechazaría el borde (media caja es peor que
+// nada) y un `>=` aceptaría una línea de menos.
+func TestPROverlayAbreJustoEnElAltoMinimo(t *testing.T) {
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+
+	// El primer alto que abre, buscado y no cocido en una constante: si el
+	// reparto del layout cambia, el test se entera en vez de congelar un
+	// número que ya no significa nada.
+	var abre int
+	for h := 8; h <= 60; h++ {
+		probe := m
+		probe.height = h
+		probe, _ = press(probe, "O")
+		if probe.pr != nil {
+			abre = h
+			break
+		}
+	}
+	if abre == 0 {
+		t.Fatal("el formulario no abre a ningún alto")
+	}
+
+	enBorde := m
+	enBorde.height = abre
+	enBorde, _ = press(enBorde, "O")
+	if enBorde.pr == nil {
+		t.Fatalf("no abrió a %d líneas", abre)
+	}
+	if got := enBorde.layout().bodyLines; got != prMinBodyLines {
+		t.Errorf("abre a %d líneas con un cuerpo de %d, want el mínimo exacto %d", abre, got, prMinBodyLines)
+	}
+
+	menor := m
+	menor.height = abre - 1
+	menor, _ = press(menor, "O")
+	if menor.pr != nil {
+		t.Errorf("abrió a %d líneas, una por debajo del mínimo (%d)", abre-1, prMinBodyLines)
+	}
+}
+
+// prSection es el otro lado del mismo borde: con el hueco EXACTO pinta, con uno
+// menos devuelve "" para que quien lo compone no deje una caja a medias. Si el
+// layout y prSection no coincidieran en el mínimo, el overlay abriría sin que
+// su caja se dibujara.
+func TestPROverlayPrSectionSoloDesdeElAltoMinimo(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+
+	if got := m.prSection(prMinBodyLines - 1); got != "" {
+		t.Errorf("con una línea menos pintó %d líneas, want la sección vacía:\n%s",
+			len(strings.Split(got, "\n")), got)
+	}
+	got := m.prSection(prMinBodyLines)
+	if got == "" {
+		t.Fatalf("con el alto mínimo no pintó nada:\n%s", stripANSI(m.View().Content))
+	}
+	// La caja entera: los dos bordes más el hueco exacto que se le pidió.
+	if n := len(strings.Split(got, "\n")); n != prMinBodyLines+2 {
+		t.Errorf("alto de la caja = %d, want %d (2 bordes + %d)", n, prMinBodyLines+2, prMinBodyLines)
+	}
+	if !strings.Contains(stripANSI(got), "dirty-api") {
+		t.Errorf("la sección del alto mínimo no dice sobre qué repo es:\n%s", stripANSI(got))
+	}
+}
+
+// prFit reparte el hueco de la caja entre los widgets, y ese reparto es un
+// contrato de la vista, no un detalle interno: los inputs se quedan con lo que
+// sobra tras la columna de rótulos y la celda de margen del input, y el cuerpo
+// con TODO el interior —su prompt ┃ es lo que marca el borde izquierdo, así
+// que no reserva nada— y con el alto que dejan las líneas fijas. Los `max(1,
+// …)` de ahí son la red por si el hueco viniera negativo, que con prFits ya no
+// pasa: si un signo se comiera el margen, los inputs o el cuerpo se quedarían
+// en una columna y el formulario se leería partido por la mitad.
+func TestPROverlayLosWidgetsSeDimensionanAlHueco(t *testing.T) {
+	const width, height = 100, 40
+	// El prompt del cuerpo (┃) se pinta DENTRO del ancho que se le pasa, así que
+	// el widget guarda en Width() lo que le queda tras él: por eso el ancho
+	// pedido es el interior de la caja y el que devuelve es dos celdas menos.
+	const prBodyPrompt = 2
+
+	m := openPROverlay(t, resize(newPROverlayModel(t, "/tmp/dirty-api"), width, height))
+
+	// Los 2 del ancho pedido son los bordes de la caja, los mismos que reserva
+	// la sección al pintarse.
+	if got := m.pr.body.Width(); got != width-2-prBodyPrompt {
+		t.Errorf("ancho del cuerpo = %d, want %d (todo el interior de la caja, prompt incluido)",
+			got, width-2-prBodyPrompt)
+	}
+	wantValor := width - 2 - prLabelWidth - prValueSlack
+	for _, in := range []struct {
+		nombre string
+		got    int
+	}{{"título", m.pr.title.Width()}, {"base", m.pr.baseIn.Width()}} {
+		if in.got != wantValor {
+			t.Errorf("ancho del input de %s = %d, want %d (el interior menos rótulos y margen)",
+				in.nombre, in.got, wantValor)
+		}
+	}
+	if got, want := m.pr.body.Height(), m.layout().bodyLines-prFixedLines; got != want {
+		t.Errorf("alto del cuerpo = %d, want %d (lo que dejan las %d líneas fijas)", got, want, prFixedLines)
 	}
 }
 

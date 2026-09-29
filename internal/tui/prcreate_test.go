@@ -158,6 +158,12 @@ func lastToast(m Model) string {
 	return ts[len(ts)-1].text
 }
 
+// toastBlock devuelve los avisos pintados tal como los ve el usuario: con su
+// icono, que es lo que sale de su nivel.
+func toastBlock(m Model) string {
+	return strings.Join(m.toasts.lines(), "\n")
+}
+
 // --- el ciclo completo ---
 
 // El camino entero: overlay → submit → gh ejecutado → exec registrada con el
@@ -575,6 +581,65 @@ func TestPRFalloDeLaCLIToastConElMotivo(t *testing.T) {
 	}
 	if m.running[dir] != "" {
 		t.Errorf("el repo quedó ocupado: %q", m.running[dir])
+	}
+}
+
+// --- el nivel del aviso ---
+
+// El desenlace se avisa con el NIVEL que le toca, no solo con el texto: el
+// nivel es lo que elige el icono y el color, y un fallo pintado con el ✓ del
+// éxito es peor que no avisar, porque el usuario no vuelve a mirar. Las dos
+// ramas se comprueban, que es lo que las ata al resultado: con una sola, un
+// `== toastSuccess` invertido seguiría pintando bien la mitad de los casos.
+func TestPRElAvisoDelDesenlaceLlevaSuNivel(t *testing.T) {
+	casos := []struct {
+		nombre string
+		stub   string
+		want   toastLevel
+	}{
+		{"éxito", "echo https://github.com/acme/widget/pull/42", toastSuccess},
+		{"fallo", "echo 'could not create PR: head branch already exists' >&2\nexit 1", toastError},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			dir := prRepo(t, "git@github.com:acme/widget.git")
+			forgeStub(t, "gh", c.stub)
+			m, _ := prModel(t, dir)
+
+			m, _ = prEnvíaPR(t, m, "un título")
+			res := awaitPR(t, &m)
+			if res.reject != "" {
+				t.Fatalf("la creación se rechazó: %s", res.reject)
+			}
+			if c.want == toastError && res.err == nil {
+				t.Fatal("la creación debía fallar")
+			}
+			if c.want == toastSuccess && res.err != nil {
+				t.Fatalf("la creación no debía fallar: %v", res.err)
+			}
+
+			ts := m.toasts.toasts
+			if len(ts) == 0 {
+				t.Fatal("no quedó ningún aviso")
+			}
+			last := ts[len(ts)-1]
+			if last.level != c.want {
+				t.Errorf("nivel del aviso = %v (%s), want %v", last.level, last.text, c.want)
+			}
+			// Y el icono que sale en la vista es el de ese nivel: el nivel es
+			// un campo interno, lo que el usuario ve es el aviso pintado.
+			painted := stripANSI(toastBlock(m))
+			if !strings.Contains(painted, toastIcon(c.want)) {
+				t.Errorf("el aviso no lleva el icono de %v:\n%s", c.want, painted)
+			}
+			otro := toastSuccess
+			if c.want == toastSuccess {
+				otro = toastError
+			}
+			if strings.Contains(painted, toastIcon(otro)) {
+				t.Errorf("el aviso pintado lleva el icono del nivel contrario:\n%s", painted)
+			}
+		})
 	}
 }
 

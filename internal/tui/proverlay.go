@@ -52,6 +52,18 @@ const (
 	// no dentro del ancho que se le pasó. Sin esta celda de margen la línea
 	// se sale de la caja y bordered recorta el último carácter.
 	prValueSlack = 1
+	// prMinValueWidth es la columna de valor más estrecha que el formulario
+	// admite: lo mínimo para leer lo que se está escribiendo sin scrollear. Es
+	// el ancho de la columna de rótulos, que es lo que hay justo al lado: por
+	// debajo el rótulo y el valor ya no se distinguen de un vistazo.
+	prMinValueWidth = 12
+	// prMinWidth es el ancho EXTERIOR mínimo del overlay: los dos bordes de la
+	// caja, la columna de rótulos, la celda de margen del input y la columna de
+	// valor mínima. Es el otro eje del mismo principio que prMinBodyLines —por
+	// debajo el formulario no se abre, porque no cabe entero— y se deriva de
+	// las partes en vez de salirse de un número redondo: lo que garantiza es
+	// que el ancho del input sea un ancho, y no un clamp a 1 de un negativo.
+	prMinWidth = 2 + prLabelWidth + prValueSlack + prMinValueWidth
 )
 
 // prField es el campo con el foco del formulario. El head NO es un campo: se
@@ -215,11 +227,23 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 	return m, m.prFocus(prFieldTitle)
 }
 
-// prFits dice si el overlay cabe entero en la terminal. El presupuesto lo
-// fija el layout (el formulario ES el cuerpo), así que la pregunta es una:
-// ¿el cuerpo que le toca llega al mínimo del formulario?
+// prFits dice si el overlay cabe entero en la terminal. El presupuesto de alto
+// lo fija el layout (el formulario ES el cuerpo), así que esa pregunta es una:
+// ¿el cuerpo que le toca llega al mínimo del formulario? El ancho no lo reparte
+// nadie —lo reparte la terminal— pero también tiene su mínimo: es lo que hace
+// que el ancho del input sea un ancho y no un clamp a 1 de una resta negativa.
+// Un terminal angosto y alto es el caso que el alto solo no ve.
 func (m Model) prFits() bool {
-	return m.pr != nil && m.layout().bodyLines >= prMinBodyLines
+	return m.pr != nil && m.layout().bodyLines >= prMinBodyLines && m.width >= prMinWidth
+}
+
+// prValueWidth es el ancho de la columna de valor de los inputs: el interior de
+// la caja menos la columna de rótulos y la celda de margen del input. Con
+// prMinWidth como suelo —que es lo que hace abrir el overlay— nunca sale
+// negativo, así que el max(1, …) es solo la red por si el ancho o el alto
+// cambiaran por otro camino.
+func (m Model) prValueWidth() int {
+	return max(1, m.width-2-prLabelWidth-prValueSlack)
 }
 
 // prFit dimensiona los widgets al hueco real: el ancho interior de la caja
@@ -234,8 +258,9 @@ func (m *Model) prFit() {
 	}
 	rows := m.layout().bodyLines
 	inner := max(1, m.width-2)
-	m.pr.title.SetWidth(max(1, inner-prLabelWidth-prValueSlack))
-	m.pr.baseIn.SetWidth(max(1, inner-prLabelWidth-prValueSlack))
+	value := m.prValueWidth()
+	m.pr.title.SetWidth(value)
+	m.pr.baseIn.SetWidth(value)
 	m.pr.body.SetWidth(inner)
 	m.pr.body.SetHeight(max(1, rows-prFixedLines))
 }
