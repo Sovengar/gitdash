@@ -204,6 +204,17 @@ CONDITIONALS_BOUNDARY internal/tui/prcreate.go:156
 #   el mismo corte. La TERCERA forma (un motivo que NO empieza por "git ") no
 #   entra en la rama y por eso no se recorta, y eso está sujeto con test.
 
+# --- internal/tui/update.go -------------------------------------------------
+CONDITIONALS_NEGATION internal/tui/update.go:66
+#   El `c != nil` que decide encolar el fetch al terminar el scan.
+#   `fetchBatchCmd` devuelve SIEMPRE nil (app.go:544, sin excepción: con o sin
+#   targets solo lanza la goroutine y publishes por el canal de eventos). La
+#   llamada ocurre en la propia inicialización del if, así que el fetch se
+#   lanza igual con `c == nil`; lo único que cambia es que se Encole un nil, y
+#   `tea.Batch` los descarta (`compactCmds` ignora los nil). Equivalente por
+#   contrato de la función que llama. La prueba de que el fetch sí sale está en
+#   TestElFinDelScanLanzaElFetchAutomatico: mira el evento, no el retorno.
+
 # --- internal/gitstatus/status.go ----------------------------------------
 ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   El tope de workers del pool (`runtime.NumCPU()*4`). El clamp solo limita
@@ -263,3 +274,32 @@ CONDITIONALS_BOUNDARY internal/forge/parse.go:45
 # ninguno detrás: 15 eran huecos de test —el borde exacto del alto y del
 # ancho, el rótulo que se resalta, el nivel del aviso, el reparto del hueco
 # entre los widgets— y los 4 de arriba son identidades de construcción.
+#
+# ---------------------------------------------------------------------------
+# Cómo se tria un NOT COVERED (el gate de arriba solo mira los LIVED, asi que
+# esto no lo bloquea: es el trabajo de fondo).
+#
+# El NOT COVERED de gremlins NO es veredicto, es sospecha, por dos razones que se
+# pueden medir y no hay que creer:
+#
+# 1. Mapeo de cobertura roto. gremlins busca un bloque que EMPIECE en la linea
+#    del mutante; la cobertura de Go se emite por bloques que ABARCAN un rango
+#    (linea.col, linea.col). Un mutante en la columna 22 de una linea cuyo
+#    bloque empieza en la 54 esta dentro de ese bloque y sale NOT COVERED igual.
+#    Con el perfil propio (go test -covermode=count -coverpkg=./... -coverprofile)
+#    y buscando el bloque que CONTIENE la posicion, los 912 mutantes KILLED de un
+#    run caen dentro de un bloque con count > 0: los 912, sin fallos. Ese es el
+#    control que hace fiable el metodo.
+#
+# 2. `-coverpkg=./...` es obligatorio con este layout. internal/testutil lo usan
+#    los tests de otros paquetes, y sin -coverpkg el perfil solo mide el paquete
+#    bajo test: sus 14 NOT COVERED eran callers vivos. Con -coverpkg pasan a
+#    ARTEFACTO.
+#
+# Reparto de un run completo (180 NOT COVERED): 48 artefactos de mapeo, 114 lineas
+# sin bloque instrumentable (const, firmas, comentarios: los mutantes no son
+# codigo ejecutable y los de `+` entre strings ni compilan al mutarlos), 18 huecos
+# de verdad, de los que 11 no son viables, 2 son codigo de main() sin tests, 3 son
+# identidades (esta seccion + la de app.go), y 2 eran trabajo real:
+# app.go:454 (el error de discovery.Scan no llegaba al usuario) y update.go:60
+# (la cache no se guardaba nunca). Los dos cerrados con test.

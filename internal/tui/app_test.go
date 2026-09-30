@@ -3,16 +3,21 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"gitdash/internal/cache"
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/state"
+	"gitdash/internal/testutil"
 )
 
 // newTestModel construye un modelo con proyectos y snapshots dados.
@@ -430,4 +435,193 @@ func rowNames(rows []row) []string {
 		out = append(out, r.project.Name)
 	}
 	return out
+}
+
+// --- el scan con una raíz que no se puede leer ---
+
+// Una raíz ilegible no puede tirar el escaneo entero: `discovery.Scan`
+// acumula el error por raíz y sigue con las demás. El pipeline de la TUI tiene
+// que llevar ese aviso en la nota (de ahí sale el toast) SIN perder los repos
+// que sí se leyeron. Si la nota se pierde, un `root` mal escrito en la config
+// se manifiesta como "no encuentro repos" en vez de "esta raíz no existe", que
+// es justo la confusión que el aviso evita.
+func TestElScanReportaLaRaizIlegibleYConservaLosReposQueSi(t *testing.T) {
+	bueno, _ := testutil.NewRepo(t, true)
+	testutil.Marker(t, bueno, "ok", "g", "s", false)
+
+	// Una raíz que es un FICHERO, no un directorio: el caso que Scan reporta.
+	malo := filepath.Join(t.TempDir(), "esto-no-es-un-directorio")
+	if err := os.WriteFile(malo, []byte("x"), 0o644); err != nil {
+		t.Fatalf("preparando la raíz mala: %v", err)
+	}
+
+	cfg := config.Defaults()
+	cfg.Roots = []string{bueno, malo}
+	m := New(cfg)
+	t.Cleanup(m.cancel)
+
+	m.startScanCmd()
+	sp := firstScanMsg(t, m)
+
+	if sp.note == "" {
+		t.Fatal("nota vacía: la raíz ilegible no llega al usuario, y un root mal escrito parece que no hay repos")
+	}
+	if !strings.Contains(sp.note, "root ilegible") {
+		t.Errorf("la nota no nombra el problema: %q", sp.note)
+	}
+	var paths []string
+	for _, p := range sp.projects {
+		paths = append(paths, p.Path)
+	}
+	if len(paths) != 1 || paths[0] != bueno {
+		t.Errorf("el escaneo tiró los repos que sí se leían: %v", paths)
+	}
+}
+
+// firstScanMsg consume el primer evento del pump con plazo: si el pipeline no
+// emitiera nada, el test se quedaría colgado hasta el timeout global de go test
+// en lugar de fallar con un mensaje que diga qué pasó.
+func firstScanMsg(t *testing.T, m Model) scanProjectsMsg {
+	t.Helper()
+	type res struct {
+		msg tea.Msg
+	}
+	ch := make(chan res, 1)
+	go func() { ch <- res{waitForEvent(m.events)()} }()
+	select {
+	case r := <-ch:
+		sp, ok := r.msg.(scanProjectsMsg)
+		if !ok {
+			t.Fatalf("primer evento = %T, want scanProjectsMsg", r.msg)
+		}
+		return sp
+	case <-time.After(10 * time.Second):
+		t.Fatal("el scan no emitió ningún evento en 10s")
+		return scanProjectsMsg{}
+	}
+}
+
+// --- el fin del scan: cache y fetch automático ---
+
+// `collectDoneMsg` no lo manejaba ningún test, así que el cierre del scan no
+// estaba sujeto: ni la cache que hace que la app pinte al instante al arrancar,
+// ni el fetch automático. Invertir la guarda de `cache.Path()` deja la app
+// aparente y sana mientras no cachea nunca, y por eso esto mira el fichero de
+// verdad y no un retorno.
+func TestElFinDelScanGuardaLaCache(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	m := newTestModel(t,
+		[]discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
+	m.cfg.FetchAuto = false // este test es el de la cache, no el del fetch
+
+	m.Update(collectDoneMsg{})
+
+	ruta := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "gitdash", "repos.json")
+	esperaFichero(t, ruta)
+
+	var c cache.File
+	if err := json.Unmarshal(readFile(t, ruta), &c); err != nil {
+		t.Fatalf("cache ilegible: %v", err)
+	}
+	if len(c.Repos) != 1 || c.Repos[0].Path != "/tmp/api" {
+		t.Errorf("la cache no guardó lo escaneado: %+v", c.Repos)
+	}
+}
+
+// El otro mitad del cierre: con fetch automático y un repo con upstream, el
+// fin del scan Lanza el fetch. Se mira el evento, no el retorno, porque
+// `fetchBatchCmd` publica por el canal y devuelve siempre nil.
+func TestElFinDelScanLanzaElFetchAutomatico(t *testing.T) {
+	casos := []struct {
+		nombre    string
+		fetchAuto bool
+		snap      gitstatus.Snapshot
+		quiere    bool
+	}{
+		{"con upstream", true, snapClean(), true},
+		{"sin fetch automatico", false, snapClean(), false},
+		{"repo sin upstream", true, gitstatus.Snapshot{}, false},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			m := newTestModel(t,
+				[]discovery.Project{proj("api", "/tmp/api", true)},
+				map[string]gitstatus.Snapshot{"/tmp/api": c.snap})
+			m.cfg.FetchAuto = c.fetchAuto
+
+			m.Update(collectDoneMsg{})
+
+			// /tmp/api no es un repo, así que el fetch falla; lo que importa es
+			// que se lanzara. El evento "fetching" sale antes de tocar git.
+			// El plazo solo es largo para el caso que debe LANZAR: en los
+			// negativos el evento "fetching" (que sale antes de tocar git) no
+			// puede tardar, así que esperar más solo alarga la suite.
+			plazo := 200 * time.Millisecond
+			if c.quiere {
+				plazo = 5 * time.Second
+			}
+			visto := esperaEvento(t, m, plazo, func(ev event) bool {
+				fs, ok := ev.(fetchStateMsg)
+				return ok && fs.path == "/tmp/api"
+			})
+			if c.quiere && !visto {
+				t.Error("no se lanzó el fetch automático al terminar el scan")
+			}
+			if !c.quiere && visto {
+				t.Error("se lanzó un fetch que no tocaba: sin fetch automático o sin upstream")
+			}
+		})
+	}
+}
+
+// esperaFichero espera a que la cache aparezca: el guardado sale en una
+// goroutine (no bloquea el render), así que no basta con mirar una vez.
+func esperaFichero(t *testing.T, ruta string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(ruta); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("la cache nunca apareció en %s", ruta)
+}
+
+func readFile(t *testing.T, ruta string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(ruta)
+	if err != nil {
+		t.Fatalf("leyendo %s: %v", ruta, err)
+	}
+	return raw
+}
+
+// esperaEvento consume eventos del pump hasta que uno cumpla pred o se agote el
+// plazo. Sin plazo, un fetch que no se lanza deja el test colgado hasta el
+// timeout global en vez de fallar diciendo qué faltaba.
+func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) bool) bool {
+	t.Helper()
+	ch := make(chan bool, 1)
+	go func() {
+		for {
+			ev := waitForEvent(m.events)()
+			if ev == nil {
+				return
+			}
+			if pred(ev) {
+				ch <- true
+				return
+			}
+		}
+	}()
+	select {
+	case ok := <-ch:
+		return ok
+	case <-time.After(plazo):
+		return false
+	}
 }
