@@ -384,7 +384,7 @@ var hintLabels = map[string]string{
 	// acción de creación de PR/MR: la etiqueta no lleva la tecla dentro (la
 	// antepone HintBarLines) y coincide con el rótulo del overlay, para que el
 	// hint y el título del formulario sean la misma palabra.
-	"pr": "new PR",
+	"pr": "open PR",
 }
 
 // HintBarLines devuelve las líneas de hints agrupadas por categoría,

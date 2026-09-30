@@ -292,13 +292,18 @@ func TestDefaultKeybindingsPR(t *testing.T) {
 		}
 	}
 	// La etiqueta va SIN la tecla dentro: la antepone HintBarLines, y si la
-	// llevara un rebind produciría hints como "W O new PR".
-	if label, ok := hintLabels["pr"]; !ok || label != "new PR" {
-		t.Errorf("hintLabels[pr] = %q (%v), want \"new PR\"", label, ok)
+	// llevara un rebind produciría hints como "W O open PR".
+	if label, ok := hintLabels["pr"]; !ok || label != "open PR" {
+		t.Errorf("hintLabels[pr] = %q (%v), want \"open PR\"", label, ok)
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
-	if !strings.Contains(hints, "O new PR") {
+	if !strings.Contains(hints, "O open PR") {
 		t.Errorf("hint de PR ausente: %v", cfg.HintBarLines())
+	}
+	// "open PR" a secas en los hints, y no "new PR": la caja del formulario se
+	// titula "new PR · repo" y un substring laxo encontraría los dos.
+	if strings.Contains(hints, "new PR") {
+		t.Errorf("los hints no deberían decir \"new PR\": %v", cfg.HintBarLines())
 	}
 	// Y tampoco una tecla que el enrutado resuelve por su cuenta.
 	for _, fixed := range []string{"q", "k", "j", "up", "down", "home", "end", "enter", "esc", "tab"} {
@@ -321,7 +326,7 @@ pr = "W"
 		t.Errorf("pr = %q, want W", got)
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
-	if !strings.Contains(hints, "W new PR") {
+	if !strings.Contains(hints, "W open PR") {
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 }
