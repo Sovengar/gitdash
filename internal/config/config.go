@@ -63,7 +63,7 @@ type Config struct {
 	// esta declaración, todo remote devuelve "forge desconocido" y la acción
 	// de abrir un PR falla en silencio: los hosts públicos vienen de
 	// DefaultForges, así que lo que hay que declarar son las instancias
-	// self-managed.
+	// self-managed (y apagar las que no se usen, con enabled = false).
 	Forges map[string]ForgeConfig
 }
 
@@ -73,10 +73,13 @@ type aiActionConfig struct {
 }
 
 // forgeConfig refleja la sección [forge.<nombre>] del TOML crudo. Los punteros
-// distinguen "ausente" (conservar lo declarado/default) de "vacío".
+// distinguen "ausente" (conservar lo declarado/default) de "valor cero":
+// enabled = false apaga el proveedor, así que no puede ser un bool desnudo.
 type forgeConfig struct {
-	Hosts   []string `toml:"hosts"`
-	APIBase *string  `toml:"api_base"`
+	Enabled   *bool   `toml:"enabled"`
+	Host      *string `toml:"host"`
+	APIBase   *string `toml:"api_base"`
+	CloneBase *string `toml:"clone_base"`
 }
 
 // fetchConfig refleja la sección [fetch] del TOML, con punteros para

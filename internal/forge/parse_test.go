@@ -19,12 +19,11 @@ func testHosts() map[string]string {
 func refGL(project string) RepoRef {
 	parts := strings.Split(project, "/")
 	return RepoRef{
-		Forge:       ForgeGitLab,
-		Host:        "gitlab.example.com",
-		Project:     project,
-		Owner:       parts[len(parts)-2],
-		Name:        parts[len(parts)-1],
-		ClonePrefix: "git",
+		Forge:   ForgeGitLab,
+		Host:    "gitlab.example.com",
+		Project: project,
+		Owner:   parts[len(parts)-2],
+		Name:    parts[len(parts)-1],
 	}
 }
 
@@ -186,11 +185,11 @@ func TestParseRemoteURLKeepsConfiguredPrefix(t *testing.T) {
 	if !ok {
 		t.Fatal("no parseó")
 	}
-	if got.ClonePrefix != "git" {
-		t.Fatalf("ClonePrefix = %q, quiero %q (normalizado sin barras)", got.ClonePrefix, "git")
-	}
 	if got.Project != "grupo/proy" {
-		t.Fatalf("Project = %q, quiero %q (no tocaba un path sin el prefijo)", got.Project, "grupo/proy")
+		t.Fatalf("Project = %q, quiero %q (un path sin el prefijo no se toca)", got.Project, "grupo/proy")
+	}
+	if got.Owner != "grupo" || got.Name != "proy" {
+		t.Fatalf("Owner/Name = %q/%q, quiero grupo/proy", got.Owner, got.Name)
 	}
 }
 

@@ -1,24 +1,32 @@
-// Configuración de forges: qué hosts son de GitHub y cuáles de GitLab, y en qué
-// subcarpeta vive cada instancia.
+// Configuración de forges: qué proveedor vive en qué host y en qué subcarpeta.
 //
 // Hace falta porque forge.ParseRemoteURL NO adivina: un host que no está
 // declarado devuelve false a propósito, porque de un host desconocido no se
-// puede saber a qué proveedor pertenece ni si su URL web lleva prefijo, y
-// adivinarlo produce enlaces que abren 404 sin que nada falle visiblemente. Sin
-// esto, abrir un PR sobre el GitLab self-managed de la casa (que vive en
-// /git/, no en la raíz del host) no podría ni resolverse ni ejecutarse.
+// puede saber a qué proveedor pertenece ni si su URL lleva prefijo, y adivinarlo
+// produce enlaces que abren 404 sin que nada falle visiblemente. Sin esto,
+// abrir un MR sobre el GitLab self-managed de la casa (que vive en /git/, no en
+// la raíz del host) no podría ni resolverse ni ejecutarse.
 //
-// La forma es [forge.<proveedor>] con dos claves, y el ejemplo que lo explica:
+// La forma es [forge.<proveedor>], y el ejemplo que lo explica:
+//
+//	[forge.github]
+//	enabled = true
+//	host = "github.com"
 //
 //	[forge.gitlab]
-//	# api_base de la instancia que añades. Al ser ABSOLUTO nombra el host al
-//	# que aplica: de ahí sale también la subcarpeta del clone (/git/api/v4/ →
-//	# "git"). Un api_base relativo ("/api/v4/") aplica a todos los hosts del
-//	# proveedor.
-//	api_base = "https://git.example.com/git/api/v4/"
-//	# Hosts donde vive este proveedor. Se AÑADEN a los de por defecto, así que
-//	# aquí solo va lo que no es github.com/gitlab.com.
-//	hosts = ["git.example.com"]
+//	enabled = true
+//	host = "umane.emeal.nttdata.com"
+//	# api_base RELATIVO de la instancia ("/api/v4/", "/git/api/v4/"): de su
+//	# path sale el prefijo de la subcarpeta del clone ("git"). Vacío = raíz.
+//	api_base = "/git/api/v4/"
+//	# clone_base es el override explícito de ese prefijo, para cuando la
+//	# instancia no deduce su subcarpeta de la ruta del API. Vacío = derivado.
+//	clone_base = "git"
+//
+// Un host POR proveedor, no una lista: es una instancia por puerta (gh/glab), y
+// el prefijo sale del mismo dato que el host. enabled = false apaga el
+// proveedor entero (su host deja de resolver a forge), que es como se deja una
+// puerta instalada sin Instances declaradas.
 //
 // Los hosts públicos (github.com, gitlab.com) vienen de DefaultForges, derivados
 // de la misma tabla que usa forge: una sola lista, para que el mapa de runtime y
@@ -26,28 +34,54 @@
 package config
 
 import (
-	"net/url"
 	"strings"
 
 	"gitdash/internal/forge"
 )
 
 // DefaultGitLabAPIBase es el api_base REST de una instancia de GitLab en la raíz
-// de su host ("https://gitlab.com" + "/api/v4/"). Es el único default que
-// aporta algo: de él sale el prefijo de subcarpeta, y vacío significa "la
-// instancia vive en la raíz". GitHub no lleva ninguno porque su api_base
-// (/api/v3/) nunca lleva prefijo de clone, y declararlo sería un default que no
-// dice nada.
+// de su host ("/api/v4/", relativo como los que declara el usuario). Es el
+// único default que aporta algo: de él sale el prefijo de subcarpeta, y vacío
+// significa "la instancia vive en la raíz". GitHub no lleva ninguno porque su
+// api_base (/api/v3/) nunca lleva prefijo de clone, y declararlo sería un
+// default que no dice nada.
 const DefaultGitLabAPIBase = "/api/v4/"
 
-// ForgeConfig declara dónde vive un proveedor: los hosts donde vive y el
-// api_base de la instancia. La lista de hosts y el api_base son el mismo hecho
-// dicho de dos formas (el host se deduce del api_base absoluto), y se guardan
-// separados porque un host puede declararse sin api_base: el caso normal de
-// "esta instancia está en la raíz del host".
+// ForgeConfig declara dónde vive un proveedor: un host, si está activo, el
+// api_base de esa instancia y el prefijo de subcarpeta (derivado, o forzado
+// con CloneBase).
 type ForgeConfig struct {
-	Hosts   []string
+	// Enabled es la puerta: apagado, su host no resuelve a ningún forge. El
+	// default es true, así que un proveedor declarado sin la clave sigue
+	// funcionando.
+	Enabled bool
+	// Host es la instancia donde vive el proveedor. Singular a propósito: la
+	// puerta (gh/glab) es la misma para todas las instancias, y el prefijo de
+	// subcarpeta sale de su api_base, así que una lista de hosts necesitaría un
+	// segundo dato que nadie tiene (a cuál de ellos aplica cada api_base).
+	Host string
+	// APIBase es el api_base REST RELATIVO de la instancia: "/api/v4/" o
+	// "/git/api/v4/". Vacío = la instancia vive en la raíz del host.
 	APIBase string
+	// CloneBase sobrescribe el prefijo de subcarpeta cuando el api_base no lo
+	// dice (una instancia montada fuera de la ruta estándar). Vacío = se deriva
+	// de APIBase.
+	CloneBase string
+}
+
+// ClonePrefix devuelve el relative URL root de la instancia: la subcarpeta en la
+// que vive el forge ("git" para un GitLab self-managed bajo /git/), vacía si
+// está en la raíz del host.
+//
+// CloneBase manda cuando viene, porque es el override explícito; si no, se
+// deriva del api_base con forge.PrefixFromAPIBase, que devuelve vacío ante una
+// forma inesperada en vez de adivinar. Nunca devuelve barras: el prefijo sale
+// limpio porque es el que se compara contra el path del remoto.
+func (f ForgeConfig) ClonePrefix() string {
+	if base := strings.Trim(strings.TrimSpace(f.CloneBase), "/"); base != "" {
+		return base
+	}
+	return forge.PrefixFromAPIBase(f.APIBase)
 }
 
 // DefaultForges son los proveedores que gitdash conoce sin que el usuario
@@ -56,9 +90,7 @@ type ForgeConfig struct {
 func DefaultForges() map[string]ForgeConfig {
 	out := make(map[string]ForgeConfig, 2)
 	for host, name := range forge.PublicHosts() {
-		f := out[name]
-		f.Hosts = append(f.Hosts, host)
-		out[name] = f
+		out[name] = ForgeConfig{Enabled: true, Host: host}
 	}
 	gl := out[forge.ForgeGitLab]
 	gl.APIBase = DefaultGitLabAPIBase
@@ -78,9 +110,10 @@ func supportedForge(name string) bool {
 }
 
 // addForge mezcla lo declarado por el usuario sobre lo que ya hay (los
-// defaults, o lo declarado antes). Los hosts se AÑADEN —gitlab.com sigue
-// funcionando mientras se declara el self-managed— y el api_base sustituye al
-// anterior, porque es el de la instancia que se acaba de declarar.
+// defaults, o lo declarado antes). Cada clave sustituye a la anterior cuando
+// viene: con un host y un api_base por proveedor, "declarar" es exactamente
+// "sustituir la instancia". Lo ausente conserva lo anterior, y un valor vacío
+// se trata como ausente (mismo criterio que el resto del loader).
 //
 // El nombre del proveedor se normaliza a minúsculas: viene de una clave de
 // config escrita a mano, y un "GitLab" que no casara con la constante dejaría
@@ -91,82 +124,62 @@ func (c *Config) addForge(rawName string, f forgeConfig) {
 		return
 	}
 	cur := c.Forges[name]
-	for _, h := range f.Hosts {
-		h = normalizeHost(h)
-		if h == "" || containsHost(cur.Hosts, h) {
-			continue
+	if f.Enabled != nil {
+		cur.Enabled = *f.Enabled
+	}
+	if f.Host != nil {
+		if h := normalizeHost(*f.Host); h != "" {
+			cur.Host = h
 		}
-		cur.Hosts = append(cur.Hosts, h)
 	}
 	if f.APIBase != nil && strings.TrimSpace(*f.APIBase) != "" {
 		cur.APIBase = strings.TrimSpace(*f.APIBase)
+	}
+	if f.CloneBase != nil && strings.TrimSpace(*f.CloneBase) != "" {
+		cur.CloneBase = strings.TrimSpace(*f.CloneBase)
 	}
 	c.Forges[name] = cur
 }
 
 // ForgeHosts resuelve el mapa host → proveedor que consume
-// forge.ParseRemoteURL. Los hosts públicos y los declarados se mezclan en una
-// sola pasada, así que el runtime y la config no pueden discrepar.
+// forge.ParseRemoteURL. Un proveedor deshabilitado no aporta su host, así que
+// sus remotos vuelven a ser "forge desconocido" en vez de esperar una puerta
+// apagada.
 func (c Config) ForgeHosts() map[string]string {
 	out := make(map[string]string, len(c.Forges)+2)
 	for name, f := range c.Forges {
-		for _, h := range f.Hosts {
-			if h = normalizeHost(h); h != "" {
-				out[h] = name
-			}
+		if !f.Enabled {
+			continue
+		}
+		if h := normalizeHost(f.Host); h != "" {
+			out[h] = name
 		}
 	}
 	return out
 }
 
-// ForgePrefixes resuelve host → prefijo de subcarpeta del clone, derivado del
-// api_base con forge.PrefixFromAPIBase. Un prefijo equivocado no rompe la
-// creación (el argv no lo lleva: el proyecto ya viene sin él) pero rompe la URL
-// web, así que sale del MISMO dato que el host en vez de declararse aparte.
+// ForgePrefixes resuelve host → prefijo de subcarpeta del clone, derivado con
+// ForgeConfig.ClonePrefix. Un prefijo equivocado no rompe la creación (el argv
+// no lo lleva: el proyecto ya viene sin él) pero rompe la URL web, así que sale
+// del MISMO dato que el host en vez de declararse aparte.
+//
+// Solo entran los hosts con prefijo no vacío: la raíz del host es la ausencia de
+// prefijo, y una entrada "" solo añadiría ruido al mapa que lee el parser.
 func (c Config) ForgePrefixes() map[string]string {
-	def := DefaultForges()
 	out := make(map[string]string, len(c.Forges)+2)
-	for name, f := range c.Forges {
-		// Un api_base absoluto nombra la instancia a la que aplica, y por tanto
-		// a UN host. Los demás hosts del proveedor se quedan con el api_base de
-		// por defecto: es la diferencia entre "esta instancia vive en /git/" y
-		// "gitlab.com vive en la raíz", que declaradas en la misma sección.
-		named := apiBaseHost(f.APIBase)
-		for _, h := range f.Hosts {
-			h = normalizeHost(h)
-			if h == "" {
-				continue
-			}
-			api := f.APIBase
-			if named != "" && !strings.EqualFold(named, h) {
-				api = def[name].APIBase
-			}
-			out[h] = forge.PrefixFromAPIBase(apiBasePath(api))
+	for _, f := range c.Forges {
+		if !f.Enabled {
+			continue
+		}
+		h := normalizeHost(f.Host)
+		if h == "" {
+			continue
+		}
+		if p := f.ClonePrefix(); p != "" {
+			out[h] = p
 		}
 	}
 	return out
-}
-
-// apiBaseHost devuelve el host que nombra un api_base absoluto, o "" si el
-// api_base es relativo (o está vacío): un api_base relativo no puede atribuirse
-// a ningún host en concreto.
-func apiBaseHost(apiBase string) string {
-	u, err := url.Parse(strings.TrimSpace(apiBase))
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.Hostname()
-}
-
-// api_base de la subcarpeta se deriva de ahí, nunca del esquema ni del host (el
-// prefijo vive en el path, y forge.PrefixFromAPIBase lo espera así).
-func apiBasePath(apiBase string) string {
-	apiBase = strings.TrimSpace(apiBase)
-	u, err := url.Parse(apiBase)
-	if err != nil {
-		return apiBase
-	}
-	return u.Path
 }
 
 // normalizeForgeName baja a minúsculas y recorta el nombre del proveedor, como
@@ -180,14 +193,4 @@ func normalizeForgeName(name string) string {
 // mayúsculas y el mapa de runtime se busca por él.
 func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSpace(host))
-}
-
-// containsHost evita hosts repetidos al fusionar la config con los defaults.
-func containsHost(hosts []string, host string) bool {
-	for _, h := range hosts {
-		if normalizeHost(h) == host {
-			return true
-		}
-	}
-	return false
 }

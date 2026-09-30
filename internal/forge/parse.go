@@ -72,12 +72,11 @@ func ParseRemoteURL(raw string, hosts, prefixes map[string]string) (RepoRef, boo
 		}
 	}
 	return RepoRef{
-		Forge:       forge,
-		Host:        host,
-		Project:     strings.Join(parts, "/"),
-		Owner:       parts[len(parts)-2],
-		Name:        parts[len(parts)-1],
-		ClonePrefix: prefix,
+		Forge:   forge,
+		Host:    host,
+		Project: strings.Join(parts, "/"),
+		Owner:   parts[len(parts)-2],
+		Name:    parts[len(parts)-1],
 	}, true
 }
 
