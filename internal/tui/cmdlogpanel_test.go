@@ -968,3 +968,31 @@ func TestPanelSaneaElArgvDeUnaEntrada(t *testing.T) {
 		}
 	}
 }
+
+// El argv del panel es texto no confiable (lleva el prompt del marcador), así
+// que puede traer bytes que no son UTF-8 válido: al pintarlos, el terminal
+// decide qué hacer con ellos. El saneador los descarta, y esa rama no estaba
+// ejercitada por ningún test: `size <= 1` es exactamente la condición que
+// distingue un rune mal decodificado de un RuneError legítimo (un U+FFFD
+// escrito de verdad viene con size == 3 y TIENE que sobrevivir).
+func TestSanitizeLogTextDescartaBytesQueNoSonUTF8(t *testing.T) {
+	casos := []struct {
+		nombre, in, want string
+	}{
+		{"byte suelto", "go\xfftest", "gotest"},
+		{"byte suelto entre letras", "a\xffb", "ab"},
+		{"secuencia truncada", "\xe4\xb8", ""},
+		{"byte valido conako", "ca\xfe", "ca"},
+		// U+FFFD de verdad (3 bytes) no es un error de decodificacion: es
+		// texto, y elTerminal lo pinta. Descartarlo seria perder informacion.
+		{"U+FFFD legitimo", "a\uFFFDb", "a\uFFFDb"},
+		// El invalido se va y el U+FFFD de verdad se queda: son cosas distintas
+		// aunque los dos se pinten como el mismo signo.
+		{"mixto", "x\xffy\uFFFDz", "xy\uFFFDz"},
+	}
+	for _, c := range casos {
+		if got := sanitizeLogText(c.in); got != c.want {
+			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.nombre, c.in, got, c.want)
+		}
+	}
+}

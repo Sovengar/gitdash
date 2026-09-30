@@ -676,3 +676,125 @@ func TestNewAguantaQueNoHayDondeGuardarElPlegado(t *testing.T) {
 		}
 	})
 }
+
+// --- avisos y resultados obsoletos ---
+
+// El `fetch ok` a secas solo es para UN repo: con varios se cuenta, porque
+// "fetch ok" a secas no dice si se sincronizaron 3 repos o 1. Y con alguno
+// fallido el aviso es otro entero: el número de fallos es lo que el usuario
+// necesita ver primero. Los tres arms se prueban porque el del medio (ok == 1)
+// era el único sin sujetar.
+func TestElFinDelFetchDistingueCuantosReposSincroniza(t *testing.T) {
+	casos := []struct {
+		nombre       string
+		ok, failed   int
+		wantContiene string
+	}{
+		{"uno solo", 1, 0, "fetch ok"},
+		{"varios", 3, 0, "fetch ok (3 repos)"},
+		{"ninguno y todos fallan", 0, 2, "2 failed"},
+		{"mezcla", 2, 1, "2 ok, 1 failed"},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)}, nil)
+
+			// Update devuelve el modelo nuevo: hay que leer ESE, no el de antes.
+			// Los mapas se comparten entre copias, así que un test que se queda
+			// con el viejo pasa en verde sin haber comprobado nada.
+			mm, _ := m.Update(fetchDoneMsg{ok: c.ok, failed: c.failed})
+			m = mm.(Model)
+
+			got := lastToast(m)
+			if !strings.Contains(got, c.wantContiene) {
+				t.Errorf("fetch %d ok / %d failed: el aviso dice %q, want contiene %q",
+					c.ok, c.failed, got, c.wantContiene)
+			}
+		})
+	}
+}
+
+// Un `worktreeRemovedMsg` cuyo token no es el vigente es de un intento que se
+// sustituyó (el usuario relanzó el borrado, o un scan liberó el running por
+// su cuenta). Si se aceptara, borraría el token del intento vigente y le
+// enseñaría al usuario un éxito por un worktree que quizá sigue ahí. La rama
+// existe justo para esto y no estaba probada.
+func TestElBorradoDeWorktreeObsoletoNoTocaElIntentoVigente(t *testing.T) {
+	const parent = "/tmp/api"
+	m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+	m.removeTokens = map[string]int{parent: 7}
+	m.running[parent] = "worktree_remove"
+
+	mm, _ := m.Update(worktreeRemovedMsg{
+		parent: parent, wtPath: "/tmp/wt-a", name: "wt-a",
+		gen: 3, // intento antiguo: el vigente es el 7
+	})
+	m = mm.(Model)
+
+	if got := m.removeTokens[parent]; got != 7 {
+		t.Errorf("el resultado obsoleto consumió el token del intento vigente: %d, want 7", got)
+	}
+	if _, sigue := m.removeTokens[parent]; !sigue {
+		t.Error("el token vigente desapareció: el relanzamiento se queda sin poder comprobar su resultado")
+	}
+	if m.running[parent] != "worktree_remove" {
+		t.Errorf("un resultado obsoleto liberó el running de otro intento: %q", m.running[parent])
+	}
+	if txt := lastToast(m); strings.Contains(txt, "wt-a") {
+		t.Errorf("un resultado obsoleto pintó un aviso: %q", txt)
+	}
+}
+
+// Esc es la vía de salida de la confirmación de borrado, y su valor está en
+// que SE CONSUME: la confirmación tiene prioridad sobre el resto del teclado
+// (también sobre el esc que cierra la búsqueda). Si esc no se consumiera,
+// desarmaría el borrado y además cerraría la búsqueda: dos efectos de una
+// tecla, que es justo lo que el bloque commentado prohíbe. Por eso el testigo
+// es la búsqueda, no el propio desarme (que ocurre igual en los dos caminos).
+func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
+	const parent = "/tmp/api"
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc, Text: "esc"}
+
+	t.Run("con confirmación armada", func(t *testing.T) {
+		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+		m.armed = &armedRemoval{wtPath: "/tmp/wt-a", parent: parent, name: "wt-a"}
+		m.searchActive = true
+		m.search = "api"
+
+		mm, _ := m.Update(esc)
+		m = mm.(Model)
+
+		if m.armed != nil {
+			t.Error("esc no desarmó la confirmación: la app queda esperando otra tecla")
+		}
+		if len(m.removeTokens) != 0 {
+			t.Errorf("esc registró un intento de borrado: %v", m.removeTokens)
+		}
+		if m.running[parent] != "" {
+			t.Errorf("esc dejó el repo en running: %q", m.running[parent])
+		}
+		// La parte que distingue este camino del default: la tecla se paró aquí.
+		if !m.searchActive || m.search != "api" {
+			t.Errorf("esc siguió su curso y tocó la búsqueda: searchActive=%v search=%q; "+
+				"la confirmación tiene que consumirla", m.searchActive, m.search)
+		}
+	})
+
+	// El control: sin nada armado, esc sí cierra la búsqueda. Si este caso
+	// pasara también con la confirmación, el anterior no distinguiría nada.
+	t.Run("sin nada armado", func(t *testing.T) {
+		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+		m.searchActive = true
+		m.search = "api"
+
+		mm, _ := m.Update(esc)
+		m = mm.(Model)
+
+		if m.searchActive {
+			t.Error("sin nada armado, esc tiene que cerrar la búsqueda")
+		}
+		if m.search != "" {
+			t.Errorf("esc en la búsqueda no limpió el filtro: %q", m.search)
+		}
+	})
+}
