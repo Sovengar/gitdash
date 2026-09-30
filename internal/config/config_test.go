@@ -443,6 +443,38 @@ func TestLoadLeeElFicheroDelPathResuelto(t *testing.T) {
 	}
 }
 
+// SyncBranchExplicit separa "el usuario puso sync_branch" de "es el default":
+// el default es una suposición que el repo puede desmentir (y ahí la
+// referencia cae a master), una rama escrita es una intención que no se toca.
+func TestSyncBranchExplicit(t *testing.T) {
+	t.Run("sin declarar", func(t *testing.T) {
+		cfg, _ := LoadFrom(write(t, `roots = ["/tmp"]`))
+		if cfg.SyncBranchExplicit {
+			t.Error("SyncBranchExplicit con la clave ausente: el default no es una declaración")
+		}
+		if cfg.SyncBranch != "main" {
+			t.Errorf("SyncBranch = %q, want main (el default)", cfg.SyncBranch)
+		}
+	})
+	t.Run("declarada", func(t *testing.T) {
+		cfg, _ := LoadFrom(write(t, `sync_branch = "develop"`))
+		if !cfg.SyncBranchExplicit {
+			t.Error("SyncBranchExplicit = false con sync_branch en el TOML")
+		}
+		if cfg.SyncBranch != "develop" {
+			t.Errorf("SyncBranch = %q, want develop", cfg.SyncBranch)
+		}
+	})
+	// `sync_branch = ""` no es una declaración: es una casilla vacía, y por
+	// la misma regla que no pisa el default tampoco puede cerrar el fallback.
+	t.Run("declarada pero vacía", func(t *testing.T) {
+		cfg, _ := LoadFrom(write(t, `sync_branch = ""`))
+		if cfg.SyncBranchExplicit {
+			t.Error("SyncBranchExplicit = true con sync_branch vacío")
+		}
+	})
+}
+
 // Un comando declarado vacío NO sustituye al default: es una casilla sin
 // rellenar, no una orden de "no hacer nada". Aceptarlo dejaba la acción con un
 // argv vacío, que es un panic alcanzable desde el panel del log.

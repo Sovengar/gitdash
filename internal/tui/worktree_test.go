@@ -944,7 +944,7 @@ func TestWorktreeExpandRealFixture(t *testing.T) {
 	testutil.MakeWorktree(t, dir, wtDetached, "otra")
 	testutil.Detach(t, wtDetached)
 
-	snap := gitstatus.Collect(t.Context(), dir, "main")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
 	if len(snap.Worktrees) != 2 {
 		t.Fatalf("fixture: worktrees = %d, want 2", len(snap.Worktrees))
 	}

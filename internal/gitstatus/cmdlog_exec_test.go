@@ -123,7 +123,7 @@ func TestCollectRegistraLasLecturasComoRead(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
-	Collect(context.Background(), dir, "main")
+	Collect(context.Background(), dir, "main", false)
 
 	entries := rec.Entries()
 	if len(entries) < 3 {
@@ -211,7 +211,7 @@ func TestCollectNoLeeElRemote(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
-	Collect(context.Background(), dir, "main")
+	Collect(context.Background(), dir, "main", false)
 
 	for _, e := range rec.Entries() {
 		if strings.Contains(e.Command(), "remote") {
@@ -238,7 +238,7 @@ func TestRemoveWorktreeArgv(t *testing.T) {
 func TestExecSinRecorderNoRompe(t *testing.T) {
 	cmdlog.SetRecorder(nil)
 	dir, _ := testutil.NewRepo(t, true)
-	snap := Collect(context.Background(), dir, "main")
+	snap := Collect(context.Background(), dir, "main", false)
 	if snap.Err != "" {
 		t.Fatalf("Collect sin recorder falló: %s", snap.Err)
 	}
@@ -283,7 +283,7 @@ func TestExecSinStderrConservaElMotivo(t *testing.T) {
 		t.Errorf("err = %q, want el motivo del proceso (context canceled)", err)
 	}
 	// El mismo camino desde Collect: el error viaja en el Snapshot.
-	snap := Collect(ctx, dir, "")
+	snap := Collect(ctx, dir, "", false)
 	if snap.Err == "" {
 		t.Fatal("Collect con contexto cancelado sin Err")
 	}

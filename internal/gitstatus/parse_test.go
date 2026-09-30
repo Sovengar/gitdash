@@ -123,7 +123,7 @@ func TestParseLog(t *testing.T) {
 
 func TestCollectClean(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if st.Err != "" {
 		t.Fatalf("err = %q", st.Err)
 	}
@@ -138,7 +138,7 @@ func TestCollectDirty(t *testing.T) {
 	testutil.WriteUncommitted(t, dir, map[string]string{"base.txt": "changed"})
 	testutil.WriteUntracked(t, dir, map[string]string{"un1.txt": "x", "un2.txt": "y"})
 
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if st.Status.TrackedChanges != 1 || st.Status.Untracked != 2 {
 		t.Errorf("tracked=%d untracked=%d", st.Status.TrackedChanges, st.Status.Untracked)
 	}
@@ -152,7 +152,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 	testutil.CommitFiles(t, ahead, map[string]string{"extra.txt": "x"}, "local 1")
 	testutil.CommitFiles(t, ahead, map[string]string{"extra2.txt": "x"}, "local 2")
 
-	st := Collect(t.Context(), ahead, "")
+	st := Collect(t.Context(), ahead, "", false)
 	if st.Status.Ahead != 2 || st.Status.Derive() != StateAhead {
 		t.Errorf("ahead: %+v", snapSummary(st))
 	}
@@ -160,7 +160,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 	behind, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 3, "behind-")
 	testutil.FetchLocal(t, behind) // sin fetch el repo no ve el behind
-	st = Collect(t.Context(), behind, "")
+	st = Collect(t.Context(), behind, "", false)
 	if st.Status.Behind != 3 || st.Status.Derive() != StateBehind {
 		t.Errorf("behind: %+v", snapSummary(st))
 	}
@@ -169,7 +169,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 	testutil.CommitFiles(t, diverged, map[string]string{"l.txt": "l"}, "local")
 	testutil.PushUpstreamCommits(t, origin2, 2, "div-")
 	testutil.FetchLocal(t, diverged)
-	st = Collect(t.Context(), diverged, "")
+	st = Collect(t.Context(), diverged, "", false)
 	if st.Status.Ahead != 1 || st.Status.Behind != 2 || st.Status.Derive() != StateDiverged {
 		t.Errorf("diverged: %+v", snapSummary(st))
 	}
@@ -177,7 +177,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 
 func TestCollectNoUpstream(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if st.Status.HasUpstream || st.Status.Derive() != StateNoUpstream {
 		t.Errorf("no-upstream: %+v", snapSummary(st))
 	}
@@ -186,7 +186,7 @@ func TestCollectNoUpstream(t *testing.T) {
 func TestCollectDetached(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	testutil.Detach(t, dir)
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if !st.Status.Detached {
 		t.Fatalf("detached: %+v", st.Status)
 	}
@@ -199,7 +199,7 @@ func TestCollectCorrupt(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	// .git corrupto: el binario git falla y el error viaja en el Snapshot.
 	testutil.BreakGit(t, dir)
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if st.Err == "" {
 		t.Fatal("corrupto sin error")
 	}
@@ -271,7 +271,7 @@ func TestParseLineaTruncadaSeDescarta(t *testing.T) {
 func TestCollectSinCommits(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir) // sin commit
-	st := Collect(t.Context(), dir, "")
+	st := Collect(t.Context(), dir, "", false)
 	if st.Err != "" {
 		t.Fatalf("err = %q", st.Err)
 	}
@@ -341,7 +341,7 @@ func TestStreamPoolConcurrenciaInvalida(t *testing.T) {
 	for _, c := range []int{0, -1, 1, 2} {
 		var mu sync.Mutex
 		got := map[string]bool{}
-		StreamPool(t.Context(), projects, "", c, func(path string, _ Snapshot) {
+		StreamPool(t.Context(), projects, "", false, c, func(path string, _ Snapshot) {
 			mu.Lock()
 			got[path] = true
 			mu.Unlock()
@@ -364,7 +364,7 @@ func TestStreamPool(t *testing.T) {
 	got := map[string]State{}
 	var mu sync.Mutex
 	// emit se invoca concurrentemente (contrato de StreamPool): proteger el mapa.
-	StreamPool(t.Context(), projects, "", 2, func(path string, st Snapshot) {
+	StreamPool(t.Context(), projects, "", false, 2, func(path string, st Snapshot) {
 		mu.Lock()
 		got[path] = st.State(true)
 		mu.Unlock()

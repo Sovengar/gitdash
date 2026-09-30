@@ -39,7 +39,7 @@ func runPrint(cfg config.Config) {
 
 	var mu sync.Mutex
 	states := map[string]gitstatus.Snapshot{}
-	gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, 8, func(path string, snap gitstatus.Snapshot) {
+	gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, cfg.SyncBranchExplicit, 8, func(path string, snap gitstatus.Snapshot) {
 		mu.Lock()
 		states[path] = snap
 		mu.Unlock()

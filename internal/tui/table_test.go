@@ -339,12 +339,44 @@ func TestSyncOfYNombreResuelvenElPathQueCorresponde(t *testing.T) {
 		{"/no-descubierto", "global", "no-descubierto"},
 		{"", "global", ""},
 	} {
-		if got := m.syncOf(c.path); got != c.sync {
+		if got, _ := m.syncOf(c.path); got != c.sync {
 			t.Errorf("syncOf(%q) = %q, want %q", c.path, got, c.sync)
 		}
 		if got := m.nameOf(c.path); got != c.name {
 			t.Errorf("nameOf(%q) = %q, want %q", c.path, got, c.name)
 		}
+	}
+}
+
+// El segundo valor de syncOf decide si la referencia puede caer a master, y es
+// la precedencia completa de la feature: solo el default (nadie la declaró)
+// la admite. Un override del marcador o una config global explícita se
+// respetan tal cual, aunque la rama no exista: cambiarles la referencia en
+// silencio taparía un error de configuración detrás de un número plausible.
+func TestSyncOfFallbackSoloEnElDefault(t *testing.T) {
+	casos := []struct {
+		nombre   string
+		project  discovery.Project
+		global   string
+		explicit bool
+		want     string
+		wantFB   bool
+	}{
+		{"default sin declarar", discovery.Project{Path: "/a"}, "main", false, "main", true},
+		{"marcador declarado", discovery.Project{Path: "/a", SyncBranch: "develop"}, "main", false, "develop", false},
+		{"config global explícita", discovery.Project{Path: "/a"}, "release", true, "release", false},
+		{"marcador sobre global explícita", discovery.Project{Path: "/a", SyncBranch: "develop"}, "release", true, "develop", false},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			m := newTestModel(t, []discovery.Project{c.project}, map[string]gitstatus.Snapshot{})
+			m.cfg.SyncBranch = c.global
+			m.cfg.SyncBranchExplicit = c.explicit
+			got, gotFB := m.syncOf("/a")
+			if got != c.want || gotFB != c.wantFB {
+				t.Errorf("syncOf = (%q, %v), want (%q, %v)", got, gotFB, c.want, c.wantFB)
+			}
+		})
 	}
 }
 

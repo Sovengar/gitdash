@@ -35,7 +35,7 @@ func TestCollectWorktrees(t *testing.T) {
 	wtB := t.TempDir()
 	testutil.MakeWorktree(t, dir, wtB, "wt-b")
 
-	snap := Collect(t.Context(), dir, "")
+	snap := Collect(t.Context(), dir, "", false)
 	if len(snap.Worktrees) != 2 {
 		t.Fatalf("wts = %d, want 2 (marcador o no)", len(snap.Worktrees))
 	}
@@ -69,7 +69,7 @@ func TestRemoveWorktreeRemovesAndKeepsBranch(t *testing.T) {
 		t.Errorf("la carpeta del worktree sigue existiendo: %v", err)
 	}
 	// El registro desaparece: git ya no lo lista.
-	if snap := Collect(t.Context(), dir, ""); len(snap.Worktrees) != 0 {
+	if snap := Collect(t.Context(), dir, "", false); len(snap.Worktrees) != 0 {
 		t.Errorf("worktrees tras borrar = %d, want 0", len(snap.Worktrees))
 	}
 	// La rama sobrevive.
@@ -135,7 +135,7 @@ func TestRemoveWorktreePrunableFailsGracefully(t *testing.T) {
 	if err != nil && FailureReason(out, err) == "" {
 		t.Errorf("error sin motivo resumible: err=%v out=%q", err, out)
 	}
-	if snap := Collect(t.Context(), dir, ""); len(snap.Worktrees) != 0 {
+	if snap := Collect(t.Context(), dir, "", false); len(snap.Worktrees) != 0 {
 		t.Errorf("el registro huérfano sigue listado: %+v", snap.Worktrees)
 	}
 	// El force sobre un path ya inexistente tampoco rompe.

@@ -345,7 +345,7 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-real")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-real")
-	snap := gitstatus.Collect(t.Context(), dir, "main")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
 	if len(snap.Worktrees) != 1 {
 		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
 	}
@@ -650,7 +650,7 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty")
 	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "x"})
-	snap := gitstatus.Collect(t.Context(), dir, "main")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
 	if len(snap.Worktrees) != 1 {
 		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
 	}

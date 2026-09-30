@@ -197,7 +197,11 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 	// tiene: es el mismo valor, ya normalizado por la recolección.
 	base := r.snap.SyncBranch
 	if base == "" {
-		base = m.syncOf(r.project.Path)
+		// Sin snapshot no hay a quién preguntarle por la referenciaeffective
+		// (una sub-fila de worktree no tiene el suyo) ni dónde resolverla: el
+		// bool del fallback se queda sin usar a propósito, porque resolverlo
+		// aquí sería un `rev-list` en el hilo de la UI.
+		base, _ = m.syncOf(r.project.Path)
 	}
 	// Un worktree sin marcador no tiene snapshot propio, igual que para los
 	// placeholders de la IA: la rama sale del inventario del padre, la MISMA

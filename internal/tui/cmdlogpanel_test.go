@@ -859,7 +859,7 @@ func TestBorradoWorktreeRegistraElArgvResuelto(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-real")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-real")
-	snap := gitstatus.Collect(t.Context(), dir, "main")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
 
 	p := proj(filepath.Base(dir), dir, true)
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})

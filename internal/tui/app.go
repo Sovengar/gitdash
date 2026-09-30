@@ -458,7 +458,7 @@ func (m *Model) startScanCmd() tea.Cmd {
 		if ctx.Err() != nil {
 			return
 		}
-		gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, 8, func(path string, snap gitstatus.Snapshot) {
+		gitstatus.StreamPool(ctx, projects, cfg.SyncBranch, cfg.SyncBranchExplicit, 8, func(path string, snap gitstatus.Snapshot) {
 			sendEvent(ctx, events, statusMsg{path: path, snap: snap})
 		})
 		if ctx.Err() != nil {
@@ -534,7 +534,8 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 				ok++
 				mu.Unlock()
 				sendEvent(ctx, events, fetchStateMsg{path: p, state: "ok"})
-				sendEvent(ctx, events, statusMsg{path: p, snap: gitstatus.Collect(ctx, p, m.syncOf(p))})
+				sync, syncFallback := m.syncOf(p)
+				sendEvent(ctx, events, statusMsg{path: p, snap: gitstatus.Collect(ctx, p, sync, syncFallback)})
 			}(path)
 		}
 		wg.Wait()
@@ -576,7 +577,8 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		}
 		sendEvent(appCtx, events, msg)
 		if err == nil {
-			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
+			sync, syncFallback := m.syncOf(path)
+			sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, sync, syncFallback)})
 		}
 	}()
 	return nil
@@ -607,7 +609,7 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 	m.running[parent] = "worktree_remove"
 	appCtx := m.ctx
 	events := m.events
-	syncBranch := m.syncOf(parent)
+	syncBranch, syncFallback := m.syncOf(parent)
 	go func() {
 		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
 		defer cancel()
@@ -624,7 +626,7 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 			cmd: "git " + strings.Join(gitstatus.RemoveWorktreeArgv(wtPath, withForce), " "),
 		})
 		if err == nil {
-			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch)})
+			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch, syncFallback)})
 		}
 	}()
 	return nil
@@ -639,7 +641,8 @@ func (m *Model) recollectCmd(path string) tea.Cmd {
 	appCtx := m.ctx
 	events := m.events
 	go func() {
-		sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, m.syncOf(path))})
+		sync, syncFallback := m.syncOf(path)
+		sendEvent(appCtx, events, statusMsg{path: path, snap: gitstatus.Collect(appCtx, path, sync, syncFallback)})
 	}()
 	return nil
 }
@@ -996,14 +999,17 @@ func (m *Model) nameOf(path string) string {
 }
 
 // syncOf resuelve la sync branch efectiva de un path: override del
-// marcador > global. Proyectos no descubiertos → global.
-func (m *Model) syncOf(path string) string {
+// marcador > global. El segundo valor dice si esa referencia admite el
+// fallback al otro nombre habitual de la rama principal (solo cuando nadie
+// la declaró). Proyectos no descubiertos → global.
+func (m *Model) syncOf(path string) (string, bool) {
 	for _, p := range m.projects {
 		if p.Path == path {
-			return gitstatus.SyncFor(p, m.cfg.SyncBranch)
+			return gitstatus.SyncFor(p, m.cfg.SyncBranch),
+				gitstatus.SyncForAllowsFallback(p, m.cfg.SyncBranchExplicit)
 		}
 	}
-	return m.cfg.SyncBranch
+	return m.cfg.SyncBranch, !m.cfg.SyncBranchExplicit
 }
 
 // saveCollapsed persiste el estado de plegado y de expansión a disco

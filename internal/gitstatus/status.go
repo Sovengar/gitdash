@@ -23,6 +23,13 @@ import (
 	"gitdash/internal/discovery"
 )
 
+// syncFallbackBranch es el nombre con el que se prueba la referencia cuando
+// la global no existe en el repo. "main" es el default de `git init` desde
+// 2020, pero media vida de repos sigue en "master": el fallback está ahí
+// para que esos repos no vivan con "main —" en la columna SYNC ni con un
+// `glab mr create -b main` que el servidor rechaza.
+const syncFallbackBranch = "master"
+
 // Snapshot es el estado completo y vivo de un repo, listo para la UI.
 type Snapshot struct {
 	Status     Status
@@ -55,9 +62,12 @@ func (s Snapshot) State(hasRepo bool) State {
 }
 
 // Collect recolecta el estado del repo en dir, con la desviación vs la
-// sync branch dada ("" = sin comparación). Nunca falla duro: el error
-// (si lo hay) viaja dentro del Snapshot para verse en la UI.
-func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
+// sync branch dada ("" = sin comparación). allowFallback permite probar
+// syncFallbackBranch cuando la dada no existe, y es lo que decide si la
+// referencia que se muestra pasa a ser esa: solo lo hace nadie la declaró
+// (ver SyncForAllowsFallback). Nunca falla duro: el error (si lo hay) viaja
+// dentro del Snapshot para verse en la UI.
+func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Snapshot {
 	var snap Snapshot
 
 	out, err := runGit(ctx, dir, cmdlog.ClassRead, "status", "--porcelain=v2", "--branch")
@@ -73,7 +83,18 @@ func Collect(ctx context.Context, dir, syncBranch string) Snapshot {
 		// La rama resuelta se rellena siempre (visible en UI
 		// aunque la comparación falle → "<rama> —").
 		snap.SyncBranch = syncBranch
-		if n, ok := syncBehind(ctx, dir, syncBranch); ok {
+		n, ok := syncBehind(ctx, dir, syncBranch)
+		if !ok && allowFallback && syncBranch != syncFallbackBranch {
+			// Nadie declaró esta referencia, así que se puede probar la otra.
+			// Vive AQUÍ, en el fallo de la comparación, y no antes: `main`
+			// resuelve en cada repo moderno, y un `rev-list` de más por repo
+			// y por ciclo solo se paga donde hace falta (los repos en master).
+			n, ok = syncBehind(ctx, dir, syncFallbackBranch)
+			if ok {
+				snap.SyncBranch = syncFallbackBranch // la que resuelve es la que se muestra
+			}
+		}
+		if ok {
 			snap.SyncBehind = n // commits de sync ausentes en HEAD
 			snap.SyncKnown = true
 		}
@@ -137,7 +158,7 @@ func normalizeBranch(st Status) string {
 //
 // emit se invoca concurrentemente desde hasta `concurrency` goroutines: el
 // callback DEBE ser seguro para uso concurrente (p.ej. mutex o canal).
-func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, concurrency int, emit func(path string, snap Snapshot)) {
+func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, defaultExplicit bool, concurrency int, emit func(path string, snap Snapshot)) {
 	// El pool usa entre 1 y 4 workers por CPU: acotado por abajo para no
 	// colgarse con un 0 en la config, y por arriba para no lanzar miles de git
 	// de golpe si alguien pone concurrency = 99999.
@@ -159,7 +180,7 @@ func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync s
 				emit(p.Path, Snapshot{}) // estado no-repo inmediato
 				return
 			}
-			emit(p.Path, Collect(ctx, p.Path, SyncFor(p, defaultSync)))
+			emit(p.Path, Collect(ctx, p.Path, SyncFor(p, defaultSync), SyncForAllowsFallback(p, defaultExplicit)))
 		}(p)
 	}
 	wg.Wait()
@@ -172,6 +193,15 @@ func SyncFor(p discovery.Project, defaultSync string) string {
 		return p.SyncBranch
 	}
 	return defaultSync
+}
+
+// SyncForAllowsFallback dice si la sync branch resuelta para p admite el
+// fallback de referencia (Collect): solo cuando NADIE la declaró, ni el
+// marcador ni la config global. Un default heredado es una suposición que
+// el repo puede desmentir; una rama escrita por alguien es una intención,
+// y cambiársela por detrás mostraría una referencia que nadie pidió.
+func SyncForAllowsFallback(p discovery.Project, defaultExplicit bool) bool {
+	return p.SyncBranch == "" && !defaultExplicit
 }
 
 // Fetch ejecuta `git fetch` en dir con los args dados (default: --prune).

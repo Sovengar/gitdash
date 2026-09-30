@@ -3,6 +3,8 @@
 package tui
 
 import (
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,7 +14,20 @@ import (
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/testutil"
 )
+
+// renameBranchInitial renombra la rama inicial del repo. Los fixtures de
+// testutil siempre nacen en main, y aquí hace falta un repo SIN main: es el
+// caso que dispara el fallback de la referencia.
+func renameBranchInitial(t *testing.T, dir, branch string) {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "-m", branch)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch -m %s en %s: %v\n%s", branch, dir, err, out)
+	}
+}
 
 // newPROverlayModel construye un modelo sobre el fixture estándar con el
 // cursor en la fila indicada. Sin path deja el cursor donde esté (para probar
@@ -151,6 +166,30 @@ func TestPROverlayPrefechaLaSyncDelRepo(t *testing.T) {
 		t.Errorf("base = %q, want develop (la sync branch del repo)", got)
 	}
 	if out := stripANSI(m.View().Content); !strings.Contains(out, "develop") {
+		t.Errorf("la base prellenada no se ve en el panel:\n%s", out)
+	}
+}
+
+// El fallback llega hasta el overlay: en un repo cuya rama principal es master
+// la base prellenada sale master, y no "main" — que es lo que hacía fallar el
+// `glab mr create -b main` con una rama que no existe.
+func TestPROverlayPrefechaMasterEnRepoSinMain(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	renameBranchInitial(t, dir, "master") // el repo ya no tiene main
+
+	// La referencia llega resuelta desde la recolección, con el default global
+	// ("main") y el fallback permitido: nobody la declaró.
+	snap := gitstatus.Collect(t.Context(), dir, "main", true)
+	if snap.SyncBranch != "master" {
+		t.Fatalf("fixture: SyncBranch = %q, want master", snap.SyncBranch)
+	}
+	p := proj(filepath.Base(dir), dir, true)
+	m := openPROverlay(t, newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap}))
+
+	if got := m.prParams().Base; got != "master" {
+		t.Errorf("base = %q, want master (la referencia resuelta del repo)", got)
+	}
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "master") {
 		t.Errorf("la base prellenada no se ve en el panel:\n%s", out)
 	}
 }

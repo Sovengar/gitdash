@@ -48,12 +48,17 @@ type Config struct {
 	Editor  string
 	// SyncBranch es la rama de referencia global para la columna SYNC:
 	// los marcadores pueden overridden por repo.
-	SyncBranch       string
-	FetchAuto        bool
-	FetchConcurrency int
-	FetchTimeout     time.Duration
-	Keybindings      Keybindings
-	Commands         Commands
+	SyncBranch string
+	// SyncBranchExplicit dice que el usuario puso sync_branch en su
+	// config.toml, en vez de heredar el default. El default no es una
+	// declaración: si el repo no tiene esa rama, la referencia effective
+	// puede caer a "master". Una declarada, no (ver gitstatus.Collect).
+	SyncBranchExplicit bool
+	FetchAuto          bool
+	FetchConcurrency   int
+	FetchTimeout       time.Duration
+	Keybindings        Keybindings
+	Commands           Commands
 	// AICommands mapea acción AI (pull, commit…) → plantilla del comando. Es
 	// un namespace abierto: el ejecutable SOLO sale de la config global, nunca
 	// del marcador commiteado (input no confiable). Sin plantilla, la acción
@@ -149,6 +154,9 @@ func LoadFrom(path string) (Config, string) {
 	}
 	if fc.SyncBranch != nil && *fc.SyncBranch != "" {
 		cfg.SyncBranch = *fc.SyncBranch // override global
+		// Declarada a mano: la referencia es una intención, no una suposición
+		// que el repo pueda desmentir (ver SyncBranchExplicit).
+		cfg.SyncBranchExplicit = true
 	}
 	if fc.Fetch != nil {
 		if fc.Fetch.Auto != nil {
