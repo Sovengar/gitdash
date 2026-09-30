@@ -413,3 +413,167 @@ func TestCabeceraYFilasCabenLasMismasColumnas(t *testing.T) {
 		t.Fatal("el fixture no produjo sub-filas de worktree: la comprobación sería vacía")
 	}
 }
+
+// --- ramas que la fixture no tenía ---
+
+// fixtureProjects no declara grupos ni incluye un repo con error, así que tres
+// ramas de las celdas nunca se pintaron: el grupo compuesto, la celda de rama
+// de un repo que no es repo, y el contador de errores del resumen de grupo. Las
+// tres son cosas que el usuario ve en pantalla, y sin un test el mutante que
+// las rompe pasa.
+func fixtureConGruposYErrores() ([]discovery.Project, map[string]gitstatus.Snapshot) {
+	projects := []discovery.Project{
+		{Path: "/tmp/g-doble", Name: "doble", HasRepo: true, PrimaryGroup: "vsocial", SecondaryGroup: "backend"},
+		{Path: "/tmp/g-solo", Name: "solo", HasRepo: true, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-sin", Name: "sin", HasRepo: true},
+		{Path: "/tmp/g-error", Name: "roto", HasRepo: true, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-norepo", Name: "norepo", HasRepo: false, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-sinrama", Name: "sinrama", HasRepo: true, PrimaryGroup: "vsocial"},
+	}
+	states := map[string]gitstatus.Snapshot{
+		"/tmp/g-doble": snapClean(),
+		"/tmp/g-solo":  snapClean(),
+		"/tmp/g-sin":   snapClean(),
+		"/tmp/g-error": {Status: gitstatus.Status{Branch: "main"}, Err: "fatal: no escribo"},
+		// Un repo con repo pero sin rama: un unborn HEAD. La celda tiene que
+		// distinguirlo del "no repo": no es lo mismo no tener repositorio que
+		// tenerlo y no tener rama donde mirar.
+		"/tmp/g-norepo":  {},
+		"/tmp/g-sinrama": {Status: gitstatus.Status{}},
+	}
+	return projects, states
+}
+
+// El rótulo del grupo son dos niveles: "primario/secundario" cuando hay los dos,
+// solo el primario cuando no, y vacío cuando no hay grupo (la columna lo
+// convierte en "-").
+func TestGroupLabelDeDosNiveles(t *testing.T) {
+	casos := []struct {
+		nombre string
+		p      discovery.Project
+		want   string
+	}{
+		{"los dos niveles", discovery.Project{PrimaryGroup: "vsocial", SecondaryGroup: "backend"}, "vsocial/backend"},
+		{"solo primario", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
+		{"sin grupo", discovery.Project{}, ""},
+		{"solo secundario no se muestra (un nivel no anida)", discovery.Project{SecondaryGroup: "backend"}, ""},
+	}
+	for _, c := range casos {
+		if got := groupLabel(c.p); got != c.want {
+			t.Errorf("%s: groupLabel = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+	if got := groupKey("vsocial", "backend"); got != "vsocial/backend" {
+		t.Errorf("groupKey = %q, want vsocial/backend", got)
+	}
+}
+
+// La celda de rama: "-" para un repo sin repositorio y para uno sin rama (un
+// unborn HEAD), el nombre con "(detached)" colgado cuando toca, y el nombre a
+// secas en el caso normal.
+func TestBranchCellSinRamaYDetached(t *testing.T) {
+	m := newTestModel(t, []discovery.Project{}, map[string]gitstatus.Snapshot{})
+	for _, c := range []struct {
+		nombre string
+		r      row
+		want   string
+	}{
+		{"sin repo", row{state: gitstatus.StateNoRepo}, "-"},
+		{"repo sin rama (unborn HEAD)", row{state: gitstatus.StateClean}, "-"},
+		{"rama normal", row{state: gitstatus.StateClean, snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "feat/x"}}}, "feat/x"},
+		{"detached", row{state: gitstatus.StateDetached, snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "abc123", Detached: true}}}, "abc123 (detached)"},
+	} {
+		got, _ := m.branchCell(c.r)
+		if got != c.want {
+			t.Errorf("%s: branchCell = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+}
+
+// El resumen de un grupo cuenta los repos CON error, que no es lo mismo que
+// no contarlos: es lo que hace que el header de un grupo con un repo roto
+// avise en vez de parecer limpio.
+func TestGroupStatsCuentaLosErrores(t *testing.T) {
+	projects, states := fixtureConGruposYErrores()
+	m := newTestModel(t, projects, states)
+
+	// El grupo "vsocial" tiene los cuatro repos con grupo, uno de ellos roto.
+	st := m.groupStats(groupKey("vsocial", ""))
+	if st.repos != 4 {
+		t.Errorf("repos = %d, want 4", st.repos)
+	}
+	if st.errors != 1 {
+		t.Errorf("errors = %d, want 1 (el repo con gitstatus.Err no cuenta como limpio)", st.errors)
+	}
+	// Y un grupo que no existe no inventa nada.
+	if st := m.groupStats("nada/aqui"); st.repos != 0 || st.errors != 0 {
+		t.Errorf("grupo inexistente = %+v, want todo a cero", st)
+	}
+}
+
+// relativeTime recorre sus seis franjas: now / minutos / horas / días / semanas
+// / meses. Con la última sin cubrir, un "8mo" podría volverse "2400d" sin que
+// nada se quejara.
+func TestRelativeTimeRecorreSusFranjas(t *testing.T) {
+	ahora := time.Now().Unix()
+	for _, c := range []struct {
+		nombre string
+		edad   time.Duration
+		want   string
+	}{
+		{"recién", 0, "now"},
+		{"minutos", 5 * time.Minute, "5m"},
+		{"horas", 3 * time.Hour, "3h"},
+		{"días", 2 * 24 * time.Hour, "2d"},
+		{"semanas", 10 * 24 * time.Hour, "1w"},
+		{"meses", 60 * 24 * time.Hour, "2mo"},
+		// Y los bordes, con un caso a cada lado de cada umbral. Un caso "3h"
+		// no distingue un umbral de 24h de uno de 23h: hace falta una edad que
+		// caiga ENTRE los dos, que es justo lo que un mutante de borde mueve.
+		// (La edad real es la pedida más los microsegundos que tarda el test,
+		// así que los casos van por debajo del umbral, nunca justo encima.)
+		{"59s todavía es now", 59 * time.Second, "now"},
+		{"30m ya son minutos", 30 * time.Minute, "30m"},
+		{"1h1m todavía son horas", time.Hour + time.Minute, "1h"},
+		{"23h59m todavía son horas", 23*time.Hour + 59*time.Minute, "23h"},
+		{"6d23h todavía son días", 6*24*time.Hour + 23*time.Hour, "6d"},
+		{"7d1h ya son semanas", 7*24*time.Hour + time.Hour, "1w"},
+		{"29d23h todavía son semanas", 29*24*time.Hour + 23*time.Hour, "4w"},
+		{"30d1h ya son meses", 30*24*time.Hour + time.Hour, "1mo"},
+	} {
+		if got := relativeTime(ahora - int64(c.edad.Seconds())); got != c.want {
+			t.Errorf("%s: relativeTime = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+	if got := relativeTime(0); got != "-" {
+		t.Errorf("sin epoch: relativeTime = %q, want -", got)
+	}
+	if got := relativeTime(-5); got != "-" {
+		t.Errorf("epoch negativo: relativeTime = %q, want -", got)
+	}
+}
+
+// stripANSI quita las secuencias de SGR (termina en 'm') y las de erase (en 'K',
+// que es lo que pinta el cursor), y NO se come texto normal que parece
+// una secuencia de escape.
+func TestStripANSISoloQuitaSecuencias(t *testing.T) {
+	if got := stripANSI("\x1b[31mrojo\x1b[0m"); got != "rojo" {
+		t.Errorf("SGR: %q, want rojo", got)
+	}
+	if got := stripANSI("antes\x1b[2Kapués"); got != "antesapués" {
+		t.Errorf("erase: %q, want antesapués", got)
+	}
+	if got := stripANSI("sin escapes"); got != "sin escapes" {
+		t.Errorf("sin escapes: %q", got)
+	}
+	// Una 'm' suelta después de un ESC también cierra la secuencia: el saneo no
+	// distingue SGR de erase, cierra con cualquiera de las dos.
+	if got := stripANSI("x\x1b[1m"); got != "x" {
+		t.Errorf("secuencia sin cerrar: %q, want x", got)
+	}
+	// El texto normal se conserva entero, incluidos los signos que un consumidor
+	// naïvo confundiría.
+	if got := stripANSI("↑2 ↓0 ¿q?"); got != "↑2 ↓0 ¿q?" {
+		t.Errorf("texto con símbolos: %q", got)
+	}
+}

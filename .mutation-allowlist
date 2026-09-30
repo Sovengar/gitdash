@@ -117,7 +117,7 @@ CONDITIONALS_NEGATION internal/tui/toast.go:236
 CONDITIONALS_BOUNDARY internal/tui/toast.go:249
 #   `if top < 0` del bloque que no cabe entero. Solo difiere con top == 0, donde
 #   keep == bottom+1 == bh: el recorte `block[bh-keep:]` deja el bloque entero.
-#   Es la guarda de "no cabe" writa al revés por un paso, y en el borde exacto
+#   Es la guarda de "no cabe" escrita al revés por un paso, y en el borde exacto
 #   no recorta nada.
 
 # --- Ruido de medición (no son huecos: hay test que los mata) -----------
