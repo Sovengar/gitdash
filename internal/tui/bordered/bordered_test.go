@@ -141,3 +141,67 @@ func TestRenderWithTitlesLeyendaInferior(t *testing.T) {
 		}
 	}
 }
+
+// La alineación del título dentro de la línea de borde: lo que decide dónde cae
+// el texto entre los dos rellenos. El caso raro es el hueco IMPAR, porque ahí la
+// división entera y el reparto se separan (con 3 de hueco, al centro es 1 a la
+// izquierda y 2 a la derecha: el resto va a la derecha).
+func TestRenderWithTitlesAlineaElTitulo(t *testing.T) {
+	// El interior es width-2: con width 9 son 7 celdas, y un título de 4 deja
+	// un hueco de 3. Impar a propósito, que es el caso que discrimina.
+	const width = 9
+	// El borde redondeado: ╭ ╮ ╰ ╯, y el relleno es ─.
+	for _, c := range []struct {
+		nombre     string
+		align      int
+		wantTop    string
+		wantBottom string
+	}{
+		{"izquierda: el hueco entero a la derecha", AlignLeft, "╭hola───╮", "╰───────╯"},
+		{"centro: 1 a la izquierda y 2 a la derecha (impar)", AlignCenter, "╭─hola──╮", "╰───────╯"},
+		{"derecha: el hueco entero a la izquierda", AlignRight, "╭───hola╮", "╰───────╯"},
+	} {
+		out := RenderWithTitles(Rounded(), nil, "hola", c.align, "", c.align, "x", width)
+		lineas := strings.Split(out, "\n")
+		if len(lineas) != 3 {
+			t.Fatalf("%s: %d líneas, want 3 (borde + contenido + borde):\n%s",
+				c.nombre, len(lineas), out)
+		}
+		if got := lineas[0]; got != c.wantTop {
+			t.Errorf("%s: línea superior = %q, want %q", c.nombre, got, c.wantTop)
+		}
+		if got := lineas[2]; got != c.wantBottom {
+			t.Errorf("%s: línea inferior = %q, want %q", c.nombre, got, c.wantBottom)
+		}
+	}
+}
+
+// Las dos líneas de borde son independientes: el título de arriba puede estar a
+// un lado y la leyenda de abajo al otro, y eso es justo lo que el panel del log
+// hace (título a la izquierda, leyenda a la derecha).
+func TestRenderWithTitlesAlineaCadaLineaPorSeparado(t *testing.T) {
+	// "T" mide 1 sobre un interior de 7: el hueco es 6.
+	out := RenderWithTitles(Rounded(), nil, "T", AlignLeft, "B", AlignRight, "x", 9)
+	lineas := strings.Split(out, "\n")
+	if got := lineas[0]; got != "╭T──────╮" {
+		t.Errorf("línea superior = %q, want ╭T──────╮", got)
+	}
+	if got := lineas[2]; got != "╰──────B╯" {
+		t.Errorf("línea inferior = %q, want ╰──────B╯", got)
+	}
+}
+
+// Sin título, la línea de borde es todo relleno: no hay nada que alinear, y una
+// alineación cualquiera no puede dejar un hueco.
+func TestRenderWithTitlesSinTituloNoDejaHueco(t *testing.T) {
+	for _, align := range []int{AlignLeft, AlignCenter, AlignRight, 99} {
+		out := RenderWithTitles(Rounded(), nil, "", align, "", align, "x", 9)
+		lineas := strings.Split(out, "\n")
+		if got := lineas[0]; got != "╭───────╮" {
+			t.Errorf("align=%d sin título: línea superior = %q, want ╭───────╮", align, got)
+		}
+		if got := lineas[2]; got != "╰───────╯" {
+			t.Errorf("align=%d sin título: línea inferior = %q, want ╰───────╯", align, got)
+		}
+	}
+}

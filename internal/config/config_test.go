@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -364,5 +365,123 @@ fold   = "w"
 	}
 	if cfg.KeyFor("fold") != "w" {
 		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
+	}
+}
+
+// --- la puerta de entrada real: Load() y Path() ---
+
+// Path es lo que la app llama al arrancar para saber dónde está su config. Todos
+// los tests del paquete pasaban un path a mano con LoadFrom, así que la función
+// que resuelve XDG_CONFIG_HOME no tenía ni un test: el mismo brazo que decide
+// dónde vive el fichero nunca se ejecutó.
+func TestPathRespetaXDGConfigHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	got, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if want := filepath.Join(dir, DirName, FileName); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+// Sin XDG_CONFIG_HOME ni HOME no hay directorio de usuario, y Path tiene que
+// decirlo en vez de devolver una ruta que no existe (un "/gitdash/config.toml"
+// silencioso escribiría donde nadie lee).
+func TestPathSinDirectorioDeUsuarioDaError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	if got, err := Path(); err == nil {
+		t.Errorf("Path sin HOME ni XDG = %q, want error", got)
+	}
+}
+
+// Load es lo que arranca de verdad: lee Path y delega en LoadFrom. Sin fichero
+// de config devuelve los defaults SIN aviso (un usuario que aún no ha configurado
+// nada no tiene un error que ver), y con fichero, los valores de ahí.
+func TestLoadSinFicheroDaDefaultsSilenciosos(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg, warn := Load()
+	if warn != "" {
+		t.Errorf("sin config, Load avisa %q; un usuario sin configurar no tiene un error que ver", warn)
+	}
+	if len(cfg.Roots) == 0 {
+		t.Error("sin config, Load no devolvió los roots por defecto")
+	}
+	if cfg.Marker == "" {
+		t.Error("sin config, Load no devolvió el marcador por defecto")
+	}
+}
+
+// Y que Load lee de verdad lo que hay en el path que resuelve: si leyera otro
+// fichero, los roots del usuario no se aplicarían y descubriría repos donde no
+// hay.
+func TestLoadLeeElFicheroDelPathResuelto(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, DirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raiz := t.TempDir()
+	cuerpo := fmt.Sprintf("roots = [%q]\nsync_branch = \"develop\"\n", raiz)
+	if err := os.WriteFile(filepath.Join(dir, DirName, FileName), []byte(cuerpo), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, warn := Load()
+	if warn != "" {
+		t.Errorf("config válida, Load avisa %q", warn)
+	}
+	if len(cfg.Roots) != 1 || cfg.Roots[0] != raiz {
+		t.Errorf("Roots = %v, want [%q]", cfg.Roots, raiz)
+	}
+	if cfg.SyncBranch != "develop" {
+		t.Errorf("SyncBranch = %q, want develop", cfg.SyncBranch)
+	}
+}
+
+// Un comando declarado vacío NO sustituye al default: es una casilla sin
+// rellenar, no una orden de "no hacer nada". Aceptarlo dejaba la acción con un
+// argv vacío, que es un panic alcanzable desde el panel del log.
+func TestComandoVacioNoPisaElDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path,
+		[]byte("[commands]\npull = \"\"\npush = \"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := LoadFrom(path)
+
+	def := DefaultCommands()
+	for _, k := range []string{"pull", "push"} {
+		if cfg.Commands[k] != def[k] {
+			t.Errorf("commands[%q] = %q, want el default %q: un valor vacío es una casilla sin rellenar, no una orden",
+				k, cfg.Commands[k], def[k])
+		}
+	}
+}
+
+// Y la otra mitad del guard: un comando VACÍO de una acción que no existe ni
+// tiene default no se registra. Si se registrara, el mapa tendría una entrada
+// con argv vacío que el log presentaría como si algo se hubiera ejecutado.
+func TestComandoVacioDeUnaAccionDesconocidaNoSeRegistra(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path,
+		[]byte("[commands]\ninventada = \"\"\nreal = \"log --oneline -5\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := LoadFrom(path)
+
+	if v, ok := cfg.Commands["inventada"]; ok {
+		t.Errorf("commands[\"inventada\"] = %q registrada: un comando vacío no es un comando", v)
+	}
+	// El namespace es abierto: una acción nueva con valor SÍ se acepta, que es
+	// lo que permite el `[ai.pull]` y cualquier comando propio.
+	if got := cfg.Commands["real"]; got != "log --oneline -5" {
+		t.Errorf("commands[\"real\"] = %q, want el valor declarado", got)
 	}
 }
