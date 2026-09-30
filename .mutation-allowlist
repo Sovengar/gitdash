@@ -38,9 +38,17 @@ ARITHMETIC_BASE cmd/gitdash/print.go:111
 #   empatan en las tres claves no está garantizado ni en el código original (por
 #   eso el test del orden no afirma nada sobre ellas: afirmarlo sería atar el test
 #   a una propiedad que el producto no tiene).
+#
+#   OJO con cómo se midió esto: TODAS las mutaciones de cmd/gitdash/print.go
+#   salen NOT COVERED aunque los tests las ejecuten (comprobado con
+#   `go test -coverprofile`: el bloque del sort sale con count 1). La fase de
+#   cobertura de gremlins no corre el paquete main de cmd/, así que ese archivo
+#   no se mide: su "not covered" es un artefacto, no un hueco. Por eso esta
+#   entrada se sostiene con una verificación a mano (mutando el fichero, la
+#   suite sigue verde) y no con el informe.
 
 # --- internal/tui/app.go -------------------------------------------------
-CONDITIONALS_NEGATION internal/tui/app.go:361
+CONDITIONALS_NEGATION internal/tui/app.go:370
 #   `if path, err := cache.Path(); err == nil { m.projects = cache.Load(...) }`.
 #   Invertida, la carga ocurre con una ruta que no se pudo resolver. cache.Load
 #   valida cada entrada contra la existencia del marcador en disco, así que con
@@ -49,8 +57,8 @@ CONDITIONALS_NEGATION internal/tui/app.go:361
 #   mutación solo hace una lectura inútil. No hay forma de observar la diferencia
 #   sin interceptar os.UserConfigDir.
 
-CONDITIONALS_NEGATION internal/tui/app.go:368
-CONDITIONALS_NEGATION internal/tui/app.go:369
+CONDITIONALS_NEGATION internal/tui/app.go:377
+CONDITIONALS_NEGATION internal/tui/app.go:378
 #   Las dos guardas de nil del store en New: el store lo crea state.NewStore()
 #   dentro del propio New y su error se descarta, así que llegar a New con un
 #   store nil no tiene camino desde la app (no hay constructor que lo acepte).
@@ -58,11 +66,11 @@ CONDITIONALS_NEGATION internal/tui/app.go:369
 #   segunda entraría con persisted nil. Sin costura de inyección no hay forma de
 #   observar ninguno de los dos: no es un hueco de test, es unreachable.
 
-CONDITIONALS_NEGATION internal/tui/app.go:955
-#   `if cmdlog.Active() == nil { return }` en logIntent. Invertida, la función
-#   llamaría a cmdlog.RecordIntent sin recorder, y RecordIntent ES un no-op sin
-#   recorder (`if current.Load() != nil`). Dos capas de guarda para lo mismo: la
-#   exterior es una optimización, la interior la garantía.
+# RETIRADA en 82bd563: la guarda `if cmdlog.Active() == nil { return }` de
+#   logIntent ya la mata un test. Se deja el motivo por el que esa guarda era
+#   solo una optimización, no la garantía: RecordIntent ES un no-op sin recorder
+#   (`if current.Load() != nil`), o sea que la exterior y la interior cubren lo
+#   mismo.
 
 # --- internal/tui/table.go -----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/table.go:267
@@ -74,7 +82,7 @@ CONDITIONALS_BOUNDARY internal/tui/table.go:270
 #   cubierta: ahí no hay guarda que compare antes, y un `<=` invierte el orden.
 
 # --- internal/tui/update.go ----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/update.go:259
+CONDITIONALS_BOUNDARY internal/tui/update.go:309
 #   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
 #   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
 #   una operación real sobre tokens en vuelo. Para el resto de teclas no se
@@ -113,26 +121,19 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:249
 #   no recorta nada.
 
 # --- Ruido de medición (no son huecos: hay test que los mata) -----------
-# Los cuatro de abajo están VERIFICADOS A MANO con la suite completa: mutando el
-# fichero, el test falla. aun así gremlins los reporta a veces como LIVED, y en el
-# MISMO run marca KILLED y LIVED mutaciones idénticas (mismo tipo, misma línea,
-# misma columna, mismo código resultante). La causa es que la mutación dispara un
-# bucle enormouso (el panel recorre ~1e9 previsualizaciones, el offset se sale del
-# rango) y el resultado depende de si el proceso mutantado llega a terminar antes
-# del timeout de la máquina. No son un hueco de test: allowlistarlos evita el rojo
-# espurio del gate, y si algún día el test que los mata desaparece, el
+# El de abajo está VERIFICADO A MANO con la suite completa: mutando el fichero,
+# el test falla. aun así gremlins lo reporta a veces como LIVED, y en el MISMO
+# run marca KILLED y LIVED mutaciones idénticas (mismo tipo, misma línea, misma
+# columna, mismo código resultante). La causa es que la mutación dispara un
+# bucle enormouso y el resultado depende de si el proceso mutantado llega a
+# terminar antes del timeout de la máquina. No es un hueco de test: allowlistarlo
+# evita el rojo espurio del gate, y si el test que lo mata desaparece, el
 # NOT COVERED de esa línea lo delata.
 CONDITIONALS_BOUNDARY internal/tui/toast.go:69
 #   La guarda de expiración (`now.Sub(created) < duration`). La mata
 #   TestToastDuracionCeroExpiraYa (un toast con duration 0 está expirado ya).
-CONDITIONALS_BOUNDARY internal/tui/layout.go:80
-#   Una de las sumas internas del alto libre del panel. La mata
-#   TestPreviewConFiltroActivoRespetaElAlto: sin la sección de filtro descontada,
-#   las secciones ya no suman la altura de la terminal.
-CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:105
-#   Un signo de la ventana de scroll del panel. La mata
-#   TestPanelOffsetEnLosExtremos (recorre alturas 2..12 y offsets 0..8, y con la
-#   ventana corrupta el slice revienta).
+#   (Las sumas internas del alto libre del panel, que también entraban aquí por
+#   ruido, ya NO están: las mata TestPreviewConFiltroRespetaElShareDelHueco.)
 
 # --- internal/tui/cmdlogpanel.go -----------------------------------------
 ARITHMETIC_BASE internal/tui/cmdlogpanel.go:101
@@ -143,6 +144,23 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:101
 #   guardado se queda pasado. Ampliar ese techo con la mutación no cambia nada
 #   observable: el offset que llega aquí nunca lo supera, y el único sitio donde
 #   se usa es `len(entries)-visible-offset`, cuyo recorte por start ya lo acota.
+
+ARITHMETIC_BASE internal/tui/cmdlogpanel.go:105
+INVERT_NEGATIVES internal/tui/cmdlogpanel.go:105
+#   El segundo término del min de la ventana: `min(visible, len(entries)-start)`.
+#   Es una IDENTIDAD, y la demostración es el offset de al lado. offset >= 0
+#   siempre (logScroll lo acota con max(0, ...), y el resto de sitios lo ponen a
+#   0), así que:
+#     · start == 0  →  len(entries)-0 == len(entries)+0. Las dos formas dan lo
+#       mismo sin más.
+#     · start > 0   →  start == len(entries)-visible-offset, luego
+#       len(entries)-start == visible+offset >= visible, o sea que el min ya
+#       devuelve `visible`. Con `+start` el segundo término es todavía mayor,
+#       así que el min sigue devolviendo `visible`.
+#   En los dos casos el min devuelve lo mismo con el signo cambiado: ninguna
+#   ventana puede cambiar de tamaño. El `min` NO se borra (con pocas entradas
+#   y un panel alto, start == 0 y len < visible: ahí sí recorta), pero su
+#   segundo término no puede ser el que decide.
 
 CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:127
 CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159

@@ -1042,30 +1042,55 @@ func TestFetchStatePorSuValor(t *testing.T) {
 	}
 }
 
-// El panel de preview también se reparte cuando hay un filtro activo, y ahí el
-// alto libre depende de la sección de filtro: si esa resta no contara, el panel
-// se llevaría altura que no existe y la caja se saldría de la terminal. Con
-// filtro, el panel tiene que ENTRAR en lo que queda.
-func TestPreviewConFiltroActivoRespetaElAlto(t *testing.T) {
-	for _, h := range []int{24, 30, 40, 41, 50, 60, 80} {
-		lay := layoutTest(h, true, defaultHintLines, false)
+// El panel de preview también se reparte cuando hay un filtro activo, y ahí su
+// alto sale del hueco libre una vez descontada la sección de filtro.
+//
+// Y su tamaño es el SHARE de ese hueco, no "el mayor que quepa": la búsqueda
+// arranca en el share y solo baja cuando el mínimo de filas de tabla no deja
+// otro sitio. Eso es exactamente lo que ata este test: con holgura de sobra el
+// panel tiene que medir el share (contar la sección de filtro dos veces, o no
+// contarla, lo deja más alto o más bajo), y sin holgura no puede pasar del hueco.
+func TestPreviewConFiltroRespetaElShareDelHueco(t *testing.T) {
+	for _, h := range []int{24, 30, 40, 50, 60, 80, 100, 140} {
+		lay := computeLayout(h, true, defaultHintLines, false, 0)
 		libre := h - (tableChrome + filterSectionLines + statsSectionLines +
 			keybindsChrome + defaultHintLines + previewChrome)
-		if lay.previewLines > libre {
-			t.Errorf("h=%d con filtro: el panel pide %d de %d líneas libres",
-				h, lay.previewLines, libre)
+		if libre < 1 {
+			t.Fatalf("h=%d: el hueco con filtro es negativo", h)
 		}
-		// Y con hueco, la ficha más lo que la acompaña llenan la terminal
-		// EXACTA: si el alto libre no descontara la sección de filtro, el panel
-		// se llevaría celdas que el filtro ya ocupa y la suma no quadraría.
-		usado := tableChrome + filterSectionLines + statsSectionLines +
-			keybindsChrome + defaultHintLines + previewChrome
+		share := min(max(minPreviewLines, libre*previewShare/5), libre)
+
+		if lay.previewLines > share {
+			t.Errorf("h=%d con filtro: el panel mide %d y el share del hueco es %d",
+				h, lay.previewLines, share)
+		}
+		// Con sitio de sobra para el mínimo de filas, el share es el alto entero
+		// del panel: la búsqueda no tiene por qué bajar.
+		if h-share-reservedConFiltro >= minBodyLines {
+			if lay.previewLines != share {
+				t.Errorf("h=%d con filtro: el panel mide %d, want el share %d "+
+					"(con %d líneas libres para la tabla no hacía falta bajar)",
+					h, lay.previewLines, share, h-share-reservedConFiltro)
+			}
+		}
+		// Y lo que ocupa cada sección más el cuerpo llena la terminal exacta.
+		// El chrome del panel solo se gasta si el panel se pinta, que es lo que
+		// hace el layout (reserved() solo lo suma con preview > 0).
+		usado := reservedConFiltro + lay.previewLines
+		if lay.previewLines > 0 {
+			usado += previewChrome
+		}
 		if !lay.showStats {
 			usado -= statsSectionLines
 		}
-		if total := usado + lay.previewLines + lay.bodyLines; total != h {
-			t.Errorf("h=%d con filtro: las secciones suman %d, want %d (el panel se llevo celdas del filtro)",
-				h, total, h)
+		if total := usado + lay.bodyLines; total != h {
+			t.Errorf("h=%d con filtro: las secciones suman %d, want %d", h, total, h)
 		}
 	}
 }
+
+// reservedConFiltro es lo que el layout gasta SIN el panel y con la sección de
+// filtro presente: el chrome de la tabla, el de la sección de filtro, el de
+// stats, el de keybinds y sus hints. El panel se suma aparte.
+const reservedConFiltro = tableChrome + filterSectionLines + statsSectionLines +
+	keybindsChrome + defaultHintLines

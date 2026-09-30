@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/forge"
+	"gitdash/internal/forge/tool"
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/testutil"
 )
@@ -696,4 +698,132 @@ func containsPair(argv []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// --- el aviso de un remote que no se pudo leer ---
+
+// prGitReason saca el motivo real del error de gitstatus, que llega con el argv
+// delante ("git [remote get-url origin]: fatal: ..."). Sin esa limpieza el
+// toast repetiría el comando entero, que es justo lo que no se quiere enseñar.
+// Y el caso normal —no hay remote— se queda sin motivo: el prefijo del aviso ya
+// dice qué hacer.
+func TestPRGitReasonSacaElMotivoDelArgv(t *testing.T) {
+	casos := []struct {
+		nombre string
+		err    string
+		want   string
+	}{
+		{
+			"sin remote no hay motivo: el aviso ya lo dice",
+			"git [remote get-url origin]: No such remote 'origin'",
+			"",
+		},
+		{
+			"un repo roto enseña su motivo, sin el argv",
+			"git [remote get-url origin]: fatal: not a git repository",
+			"fatal: not a git repository",
+		},
+		{
+			"git ausente también (el motivo viene de exec, sin el prefijo)",
+			"exec: \"git\": executable file not found in $PATH",
+			"exec: \"git\": executable file not found in $PATH",
+		},
+		{
+			"un motivo con git delante pero sin la llave se deja entero",
+			"git something rare",
+			"git something rare",
+		},
+		{
+			// El prefijo solo se recorta cuando aparece: un motivo que lo
+			// contenga más tarde (no al principio) no se toca.
+			"la llave en medio no recorta",
+			"wrapped: git [x]: detail",
+			"wrapped: git [x]: detail",
+		},
+	}
+	for _, c := range casos {
+		if got := prGitReason(errors.New(c.err)); got != c.want {
+			t.Errorf("%s: prGitReason = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+}
+
+// prRemoteReject compone el aviso: sin remote, qué hacer; con otro motivo, el
+// motivo entero. Un toast que mezclara los dos casos dejaría al usuario
+// configurando un remote que sí existe.
+func TestPRRemoteRejectDistingueElCasoNormal(t *testing.T) {
+	casos := []struct {
+		nombre string
+		err    string
+		want   string
+	}{
+		{
+			"no hay remote: la acción, no el error de git",
+			"git [remote get-url origin]: No such remote 'origin'",
+			"no origin remote in widget — configure one first",
+		},
+		{
+			"otro motivo: el motivo, con el prefijo de lectura",
+			"git [remote get-url origin]: fatal: not a git repository",
+			"widget: cannot read origin — fatal: not a git repository",
+		},
+	}
+	for _, c := range casos {
+		if got := prRemoteReject("widget", errors.New(c.err)); got != c.want {
+			t.Errorf("%s: prRemoteReject = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+}
+
+// prURL busca el enlace en cualquier línea de la salida, porque gh puede
+// imprimir texto antes. Y sin enlace, el aviso lo dice sin inventar uno.
+func TestPRURLYNotaDelDesenlace(t *testing.T) {
+	casos := []struct {
+		nombre string
+		out    string
+		want   string
+	}{
+		{"la URL es la primera línea", "https://github.com/a/b/pull/1\n", "https://github.com/a/b/pull/1"},
+		{"gh deja texto antes", "Creating pull request...\nhttps://github.com/a/b/pull/7\n", "https://github.com/a/b/pull/7"},
+		{"http también vale", "http://g.c/a/b/-/merge_requests/2", "http://g.c/a/b/-/merge_requests/2"},
+		{"sin URL no hay nada que devolver", "todo listo\n", ""},
+		{"una ruta que no es URL no se confunde", "para verlo: /a/b/pull/9\n", ""},
+		{"el http va pegado a otra cosa no cuenta", "verhttp://x\n", ""},
+		// Una barra de más o de menos NO es una URL: el prefijo tiene que ser
+		// el de verdad, entero. Con un prefijo truncado, una línea de basura se
+		// cuela en el aviso como si fuera el enlace del PR.
+		{"https con una barra de menos no es una URL", "https:/g.c/a/b\n", ""},
+	}
+	for _, c := range casos {
+		if got := prURL(c.out); got != c.want {
+			t.Errorf("%s: prURL = %q, want %q", c.nombre, got, c.want)
+		}
+	}
+
+	nivel, msg := prNote("widget", prResultMsg{out: "https://github.com/a/b/pull/1"})
+	if nivel != toastSuccess || !strings.Contains(msg, "https://github.com/a/b/pull/1") {
+		t.Errorf("éxito sin enlace visible: (%v, %q)", nivel, msg)
+	}
+	// Sin URL el aviso sigue siendo de éxito: la CLI dijo que lo creó, y lo
+	// que NO puede hacer es inventar el hueco del enlace ("created — " con nada
+	// detrás es un aviso que parece truncado).
+	if nivel, msg := prNote("widget", prResultMsg{out: "hecho"}); nivel != toastSuccess || strings.Contains(msg, "http") || strings.Contains(msg, "—") {
+		t.Errorf("salida sin URL: (%v, %q), want toast de éxito sin enlace", nivel, msg)
+	}
+	// El fallo enseña el motivo de la CLI, y no su argv con el título dentro.
+	cerr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "titulo secreto", "-b", "cuerpo largo"}, ExitCode: 1, Msg: "no commits between main and feat"}
+	nivel, msg = prNote("widget", prResultMsg{err: cerr})
+	if nivel != toastError {
+		t.Errorf("fallo: nivel = %v, want error", nivel)
+	}
+	if !strings.Contains(msg, "no commits between main and feat") {
+		t.Errorf("el fallo no enseña el motivo: %q", msg)
+	}
+	if strings.Contains(msg, "titulo secreto") || strings.Contains(msg, "cuerpo largo") {
+		t.Errorf("el fallo repite el argv con el cuerpo dentro: %q", msg)
+	}
+	// Un error que no viene del Runner (plazo agotado) también dice algo.
+	if _, msg := prNote("widget", prResultMsg{err: errors.New("context deadline exceeded")}); !strings.Contains(msg, "deadline") {
+		t.Errorf("un error suelto no llega al aviso: %q", msg)
+	}
 }
