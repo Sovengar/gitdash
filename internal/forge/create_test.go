@@ -135,7 +135,7 @@ func TestBuildCreateArgv(t *testing.T) {
 			// El prefijo de subcarpeta es del host, no del proyecto: -R recibe la
 			// ruta dentro de la instancia, que ParseRemoteURL ya dejó sin prefijo.
 			name: "gitlab en subcarpeta: -R no lleva el prefijo",
-			ref:  RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "grupo/proy", ClonePrefix: "git"},
+			ref:  RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "grupo/proy"},
 			p:    Params{Title: "T", Body: "C", Base: "main"},
 			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-b", "main", "-y", "-R", "grupo/proy"},
 		},
@@ -268,7 +268,7 @@ func TestBuildCreateArgvNoPasaHostnameALaCli(t *testing.T) {
 		ref  RepoRef
 	}{
 		{"github", refGH("acme/widget")},
-		{"gitlab", RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "grupo/proy", ClonePrefix: "git"}},
+		{"gitlab", RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "grupo/proy"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argv := BuildCreateArgv(tc.ref, Params{Title: "T", Body: "C", Base: "main", Head: "h"})

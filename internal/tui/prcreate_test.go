@@ -513,8 +513,9 @@ func TestPRGitLabSelfManagedQuitaElPrefijoDeSubcarpeta(t *testing.T) {
 	m, rec := prModel(t, dir)
 	m.cfg.Forges = prConfig(t, `
 [forge.gitlab]
-api_base = "https://git.example.com/git/api/v4/"
-hosts = ["git.example.com"]
+enabled = true
+host = "git.example.com"
+api_base = "/git/api/v4/"
 `).Forges
 
 	m, _ = prEnvíaPR(t, m, "Corregir la subcarpeta")

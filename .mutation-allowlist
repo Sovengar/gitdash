@@ -13,7 +13,7 @@
 #
 # ---------------------------------------------------------------------------
 # ESTADO
-# De 172 mutantes vivos a 18 allowlistados. Las dos clases con las que hay que
+# De 172 mutantes vivos a 25 allowlistados. Las dos clases con las que hay que
 # decidir, que se repitieron en todo el repo:
 #
 #   1. Hueco real de test -> se tapa con un test. Ejemplos: el valor exacto de
@@ -183,17 +183,17 @@ ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   existen: ahora es un clamp min/max.)
 #
 # --- internal/config/forge.go --------------------------------------------
-ARITHMETIC_BASE internal/config/forge.go:111
-ARITHMETIC_BASE internal/config/forge.go:128
+ARITHMETIC_BASE internal/config/forge.go:149
+ARITHMETIC_BASE internal/config/forge.go:169
 #   La pista de capacidad de los dos mapas que resuelven los forges:
 #   `make(map[string]string, len(c.Forges)+2)`. El segundo argumento del make
 #   con tamaño NO es contenido: solo reserva buckets para que la inserción no
 #   crezca a mitad de la vuelta. Cambiar el + por un -, o por el número tal
 #   cual, no cambia ni una clave del mapa resultante: el bucle que lo llena es
-#   el mismo, con los mismos append sobre la misma clave. Es una IDENTIDAD por
-#   construcción de la firma de make, no un hueco de test: ningún test puede
-#   distinguirla porque no hay nada que distinguir (la única forma de verla
-#   sería medir las reasignaciones internas del runtime, que no son del
+#   el mismo, con las mismas inserciones sobre la misma clave. Es una IDENTIDAD
+#   por construcción de la firma de make, no un hueco de test: ningún test
+#   puede distinguirla porque no hay nada que distinguir (la única forma de
+#   verlo sería medir las reasignaciones internas del runtime, que no son del
 #   contrato del código).
 
 # --- internal/forge/tool/tool.go ----------------------------------------
@@ -212,8 +212,8 @@ CONDITIONALS_BOUNDARY internal/forge/parse.go:45
 #   Equivalente DADO EL CONTRATO del mapa que recibe la función: con el host
 #   vacío, `hosts[""]` no puede existir. El único que construye ese mapa es
 #   config.ForgeHosts, que normaliza cada host y se salta los vacíos
-#   (`if h = normalizeHost(h); h != ""`), así que el lookup falla y los dos
-#   caminos devuelven (RepoRef{}, false). Con un `colon <= 0` la función
+#   (`if h := normalizeHost(f.Host); h != ""`), así que el lookup falla y los
+#   dos caminos devuelven (RepoRef{}, false). Con un `colon <= 0` la función
 #   recorre un paso más de camino antes de llegar al MISMO return. La
 #   demostración depende de ese contrato y por eso está escrita aquí: si
 #   alguien llegara a pasar un mapa con la clave "", el invariante se rompe y
