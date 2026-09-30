@@ -722,3 +722,43 @@ func TestFichaLaColaDelComandoRespetaSuPresupuesto(t *testing.T) {
 		}
 	}
 }
+
+// El comando del `!` se recorta al ancho que le queda, y ese ancho es el del
+// terminal MENOS el de lo que lo acompaña ("$ ", el veredicto y el borde). Con
+// un comando largo en una terminal estrecha, la ficha tiene que recortarlo: si no,
+// la línea se sale de la caja y el valor se corta contra el borde, que es
+// justo lo que el recorte del resto de campos evita.
+func TestFichaRecortaElComandoAlAnchoQueLeQueda(t *testing.T) {
+	const path = "/tmp/api"
+	largo := strings.Repeat("comando", 30) // 210 caracteres, de sobra para cortar
+
+	for _, width := range []int{40, 60, 90, 200, 260} {
+		m, r := detailRowWith(t, path, snapClean())
+		m.width = width
+		m.lastCmd[path] = cmdResult{command: largo, output: "", exit: "0"}
+
+		out := stripANSI(m.renderDetail(r, 40))
+		var linea string
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, "comando") {
+				linea = l
+				break
+			}
+		}
+		if linea == "" {
+			t.Fatalf("width=%d: el comando no aparece en la ficha:\n%s", width, out)
+		}
+		if w := len([]rune(linea)); w > width {
+			t.Errorf("width=%d: la línea del comando mide %d y se sale de la caja: %q",
+				width, w, linea)
+		}
+		// En una terminal lo bastante ancha el comando entero cabe: recortarlo
+		// siempre escondería información que sí se puede leer. El presupuesto es
+		// el ancho menos 30, así que 210 de comando necesitan 240 de terminal.
+		if width >= 240 {
+			if !strings.Contains(linea, largo) {
+				t.Errorf("width=%d: el comando se recortó sin necesidad: %q", width, linea)
+			}
+		}
+	}
+}

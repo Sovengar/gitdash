@@ -184,16 +184,25 @@ CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
 #   ancho 0 en vez de omitir la columna.
 
 # --- internal/tui/proverlay.go -------------------------------------------
-ARITHMETIC_BASE internal/tui/proverlay.go:66
-#   El `1` de prValueSlack. Su requisito real es "reservar la celda que el input
-#   dibuja al final, su cursor": con 0 el View del input se sale del borde y
-#   bordered recorta el último carácter, y con 2 el input es una celda más
-#   estrecho, que no cambia nada que se vea (nada afirma el ancho exacto del
-#   input, y la caja sigue rellenando lo que le den). O sea: CUALQUIER valor
-#   >= 1 cumple. Es un parámetro libre dentro de un mínimo, no un hueco de test.
-#   El resto del presupuesto sí está sujeto, contra su composición
-#   (TestPROverlayElPresupuestoEsElQueDiceElComentario): prFixedLines, el +2 del
-#   cuerpo y prMinValueWidth == prLabelWidth.
+# El presupuesto del formulario ya NO tiene vivos: los mata
+# TestPROverlayElPresupuestoEsElQueDiceElComentario, que lo sujeta por su
+# COMPOSICIÓN (prMinBodyLines == prFixedLines+2, prMinValueWidth ==
+# prLabelWidth, prMinWidth == 2+prLabelWidth+prValueSlack+prMinValueWidth) en vez
+# de contra las constantes, porque un test que usa la constante se mueve con ella
+# cuando el mutante la mueve.
+# El `1` de prValueSlack sigue siendo un parámetro libre dentro de un mínimo (su
+# requisito es "reservar la celda del cursor", o sea >= 1), pero su mutante ya no
+# sale como vivo: la composición lo ata igual.
+
+# --- internal/tui/prcreate.go --------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/prcreate.go:156
+#   El `>= 0` del `strings.Index(reason, "]: ")` de prGitReason. Es una
+#   IDENTIDAD, y la demostración es la guarda de fuera: ese index solo se mira
+#   dentro de `if strings.HasPrefix(reason, "git ")`, así que el motivo empieza
+#   por "git " y la llave "]: " no puede estar en la posición 0 (ahí tendría que
+#   empezar la cadena). Dentro de la rama, i >= 4, luego `i >= 0` y `i > 0` dan
+#   el mismo corte. La TERCERA forma (un motivo que NO empieza por "git ") no
+#   entra en la rama y por eso no se recorta, y eso está sujeto con test.
 
 # --- internal/gitstatus/status.go ----------------------------------------
 ARITHMETIC_BASE internal/gitstatus/status.go:144

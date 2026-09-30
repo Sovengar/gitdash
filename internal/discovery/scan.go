@@ -35,14 +35,6 @@ type Project struct {
 	MarkerErr      string // error de parseo del marcador
 }
 
-// MainPath es el repo al que pertenece el proyecto (sí mismo salvo worktrees).
-func (p Project) MainPath() string {
-	if p.MainRepo != "" {
-		return p.MainRepo
-	}
-	return p.Path
-}
-
 // Scan recorre los roots de la config y devuelve los proyectos ordenados
 // por ruta. Los roots ilegibles se reportan como error agregado sin abortar
 // el resto.

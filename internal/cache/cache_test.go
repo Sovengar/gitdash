@@ -99,3 +99,33 @@ func TestSaveValidJSON(t *testing.T) {
 		t.Errorf("json inválido: %v", err)
 	}
 }
+
+// --- Path: la puerta que decide dónde vive la cache ---
+
+// Todos los tests del paquete pasan un path a mano, así que la función que
+// resuelve $XDG_CACHE_HOME no se ejecutaba nunca. Es la que decide dónde está
+// repos.json, el fichero que hace que la app pinte al instante en vez de
+// quedarse vacía mientras escanea.
+func TestPathRespetaXDGCacheHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+
+	got, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if want := filepath.Join(dir, DirName, FileName); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+// Sin XDG_CACHE_HOME ni HOME no hay directorio de usuario, y Path tiene que
+// decirlo. Devolver una ruta inventada haría que Save escribiera en un sitio
+// que nadie lee, en silencio.
+func TestPathSinDirectorioDeUsuarioDaError(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "")
+	if got, err := Path(); err == nil {
+		t.Errorf("Path sin HOME ni XDG = %q, want error", got)
+	}
+}
