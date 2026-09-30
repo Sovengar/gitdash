@@ -57,9 +57,9 @@ caveat de arriba); `líneas` son las sospechosas concretas.
 | 1 | `internal/tui/bordered/bordered.go` | 3 | 74, 75 | ✅ hecho: las 3 mutaciones de la alineación del título, con el hueco impar (3 de sobrante → 1 izquierda / 2 derecha) y las dos líneas de borde alineadas por separado |
 | 2 | `internal/state/state.go` | 3 | 33, 37, 46 | ✅ hecho: `DefaultBaseDir` y `NewStore` **no tenían ni un test** (los 7 tests usaban `NewStoreAt`). Ahora: XDG manda sobre HOME, XDG vacío cuenta como no puesto, sin HOME error, y `NewStore` propaga el error en vez de devolver un store inservible |
 | 3 | `internal/config/config.go` | 3 | 112, 188, 221 | ✅ hecho: `Path()` y `Load()` —la puerta de entrada real— no tenían test (todos pasaban un path a mano). Y el guard de `[commands]`: un valor vacío es una casilla sin rellenar, no una orden; y no se registra una acción inexistente con argv vacío |
-| 4 | `internal/tui/app.go` | 4 | 454, 458, 464, 853 | ⬜ media |
-| 5 | `internal/tui/toast.go` | 6 | 25, 188, 190 | ⬜ media |
-| 6 | `internal/tui/proverlay.go` | 6 | 46, 66, 376, 379 | ⬜ media (376/379 ya los mata un test → verificar) |
+| 4 | `internal/tui/app.go` | 4 | 454, 458, 464, 853 | ✅ hecho: `commandTimeout` ya lo mata un test (NOT COVERED era falso). Las dos guardas de cancelación de `startScanCmd` son equivalencias por el contrato de `sendEvent` (su `select` tiene `case <-ctx.Done()`) → allowlistadas |
+| 5 | `internal/tui/toast.go` | 6 | 25, 188, 190 | ✅ hecho: los 6 ya los matan tests existentes (NOT COVERED era falso entero). Verificado a mano, uno por uno |
+| 6 | `internal/tui/proverlay.go` | 6 | 46, 66, 376, 379 | ✅ hecho: los mínimos del formulario en el borde exacto (una línea menos no abre, una más sí) **y contra su composición** (`prMinBodyLines == prFixedLines+2`, `prMinValueWidth == prLabelWidth`), porque un test que compara contra la propia constante no la ata: si el mutante la mueve, el test se mueve con ella. El `1` de `prValueSlack` solo necesita ser ≥1 → allowlistado |
 | 7 | `internal/tui/sections.go` | 11 | — | ⬜ |
 | 8 | `internal/tui/update.go` | 11 | — | ⬜ |
 | 9 | `internal/gitstatus/parse.go` | 17 | — | ⬜ parser puro, buen blanco |

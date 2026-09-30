@@ -72,6 +72,17 @@ CONDITIONALS_NEGATION internal/tui/app.go:378
 #   (`if current.Load() != nil`), o sea que la exterior y la interior cubren lo
 #   mismo.
 
+CONDITIONALS_NEGATION internal/tui/app.go:458
+CONDITIONALS_NEGATION internal/tui/app.go:464
+#   Las dos guardas de cancelación de startScanCmd (después de publicar los
+#   proyectos y después del StreamPool). Son EQUIVALENTES POR CONTRATO, y el
+#   contrato es sendEvent: su select tiene `case <-ctx.Done()`, así que con el
+#   contexto ya cancelado NADA de lo que se envíe llega al canal. Invertir la
+#   guarda solo cambia cuántos subprocess se spawnean (StreamPool con un ctx
+#   muerto falla enseguida, y sus envíos se descartan igual), nunca lo que el
+#   modelo ve. El corte evita trabajo, no cambia el resultado: un test que
+#   cancelara a mitad de scan vería exactamente los mismos eventos.
+
 # --- internal/tui/table.go -----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/table.go:267
 CONDITIONALS_BOUNDARY internal/tui/table.go:270
@@ -171,6 +182,18 @@ CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
 #   se borra a propósito: `pad(s, 0)` devuelve s sin truncar (n >= w), así que sin
 #   ella un cambio futuro del ladder que bajara kind a 0 pintaría un "KIND" de
 #   ancho 0 en vez de omitir la columna.
+
+# --- internal/tui/proverlay.go -------------------------------------------
+ARITHMETIC_BASE internal/tui/proverlay.go:66
+#   El `1` de prValueSlack. Su requisito real es "reservar la celda que el input
+#   dibuja al final, su cursor": con 0 el View del input se sale del borde y
+#   bordered recorta el último carácter, y con 2 el input es una celda más
+#   estrecho, que no cambia nada que se vea (nada afirma el ancho exacto del
+#   input, y la caja sigue rellenando lo que le den). O sea: CUALQUIER valor
+#   >= 1 cumple. Es un parámetro libre dentro de un mínimo, no un hueco de test.
+#   El resto del presupuesto sí está sujeto, contra su composición
+#   (TestPROverlayElPresupuestoEsElQueDiceElComentario): prFixedLines, el +2 del
+#   cuerpo y prMinValueWidth == prLabelWidth.
 
 # --- internal/gitstatus/status.go ----------------------------------------
 ARITHMETIC_BASE internal/gitstatus/status.go:144

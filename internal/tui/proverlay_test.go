@@ -1028,3 +1028,146 @@ func TestPRHeadDeWorktreeSinMarcadorVieneDelInventario(t *testing.T) {
 		t.Errorf("Params.Head = %q, quiero %q", got, "feat/wt")
 	}
 }
+
+// --- los mínimos del formulario, en el borde exacto ---
+
+// El formulario no se abre si no cabe entero: entrar en un overlay que no se
+// dibuja deja al usuario escribiendo a ciegas. Los dos ejes tienen su mínimo (el
+// alto del cuerpo y el ancho de la terminal) y el test los sujeta en el BORDE:
+// una línea menos y no abre, una más sí. Un mutante que cambie el 2 o el 12 por
+// otra cosa se ve aquí, y un ">=" puesto en el sitio de un ">" no.
+func TestPROverlaySoloAbreEnElBordeExacto(t *testing.T) {
+	t.Run("ancho", func(t *testing.T) {
+		// Un terminal estrecho pero alto: es el caso que el alto solo no ve.
+		m := newPROverlayModel(t, "/tmp/dirty-api")
+		m.height = 60
+
+		m.width = prMinWidth - 1
+		m2, cmd := press(m, "O")
+		if m2.pr != nil {
+			t.Errorf("ancho %d (< mínimo %d): el overlay se abrió", prMinWidth-1, prMinWidth)
+		}
+		if cmd == nil {
+			t.Error("un overlay que no cabe no avisa de por qué: el usuario pulsa y no pasa nada")
+		}
+		if m2.prPending != nil {
+			t.Error("un overlay que no cabe publicó un envío")
+		}
+
+		m.width = prMinWidth
+		m3, _ := press(m, "O")
+		if m3.pr == nil {
+			t.Errorf("ancho %d (el mínimo exacto): el overlay no se abrió", prMinWidth)
+		}
+	})
+
+	t.Run("alto", func(t *testing.T) {
+		// El umbral de alto no se mendiga: se busca la primera altura a la que
+		// el formulario cabe y se comprueba que justo por encima del cuerpo se
+		// queda corto. Así el test ata el mínimo sin escribir un número mágico.
+		m := newPROverlayModel(t, "/tmp/dirty-api")
+		m.width = 100
+
+		var primero int
+		for h := 8; h < 40; h++ {
+			m.height = h
+			if abierto, _ := press(m, "O"); abierto.pr != nil {
+				primero = h
+				break
+			}
+		}
+		if primero == 0 {
+			t.Fatalf("el overlay no abrió a ninguna altura entre 8 y 39")
+		}
+
+		// Una menos: no entra.
+		m.height = primero - 1
+		if abierto, _ := press(m, "O"); abierto.pr != nil {
+			t.Errorf("altura %d: el overlay se abrió y por debajo no cabe", primero-1)
+		}
+		// La primera que abre: el cuerpo llega JUSTO al mínimo, no de sobra.
+		// Con holgura de sobra el mínimo sería irrelevante.
+		m.height = primero
+		abierto, _ := press(m, "O")
+		if abierto.pr == nil {
+			t.Fatalf("altura %d: el overlay no se abrió", primero)
+		}
+		if got := abierto.layout().bodyLines; got != prMinBodyLines {
+			t.Errorf("altura %d: bodyLines = %d, want el mínimo exacto %d",
+				primero, got, prMinBodyLines)
+		}
+	})
+}
+
+// Y dos líneas por debajo del mínimo del alto el cuerpo ni se acerca: es lo que
+// separa "no cabe" de "cabe a duras penas". Un mínimo que aceptase 4 líneas
+// menos pintaría medio formulario.
+func TestPROverlayElMinimoDeAltoNoEsUnSueloDeFiesta(t *testing.T) {
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	m.width = 100
+	var primero int
+	for h := 8; h < 40; h++ {
+		m.height = h
+		if abierto, _ := press(m, "O"); abierto.pr != nil {
+			primero = h
+			break
+		}
+	}
+	if primero == 0 {
+		t.Fatal("el overlay no abrió a ninguna altura entre 8 y 39")
+	}
+	m.height = primero - 2
+	if abierto, _ := press(m, "O"); abierto.pr != nil {
+		t.Errorf("altura %d (dos por debajo del umbral %d): se abrió",
+			primero-2, primero)
+	}
+}
+
+// --- el presupuesto del formulario, sujeto por su composición ---
+
+// Los mínimos del overlay no se prueban mendigando un número: se prueban
+// contra las piezas de las que están hechos, porque ESE es el contrato que
+// escriben los comentarios. El umbral de alto es "los rótulos más al menos dos
+// líneas de cuerpo", y la columna de valor mínima es "el ancho de la columna de
+// rótulos, que es lo que hay justo al lado".
+//
+// Hace falta porque un test que compara contra la propia constante no la ata: si
+// prMinBodyLines pasa a ser +3, el test que la usa se mueve con ella y el
+// mutante sobrevive. La composición es lo que no se mueve.
+func TestPROverlayElPresupuestoEsElQueDiceElComentario(t *testing.T) {
+	// "los rótulos (título, base, head, draft), la línea de aviso y el rótulo del
+	// cuerpo" son seis líneas fijas, y encima de ellas caben dos de cuerpo.
+	const camposYRótulos = 6
+	if prFixedLines != camposYRótulos {
+		t.Errorf("prFixedLines = %d, want %d (4 campos + aviso + rótulo del cuerpo)",
+			prFixedLines, camposYRótulos)
+	}
+	if prMinBodyLines != prFixedLines+2 {
+		t.Errorf("prMinBodyLines = %d, want %d (las %d fijas + 2 de cuerpo)",
+			prMinBodyLines, prFixedLines+2, prFixedLines)
+	}
+	// La columna de valor mínima es la de rótulos: por debajo, el rótulo y el
+	// valor dejan de distinguirse de un vistazo.
+	if prMinValueWidth != prLabelWidth {
+		t.Errorf("prMinValueWidth = %d, want %d (el ancho de la columna de rótulos)",
+			prMinValueWidth, prLabelWidth)
+	}
+	// Y el ancho mínimo exterior se deriva de las partes: los dos bordes, la
+	// columna de rótulos, la celda de margen del input y el valor mínimo. Si se
+	// escribiera un número redondo, el input podría ser un clamp a 1 de una resta
+	// negativa en vez de un ancho.
+	if want := 2 + prLabelWidth + prValueSlack + prMinValueWidth; prMinWidth != want {
+		t.Errorf("prMinWidth = %d, want %d (2 bordes + rótulos + margen + valor mínimo)",
+			prMinWidth, want)
+	}
+	// El valor tiene que caber en el interior con su margen, que es lo que
+	// impide el recorte del último carácter por el borde de la caja.
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	m.width = prMinWidth
+	if got, want := m.prValueWidth(), prMinWidth-2-prLabelWidth-prValueSlack; got != want {
+		t.Errorf("prValueWidth en el ancho mínimo = %d, want %d", got, want)
+	}
+	if got := m.prValueWidth(); got < 1 {
+		t.Errorf("prValueWidth = %d: un input de 0 o menos de ancho no es un input", got)
+	}
+}
