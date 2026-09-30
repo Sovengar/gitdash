@@ -380,3 +380,40 @@ func TestStreamPool(t *testing.T) {
 func snapSummary(s Snapshot) string {
 	return s.Err + "|" + s.Status.Derive().String()
 }
+
+// Un conflicto (línea `u ` de porcelain v2) cuenta como cambio trackeado, y es el
+// único caso donde el recuento de la columna de estado dice lo que hay que
+// hacer: un repo con un conflicto y nada más tiene que salir como sucio, no
+// limpio. parseEntry ya sabía leer la línea; lo que no estaba probado es que
+// ParsePorcelain la cuente, y sin eso un `--` en el incremento pasaba unnoticed.
+func TestParseConflictosCuentanComoSucio(t *testing.T) {
+	// `u XY sub m1 m2 m3 mW h1 h2 h3 <path>`: nueve campos antes del path.
+	out := porcelainClean + `u UU N... 100644 100644 100644 100644 abc def ghi conflicted.go
+u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
+`
+	st, files := ParsePorcelain(out)
+	if st.TrackedChanges != 2 {
+		t.Errorf("tracked = %d, want 2 (los dos conflictos)", st.TrackedChanges)
+	}
+	if st.Untracked != 0 {
+		t.Errorf("untracked = %d, want 0", st.Untracked)
+	}
+	if st.Dirty() != 2 {
+		t.Errorf("Dirty = %d, want 2", st.Dirty())
+	}
+	if st.Derive() != StateDirty {
+		t.Errorf("derive = %v, want dirty: un repo con un conflicto no está limpio", st.Derive())
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %d, want 2", len(files))
+	}
+	if files[0].Code != "UU" || files[0].Path != "conflicted.go" {
+		t.Errorf("files[0] = %+v", files[0])
+	}
+	// El código de la línea `u ` es el par XY de los dos lados, tal cual: "AA"
+	// es un archivo añadido por los dos lados, y no debe reducirse a la primera
+	// letra ni perderla.
+	if files[1].Code != "AA" {
+		t.Errorf("files[1].Code = %q, want AA (el par XY completo)", files[1].Code)
+	}
+}

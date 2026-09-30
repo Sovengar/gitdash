@@ -23,9 +23,6 @@ type Status struct {
 // Dirty es el total de cambios pendientes en el working tree.
 func (s Status) Dirty() int { return s.TrackedChanges + s.Untracked }
 
-// HasPending reporta si hay cambios que subir o bajar.
-func (s Status) HasPending() bool { return s.Ahead > 0 || s.Behind > 0 }
-
 // FileEntry es un fichero cambiado con su código porcelain.
 type FileEntry struct {
 	Code string // "M ", "A ", "D ", "R ", "MM", "??"-estilo: dos chars
