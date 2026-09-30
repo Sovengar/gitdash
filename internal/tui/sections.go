@@ -20,20 +20,29 @@ func (m Model) section(title, content string) string {
 }
 
 // layout calcula el reparto de alto para el estado actual del modelo. Con un
-// aviso en keybinds (selector de pull, confirmación de borrado o leyenda del
-// panel del log) lo que se fuerza es la visibilidad de esa sección: si se
-// degradara, la app quedaría esperando una tecla sin decir cuáles.
+// aviso en keybinds (selector de pull, confirmación de borrado, leyenda del
+// panel del log o del overlay de PR) lo que se fuerza es la visibilidad de esa
+// sección: si se degradara, la app quedaría esperando una tecla sin decir
+// cuáles.
 func (m Model) layout() layout {
-	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "")
-	if m.logOpen {
-		// El log SUSTITUYE a la tabla y la ficha desaparece. Lo que hay que
-		// conservar es el total de líneas de la terminal, así que al alto del
-		// cuerpo se le devuelve lo que la tabla y la ficha se dejaron:
+	// El overlay de PR vive EN el cuerpo (es el dashboard lo que se sustituye),
+	// así que le pasa su mínimo: el layout no debe robarle altura a un panel de
+	// preview que no se va a dibujar debajo.
+	formMin := 0
+	if m.pr != nil {
+		formMin = prMinBodyLines
+	}
+	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "", formMin)
+	if m.logOpen || m.pr != nil {
+		// El log y el formulario SUSTITUYEN a la tabla y la ficha desaparece.
+		// Lo que hay que conservar es el total de líneas de la terminal, así
+		// que al alto del cuerpo se le devuelve lo que la tabla y la ficha se
+		// dejaron:
 		//
-		//   - la cabecera de columnas (1): la sección del log son sus 2
-		//     bordes + bodyLines, y la de la tabla 2 bordes + cabecera +
-		//     bodyLines. Los bordes son los mismos, así que de la tabla solo
-		//     se libera la línea de cabecera.
+		//   - la cabecera de columnas (1): la sección del log y la del
+		//     formulario son sus 2 bordes + bodyLines, y la de la tabla 2
+		//     bordes + cabecera + bodyLines. Los bordes son los mismos, así
+		//     que de la tabla solo se libera la línea de cabecera.
 		//   - la ficha entera (previewChrome + previewLines), si estaba.
 		//
 		// Sin esto el panel mide 3 líneas menos que la terminal en cuanto la
@@ -60,10 +69,11 @@ func (m Model) keybindsLines() int {
 }
 
 // promptLine devuelve el aviso persistente de la sección de keybinds: el
-// selector de pull, la confirmación de borrado de worktree o la leyenda del
-// panel del log. Solo puede haber uno a la vez (la segunda pulsación desarma el
-// anterior), pero si se solaparan mandan los armados sobre la leyenda. Vacío si
-// no hay nada que anunciar.
+// selector de pull, la confirmación de borrado de worktree, la leyenda del panel
+// del log o la del overlay de PR. Solo puede haber uno a la vez (la segunda
+// pulsación desarma el anterior y abrir un overlay suelta los armados), pero si
+// se solaparan mandan los armados y el formulario sobre la leyenda. Vacío si no
+// hay nada que anunciar.
 func (m Model) promptLine() string {
 	switch {
 	case m.armed != nil:
@@ -72,6 +82,8 @@ func (m Model) promptLine() string {
 		return m.pullPrompt()
 	case m.visualArmed != nil:
 		return m.visualPrompt()
+	case m.pr != nil:
+		return m.prPrompt()
 	case m.logOpen:
 		return m.logLegend()
 	}

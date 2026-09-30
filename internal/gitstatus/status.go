@@ -39,7 +39,7 @@ type Snapshot struct {
 // Worktree es un worktree registrado del repo, listo para el detalle.
 type Worktree struct {
 	Path   string // ruta absoluta del worktree
-	Branch string // refs/heads/x o "" si detached/bare
+	Branch string // nombre de la rama ("x"), o "" si detached/bare
 	Head   string // sha corto de HEAD ("" si vacío/prunable)
 }
 
@@ -194,6 +194,24 @@ func Fetch(ctx context.Context, dir string, class cmdlog.Class, args ...string) 
 // escondidos aquí (la política de pull vive en el gitconfig del usuario).
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, cmdlog.ClassAction, args...)
+}
+
+// RemoteURL devuelve la URL del remote `origin` del repo en dir. Es la única
+// lectura de remote de gitdash y es ON DEMAND: se llama al abrir un PR, no en
+// Collect. Sumarla al scan costaría un `git remote get-url` por repo y por
+// ciclo —con 60 repos, 60 procesos que casi siempre nobody mira—, y el dato
+// solo se necesita cuando alguien pulsa una tecla.
+//
+// Sale por runGit y por tanto deja entrada en el command log como ClassRead: es
+// una lectura, aunque la pulse una persona. Un repo sin remote (o sin `origin`)
+// falla, y el motivo lo trae git en stderr: es lo que el toast necesita para
+// decir qué falta en vez de un "no se pudo" sin más.
+func RemoteURL(ctx context.Context, dir string) (string, error) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // RebaseInProgress reporta si dir tiene un rebase a medias. Un pull con

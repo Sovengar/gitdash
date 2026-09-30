@@ -164,9 +164,52 @@ ARITHMETIC_BASE internal/gitstatus/status.go:144
 #   (Las guardas que SÍ eran mutables —0, negativos y el `> del tope`— ya no
 #   existen: ahora es un clamp min/max.)
 #
+# --- internal/config/forge.go --------------------------------------------
+ARITHMETIC_BASE internal/config/forge.go:111
+ARITHMETIC_BASE internal/config/forge.go:128
+#   La pista de capacidad de los dos mapas que resuelven los forges:
+#   `make(map[string]string, len(c.Forges)+2)`. El segundo argumento del make
+#   con tamaño NO es contenido: solo reserva buckets para que la inserción no
+#   crezca a mitad de la vuelta. Cambiar el + por un -, o por el número tal
+#   cual, no cambia ni una clave del mapa resultante: el bucle que lo llena es
+#   el mismo, con los mismos append sobre la misma clave. Es una IDENTIDAD por
+#   construcción de la firma de make, no un hueco de test: ningún test puede
+#   distinguirla porque no hay nada que distinguir (la única forma de verla
+#   sería medir las reasignaciones internas del runtime, que no son del
+#   contrato del código).
+
+# --- internal/forge/tool/tool.go ----------------------------------------
+ARITHMETIC_BASE internal/forge/tool/tool.go:102
+#   Lo mismo, con la firma de make([]T, len, cap): `make([]string, 0,
+#   len(env)+4)`. El 0 es la longitud (se empieza vacío y se rellena con
+#   append) y len(env)+4 es la capacidad reservada. Mutar el signo o el número
+#   cambia cuántas celdas se reservan por adelantado, no el slice que sale: el
+#   len final lo fija el bucle y los tres append de fuera.
+
+# --- internal/forge/parse.go ---------------------------------------------
+CONDITIONALS_BOUNDARY internal/forge/parse.go:45
+#   `if colon < 0` sobre el `strings.Index(rest, ":")` del remote scp. Solo
+#   difiere con colon == 0, es decir un remote que empieza por ":"
+#   ("git@:acme/widget.git"): el host queda VACÍO y el path es el resto.
+#   Equivalente DADO EL CONTRATO del mapa que recibe la función: con el host
+#   vacío, `hosts[""]` no puede existir. El único que construye ese mapa es
+#   config.ForgeHosts, que normaliza cada host y se salta los vacíos
+#   (`if h = normalizeHost(h); h != ""`), así que el lookup falla y los dos
+#   caminos devuelven (RepoRef{}, false). Con un `colon <= 0` la función
+#   recorre un paso más de camino antes de llegar al MISMO return. La
+#   demostración depende de ese contrato y por eso está escrita aquí: si
+#   alguien llegara a pasar un mapa con la clave "", el invariante se rompe y
+#   el NOT COVERED lo delataría al desaparecer esta entrada.
+
 # ---------------------------------------------------------------------------
 # Backlog real, aún sin test: ninguno. Los 215 mutantes NOT COVERED del primer
 # run eran casi todos la copia del repo dentro de .worktrees/ (Worktrunk), que
 # gremlins mutaba y contaba como si fuera código del módulo: por eso el target
 # ahora lo excluye. Los que quedaban de verdad (print.go, que no tenía un solo
 # test de sus columnas) están cerrados.
+#
+# La apertura de PR/MR (internal/forge, internal/config/forge.go,
+# internal/tui/proverlay.go, update.go) entró con 19 supervivientes y no deja
+# ninguno detrás: 15 eran huecos de test —el borde exacto del alto y del
+# ancho, el rótulo que se resalta, el nivel del aviso, el reparto del hueco
+# entre los widgets— y los 4 de arriba son identidades de construcción.

@@ -58,13 +58,21 @@ func execEntry(repo, action, cmdLine, outcome string, exit int) cmdlog.Entry {
 }
 
 // lastEntry devuelve la última entrada del log.
-func lastEntry(t *testing.T, rec *cmdlog.Recorder) cmdlog.Entry {
+// entryFor busca por acción en vez de por posición. El modelo que devuelve
+// logModel tiene el scan de fondo corriendo, así que una entrada de `git status`
+// puede anexarse DESPUÉS de la que el test acaba de synchronousar: "la última"
+// depende de la carrera de goroutines y el test falla una de cada quince. La
+// acción identifica la entrada sin depender de quién escribió después.
+func entryFor(t *testing.T, rec *cmdlog.Recorder, action string) cmdlog.Entry {
 	t.Helper()
 	entries := rec.Entries()
-	if len(entries) == 0 {
-		t.Fatal("el command log está vacío: el exec no se registró")
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Action == action {
+			return entries[i]
+		}
 	}
-	return entries[len(entries)-1]
+	t.Fatalf("el command log no tiene ninguna entrada con acción %q", action)
+	return cmdlog.Entry{}
 }
 
 // El caso que motivó la feature: `pp` sobre un repo con pull.rebase=true en el
@@ -809,7 +817,7 @@ func TestHandoffRegistraArgvYSalida(t *testing.T) {
 		t.Fatal("Update devolvió un modelo de otro tipo")
 	}
 
-	e := lastEntry(t, rec)
+	e := entryFor(t, rec, "lazygit")
 	if e.Action != "lazygit" {
 		t.Errorf("Action = %q, want %q", e.Action, "lazygit")
 	}

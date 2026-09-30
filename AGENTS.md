@@ -90,10 +90,11 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
 |---|---|
 | `internal/config` | TOML XDG. `Load()` nunca falla: defaults + warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude`. `MainRepo` enlaza worktree→repo principal |
-| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, Pull, Push, RebaseInProgress) + `outcome.go` (Classify: qué hizo git de verdad). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro. `runGit`/`runGitCombined` son el **único** punto por el que sale un subprocess git, y ambos dejan entrada en el command log |
+| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: qué hizo git de verdad). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro. `runGit`/`runGitCombined` son el **único** punto por el que sale un subprocess git, y ambos dejan entrada en el command log |
+| `internal/forge` | Puro (sin I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/proyecto, con el prefijo de subcarpeta), `WebURL`, `ForgeForHost`/`PublicHosts` (hosts públicos) y `BuildCreateArgv`/`CreateBin`/`PromptEnv` (el argv de `gh pr create` / `glab mr create`). La ejecución NO es de aquí: es de `internal/forge/tool` (Runner con plazo de 30 s y `Error` con exit code) |
 | `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
 | `internal/cmdlog` | Ring acotado en memoria (500) de lo que se ejecutó: entries de `intent` (tecla) y `exec` (proceso con argv, exit, duración y resultado). Global con default no-op; solo la TUI lo instala (`tui.New`) |
-| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `cmdlogpanel.go` (panel del log), `styles.go` |
+| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `proverlay.go` (formulario de PR) + `prcreate.go` (su ejecución), `cmdlogpanel.go` (panel del log), `styles.go` |
 | `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
 | `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees, ramas) |
 | `cmd/gitdash` | `main.go` (TUI) + `print.go` (modo `--print`, tabwriter, mismo orden) |
@@ -330,6 +331,65 @@ cursor cuando llegue la segunda tecla.
   igual (etiqueta sin tecla, la antepone `HintBarLines`); un toast no pasa por
   ahí, y es el único sitio donde la tecla se escribe a mano.
 
+## Gotcha de diseño: abrir un PR/MR (`O`)
+
+`O` abre un overlay que recoge título, cuerpo, base y draft (`proverlay.go`), y
+`ctrl+s` lo envía a `gh pr create` / `glab mr create` (`prcreate.go`). Decisiones
+que no son evidentes:
+
+- **NO es un handoff de terminal.** gh y glab son no interactivos con todos los
+  flags dados, y `BuildCreateArgv` garantiza eso (el cuerpo se emite siempre, y
+  glab lleva su `-y`). Así que no hay TTY que ceder: se captura la salida con
+  `forge/tool.Runner`, como el comando `!`. Por eso, y solo por eso, esta acción
+  **sí mide duración** en el command log: los handoffs van con `Dur = 0` porque
+  medir su proceso exigiría guardar el arranque en el modelo.
+- **La cadena es larga y cada paso corta antes de ejecutar**: remote →
+  `ParseRemoteURL` → `BuildCreateArgv` → `LookPath` → ejecución. Un PR creado
+  contra el repo equivocado no falla visiblemente (gh deduciría el destino), así
+  que “no sé de dónde es esto” es un toast que dice qué hacer y NADA ejecutado.
+  Los cuatro rechazos son `m.running[path]` liberado, sin exec en el log y sin
+  recollect: no pasó nada.
+- **El remote se lee on demand** (`gitstatus.RemoteURL`, `ClassRead`), no en
+  `Collect`: sumarlo al scan sería un `git remote get-url` por repo y por ciclo
+  para un dato que casi nadie mira. Va por `runGit` como todo lo demás, así que
+  es auditable desde el panel con `a` (show all).
+- **El forge sale de la config, no de una heurística**: `forge.ForgeForHost` solo
+  conoce `github.com` y `gitlab.com`, y adivinar el proveedor de un host
+  desconocido produce enlaces que abren 404 sin que nada falle. `Config.ForgeHosts()`
+  y `Config.ForgePrefixes()` (`internal/config/forge.go`) resuelven los dos mapas
+  que consume `ParseRemoteURL`; los hosts públicos salen de `forge.PublicHosts()`
+  para que la lista no pueda duplicarse, y los self-managed se declaran:
+
+  ```toml
+  [forge.gitlab]
+  api_base = "https://git.example.com/git/api/v4/"
+  hosts = ["git.example.com"]
+  ```
+
+  El `api_base` **absoluto nombra el host al que aplica**, y de su path sale el
+  prefijo de la subcarpeta (`/git/api/v4/` → `git`, con
+  `forge.PrefixFromAPIBase`): es lo que hace que un GitLab en `/git/` resuelva
+  `grupo/sub/widget` y no `git/grupo/sub/widget`. Un `api_base` relativo no
+  nombra ningún host y aplica a todos los del proveedor; los hosts que no nombra
+  se quedan con el default del proveedor. Un proveedor que no soportamos avisa al
+  cargar en vez de aceptarse en silencio.
+- **El argv se registra CRUDO y lo sanea quien pinta.** El título y el cuerpo los
+  escribió una persona y acaban en el panel del log, así que pasan por
+  `sanitizeLogText` (ver la sección del command log). El registro guarda lo que
+  se ejecutó, tal cual: un log “limpiado” puede mentir.
+- **Aceptar y ejecutar son dos pasos.** El overlay publica el envío en
+  `m.prPending` y devuelve un `tea.Cmd` que emite `prStartMsg`; `prCreateCmd` lo
+  consume. El seam existe para que un test vea el envío aceptado sin que ningún
+  proceso haya salido, que es la mitad que un handoff no tiene.
+- **La intención la deja el enrutado genérico**, como toda acción de
+  `commandActions`: `key O pr` en el log, y debajo el exec con el argv. Con el
+  panel del log abierto la tecla está en el guard que impide abrir overlays (si
+  no, dejaría una intención por algo que no ocurrió).
+- **La tecla de abrir la resuelve la config** (`cfg.KeyFor("pr")`) hasta en el
+  aviso del panel: un texto fijo dejaría mintiendo al usuario tras un rebind. La
+  de enviar (`ctrl+s`) NO sale de la config porque no es una acción
+  rebindeable.
+
 ## Gotcha de diseño: pull con IA (`p a`)
 
 El selector de `p` tiene una quinta variante, `a`, que hace handoff al comando AI
@@ -367,16 +427,21 @@ segunda tecla es la decisión). Decisiones que no son evidentes:
 
 - **Todo exec de git pasa por `runGit`/`runGitCombined`** (`gitstatus`), que miden
   y registran. Si añades un verbo git nuevo fuera de ahí, no aparece en el log.
-  Los 4 `exec.Command` de `tui/app.go` (editor, lazygit, shell, `!`) están
-  fuera: se registran a mano, en `execDoneMsg` (handoffs, al volver) y en
-  `openCmdCmd` (el `!`, que sí mide duración). Los handoffs van con `Dur = 0`:
-  medirlo exigiría guardar el arranque en el modelo.
+  Los 6 `exec.Command` de `tui/app.go` (editor, lazygit, `pull_ai`, visual, `!`,
+  shell) están fuera: se registran a mano, en `execDoneMsg` (handoffs, al
+  volver) y en `openCmdCmd` (el `!`, que sí mide duración). Los handoffs van con
+  `Dur = 0`: medirlo exigiría guardar el arranque en el modelo. `gh`/`glab` no
+  son git: salen por `forge/tool.Runner` y los registra `prCreateCmd`, también a
+  mano (y SÍ midiendo).
 - **`gitstatus.Fetch` recibe la `cmdlog.Class` del caller**: `git fetch --prune`
   es el mismo comando lo lanzan el scan automático y la tecla `f`, y solo el
   origen los separa. Es el único exec cuya clase no se deduce del argv.
 - `RemoveWorktreeArgv` existe para que el log, el detail y `RemoveWorktree` no
   puedan discrepar. Si duplicas la construcción del argv en otro sitio, el log
   puede mentir sobre lo que se ejecutó.
+- `forge.BuildCreateArgv` es la fuente única del argv de creación (y
+  `forge.CreateBin`/`PromptEnv`, la de la puerta y la del host): si los armas en
+  otro sitio, el log puede enseñar un comando que no es el que salió.
 
 ## Probar
 

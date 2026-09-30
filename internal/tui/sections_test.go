@@ -15,6 +15,14 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
+// layoutTest llama a computeLayout sin mínimo de formulario. Casi todos los
+// tests de layout son del dashboard normal, donde no hay overlay de PR abierto:
+// el mínimo solo existe para que el formulario no se dibuje a medias, así que
+// dejarlo explícito en 0 mantiene los tests hablando del reparto de siempre.
+func layoutTest(height int, hasFilter bool, keybinds int, keep bool) layout {
+	return computeLayout(height, hasFilter, keybinds, keep, 0)
+}
+
 func TestDashboardSeccionesBordeadas(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
@@ -70,7 +78,7 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 // entero), y mientras está la tabla no baja de minBodyLines.
 func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	// Altura amplia: todo visible y el panel con su share del alto libre.
-	wide := computeLayout(40, false, defaultHintLines, false)
+	wide := layoutTest(40, false, defaultHintLines, false)
 	if !wide.showStats || !wide.showKeybinds || wide.hintLines != defaultHintLines {
 		t.Errorf("altura amplia: %+v, want todo visible", wide)
 	}
@@ -84,7 +92,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 
 	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
 	// HintBarLines): el panel crece con el hueco que dejan.
-	pocas := computeLayout(40, false, 1, false)
+	pocas := layoutTest(40, false, 1, false)
 	if pocas.hintLines != 1 {
 		t.Errorf("keybindsLines=1: hintLines = %d, want 1", pocas.hintLines)
 	}
@@ -94,20 +102,20 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 
 	// altura intermedia: se recortan las hints antes de ocultar secciones
-	mid := computeLayout(10, false, defaultHintLines, false)
+	mid := layoutTest(10, false, defaultHintLines, false)
 	if mid.hintLines != 1 || !mid.showKeybinds {
 		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
 	}
 
 	// más baja: keybinds fuera, stats aún visible
-	baja := computeLayout(9, false, defaultHintLines, false)
+	baja := layoutTest(9, false, defaultHintLines, false)
 	if baja.showKeybinds || !baja.showStats {
 		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
 	}
 
 	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, defaultHintLines, false)
+		l := layoutTest(h, false, defaultHintLines, false)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
@@ -119,7 +127,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	// con keepKeybinds (aviso armado), keybinds nunca se degrada: es la única
 	// fuente de las teclas que espera la app. Se recortan stats y panel antes.
 	for h := 0; h <= 8; h++ {
-		l := computeLayout(h, false, 1, true)
+		l := layoutTest(h, false, 1, true)
 		if !l.showKeybinds || l.hintLines != 1 {
 			t.Errorf("h=%d con keepKeybinds: keybinds degradada: %+v", h, l)
 		}
@@ -129,7 +137,7 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 	}
 	// Y sin keepKeybinds se comporta como antes: degrada antes de crunchar.
 	for h := 0; h <= 8; h++ {
-		if l := computeLayout(h, false, 1, false); l.hintLines != 0 || l.showKeybinds {
+		if l := layoutTest(h, false, 1, false); l.hintLines != 0 || l.showKeybinds {
 			t.Errorf("h=%d sin keepKeybinds: keybinds debería caerse: %+v", h, l)
 		}
 	}
@@ -140,20 +148,20 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 // de la feature.
 func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	// Con room: panel + todo lo demás.
-	if l := computeLayout(30, false, defaultHintLines, false); l.previewLines == 0 {
+	if l := layoutTest(30, false, defaultHintLines, false); l.previewLines == 0 {
 		t.Errorf("h=30: sin panel: %+v", l)
 	}
 	// El panel más pequeño que entra es el de la cabecera de la ficha, y solo
 	// si a la tabla le quedan minBodyLines filas. La cabecera son detailHeadLines
 	// líneas, así que el alto mínimo se deriva de ella en vez de ir a fuego.
 	first := minPanelHeight(t)
-	if l := computeLayout(first, false, defaultHintLines, false); l.previewLines != detailHeadLines {
+	if l := layoutTest(first, false, defaultHintLines, false); l.previewLines != detailHeadLines {
 		t.Errorf("h=%d: previewLines = %d, want %d", first, l.previewLines, detailHeadLines)
 	}
 	// Por debajo, nada de panel y el reparto de siempre: hints y stats intactos y
 	// la tabla con lo que sobra.
 	for h := 14; h < first; h++ {
-		l := computeLayout(h, false, defaultHintLines, false)
+		l := layoutTest(h, false, defaultHintLines, false)
 		if l.previewLines != 0 {
 			t.Errorf("h=%d: previewLines = %d, want 0 (el panel no puede pedir más)", h, l.previewLines)
 		}
@@ -167,7 +175,7 @@ func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
 	}
 	// Y con el panel presente nunca se recorta una hint ni se oculta una sección.
 	for h := first; h <= 80; h++ {
-		l := computeLayout(h, false, defaultHintLines, false)
+		l := layoutTest(h, false, defaultHintLines, false)
 		if l.previewLines == 0 {
 			continue
 		}
@@ -199,7 +207,7 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 			{"armado+filtro", true, 1, true},
 			{"sin hints", false, 0, false},
 		} {
-			l := computeLayout(h, tc.hasFilter, tc.keybinds, tc.keep)
+			l := layoutTest(h, tc.hasFilter, tc.keybinds, tc.keep)
 			total := l.altoTotal(tc.hasFilter)
 			if l.bodyLines < 1 {
 				t.Errorf("%s h=%d: bodyLines = %d, want >= 1", tc.name, h, l.bodyLines)
@@ -221,7 +229,7 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 func minPanelHeight(t *testing.T) int {
 	t.Helper()
 	for h := 0; h <= 120; h++ {
-		if computeLayout(h, false, defaultHintLines, false).previewLines > 0 {
+		if layoutTest(h, false, defaultHintLines, false).previewLines > 0 {
 			return h
 		}
 	}
@@ -255,10 +263,10 @@ func (l layout) altoTotal(hasFilter bool) int {
 func TestLayoutEnElEncajeExacto(t *testing.T) {
 	// h=7: chrome de la tabla (3) + stats (3) = 6, y sobra exactamente una
 	// línea de cuerpo. Stats se quedan (caben justas); una línea menos ya no.
-	if l := computeLayout(7, false, defaultHintLines, false); !l.showStats {
+	if l := layoutTest(7, false, defaultHintLines, false); !l.showStats {
 		t.Errorf("h=7: stats ocultas aunque caben justas: %+v", l)
 	}
-	if l := computeLayout(6, false, defaultHintLines, false); l.showStats {
+	if l := layoutTest(6, false, defaultHintLines, false); l.showStats {
 		t.Errorf("h=6: stats visibles sin sitio: %+v", l)
 	}
 
@@ -271,7 +279,7 @@ func TestLayoutEnElEncajeExacto(t *testing.T) {
 	if want := free * previewShare / 5; want <= minPreviewLines {
 		t.Fatalf("h=%d: free=%d da un share de %d, que no ejercita el 2/5 (caería al mínimo)", h, free, want)
 	}
-	l := computeLayout(h, false, defaultHintLines, false)
+	l := layoutTest(h, false, defaultHintLines, false)
 	if l.previewLines != free*previewShare/5 {
 		t.Errorf("h=%d: previewLines = %d, want %d (2/5 de %d libres)", h, l.previewLines, free*previewShare/5, free)
 	}
@@ -286,7 +294,7 @@ func TestLayoutEnElEncajeExacto(t *testing.T) {
 	// grande o más pequeña seguiría "cayendo bien" en cualquier test que solo
 	// compruebe que el panel cabe, así que el borde se mira de cerca.
 	for h := 14; h <= 40; h++ {
-		got := computeLayout(h, false, defaultHintLines, false)
+		got := layoutTest(h, false, defaultHintLines, false)
 		if got.previewLines == 0 {
 			continue
 		}
@@ -775,7 +783,7 @@ func TestPreviewSinAltoNoDibujaCaja(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.height = 14 // por debajo del alto mínimo del panel
-	lay := computeLayout(m.height, false, defaultHintLines, false)
+	lay := layoutTest(m.height, false, defaultHintLines, false)
 	if lay.previewLines != 0 {
 		t.Fatalf("h=%d: el layout dio panel de %d; el test necesita un alto sin panel", m.height, lay.previewLines)
 	}
@@ -1040,7 +1048,7 @@ func TestFetchStatePorSuValor(t *testing.T) {
 // filtro, el panel tiene que ENTRAR en lo que queda.
 func TestPreviewConFiltroActivoRespetaElAlto(t *testing.T) {
 	for _, h := range []int{24, 30, 40, 41, 50, 60, 80} {
-		lay := computeLayout(h, true, defaultHintLines, false)
+		lay := layoutTest(h, true, defaultHintLines, false)
 		libre := h - (tableChrome + filterSectionLines + statsSectionLines +
 			keybindsChrome + defaultHintLines + previewChrome)
 		if lay.previewLines > libre {

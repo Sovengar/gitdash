@@ -301,6 +301,14 @@ type Model struct {
 	logCache    []cmdlog.Entry
 	logCacheSeq int
 
+	// Overlay de creación de PR/MR (tecla pr). pr == nil es "cerrado": es un
+	// view mode como el panel del log, no un estado armado de prefix-key
+	// (pullArmed, visualArmed), porque un formulario vive N pulsaciones. Abierto
+	// captura el teclado entero. prPending es el envío que el overlay aceptó y
+	// que todavía nadie ha ejecutado: la UI recoge, forge/tool corre.
+	pr        *prDraft
+	prPending *prSubmission
+
 	// modo comando (tecla !): input de shell ejecutada en el repo con
 	// $SHELL -c; Enter con input vacío abre una shell interactiva. Se pinta al
 	// final de la ficha del panel, que es donde se leen las cosas del repo.

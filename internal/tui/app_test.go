@@ -104,18 +104,28 @@ func sectionContent(t *testing.T, view, title string) string {
 	return ""
 }
 
+// namedKeys son las teclas sintéticas que no son un único rune. Los
+// modificadores no se deducen del texto (gotcha 6: el input necesita Code, y
+// el Mod aparte), así que una "ctrl+s" sin Mod sería una "s" y "shift+tab" un
+// "tab".
+var namedKeys = map[string]tea.KeyPressMsg{
+	"enter":     {Code: tea.KeyEnter},
+	"esc":       {Code: tea.KeyEsc},
+	"up":        {Code: tea.KeyUp},
+	"down":      {Code: tea.KeyDown},
+	"home":      {Code: tea.KeyHome},
+	"end":       {Code: tea.KeyEnd},
+	"backspace": {Code: tea.KeyBackspace},
+	"tab":       {Code: tea.KeyTab},
+	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
+	"ctrl+s":    {Code: 's', Mod: tea.ModCtrl},
+	"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
+}
+
 func press(m Model, key string) (Model, tea.Cmd) {
-	km := tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
-	if len(key) > 1 {
-		codes := map[string]rune{
-			"enter": tea.KeyEnter, "esc": tea.KeyEsc,
-			"up": tea.KeyUp, "down": tea.KeyDown,
-			"home": tea.KeyHome, "end": tea.KeyEnd,
-			"backspace": tea.KeyBackspace, "tab": tea.KeyTab,
-		}
-		if c, ok := codes[key]; ok {
-			km = tea.KeyPressMsg{Code: c}
-		}
+	km, named := namedKeys[key]
+	if !named {
+		km = tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
 	}
 	out, cmd := m.Update(km)
 	return out.(Model), cmd

@@ -18,6 +18,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// Un overlay que ya no cabe no se deja a medias: se cierra y se avisa.
+		// Quedarse con el teclado capturado y sin formulario visible sería
+		// escribir a ciegas.
+		if m.pr != nil && !m.prFits() {
+			m.closePR()
+			m.toasts.showWarning("terminal too small — closed the PR form")
+		}
+		m.prFit()
 		return m, nil
 
 	case spinner.TickMsg:
@@ -180,6 +188,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toasts.show(msg.text, msg.level)
 		return m, nil
 
+	// Lanza lo que el overlay de PR aceptó. Va como mensaje propio (y no
+	// como efecto de la tecla de submit) para que aceptar y ejecutar sean dos
+	// pasos: el envío queda observable en m.prPending sin que haya salido
+	// ningún proceso.
+	case prStartMsg:
+		return m, m.prCreateCmd()
+
+	// El desenlace. reject != "" significa que no se ejecutó nada, así que no
+	// hay exec que registrar ni estado que re-colectar: solo el aviso, que dice
+	// qué falta para poder hacerlo.
+	case prResultMsg:
+		delete(m.running, msg.path)
+		if msg.reject != "" {
+			// No hubo proceso: ni entrada en el command log ni recollect.
+			m.toasts.showWarning(msg.reject)
+			return m.withPump(nil)
+		}
+		level, note := prNote(m.nameOf(msg.path), msg)
+		if level == toastSuccess {
+			m.toasts.showSuccess(note)
+		} else {
+			m.toasts.showError(note)
+		}
+		// La creación puede haber pusheado la rama (gh empuja si el head no
+		// tiene upstream), así que el ahead/behind del snapshot puede haber
+		// cambiado: re-colecta pase lo que pase, como con los handoffs.
+		return m.withPump(m.recollectCmd(msg.path))
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -250,6 +286,20 @@ func (m *Model) clampCursor() {
 // se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// El overlay de creación de PR es un view mode y se lleva el teclado
+	// entero: se consulta AL PRINCIPIO del enrutado, antes que los selectores
+	// armados, los inputs y la tabla, porque el usuario está escribiendo y
+	// "p" o "f" son letras, no acciones. Es justo lo que lo separa de
+	// pullArmed y visualArmed, que son prefix-key de una sola pulsación. La
+	// única excepción es ctrl+c, que sigue su curso normal y cierra la app
+	// (igual que dentro del panel del log): tragar el abort del terminal
+	// dejaría al usuario sin salida.
+	if m.pr != nil {
+		if out, cmd, handled := m.handlePRKey(msg); handled {
+			return out, cmd
+		}
+	}
 
 	// esc cancela de forma definitiva TODOS los borrados en vuelo, no solo uno:
 	// limpia el mapa completo de tokens para que cualquier resultado tardío se
@@ -420,11 +470,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// El panel del log es un view mode y dentro `a` es su filtro: no se arman
 	// ahí los selectores (su aviso no se pintaría y la tecla quedaría
 	// shadowed). Abrir el panel ya suelta los estados armados; esto evita
-	// rearmarlos mientras siga abierto. Va DESPUÉS de los inputs: con el filtro
-	// o el modo comando activos la tecla es texto, no una acción.
+	// rearmarlos mientras siga abierto. `pr` va aquí aunque no sea un selector
+	// de variante: abrir el overlay con el panel delante no dibujaría el
+	// formulario (openPR lo rechaza), así que sin esta guarda la pulsación
+	// solo dejaría una intención de "pr" en el log por algo que no ocurrió.
+	// Va DESPUÉS de los inputs: con el filtro o el modo comando activos la
+	// tecla es texto, no una acción.
 	if m.logOpen {
 		switch m.actionForKey(key) {
-		case "pull", "visual":
+		case "pull", "visual", "pr":
 			return m, nil
 		}
 	}
@@ -510,6 +564,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			behind:   r.snap.Status.Behind,
 		}
 		return m, nil
+	case "pr":
+		// Abre el overlay de creación. Como `pull` y `visual`, no ejecuta: la
+		// tecla solo recoge los parámetros y es el submit del formulario quien
+		// lanza gh/glab (ver proverlay/prSubmit y prcreate.go).
+		return m.openPR()
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -600,7 +659,7 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true, "push": true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
-	"command": true, "worktree_remove": true, "visual": true,
+	"command": true, "worktree_remove": true, "visual": true, "pr": true,
 }
 
 // launchesCommand reporta si la acción acaba en un proceso.
@@ -612,7 +671,7 @@ func launchesCommand(action string) bool { return commandActions[action] }
 var rowActions = map[string]bool{
 	"fetch": true, "pull": true, "push": true, "lazygit": true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
-	"visual": true,
+	"visual": true, "pr": true,
 }
 
 // actionNeedsRow reporta si la acción requiere una fila seleccionada.
@@ -751,14 +810,17 @@ func (m Model) View() tea.View {
 // tabla, panel con la ficha del repo bajo el cursor y keybinds. Las entradas se
 // calculan una vez y se comparten entre la tabla y el panel.
 //
-// Con el command log abierto el cuerpo NO es la tabla: es el log, y la ficha no
-// se dibuja (layout ya le devolvió su alto). El log es una vista a la que se va
-// a mirar, no información ambiente como la ficha, así que no se reparte el
-// espacio con la tabla: se sustituye.
+// Con el command log o con el overlay de PR abiertos el cuerpo NO es la tabla:
+// es el log o el formulario, y la ficha no se dibuja (layout ya le devolvió su
+// alto). Los dos son vistas a las que se va a mirar, no información ambiente
+// como la ficha, así que no se reparten el espacio con la tabla: la sustituyen.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
 	if m.logOpen {
 		return m.compose(lay, m.logSection(lay.bodyLines), "")
+	}
+	if m.pr != nil {
+		return m.compose(lay, m.prSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
 	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))

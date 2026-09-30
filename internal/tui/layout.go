@@ -45,11 +45,17 @@ type layout struct {
 // stats o keybinds. Si no hay ningún alto que cumpla las dos, el panel no se
 // dibuja: media ficha por perder media pantalla es peor que no tener panel.
 //
+// formMin > 0 dice que el cuerpo lo ocupa un formulario (el overlay de PR) que
+// necesita al menos eso: con el formulario abierto la búsqueda de panel se
+// salta entera, porque un panel de preview competiría por el alto de algo que
+// el usuario está escribiendo y la ficha del repo bajo el cursor ya no describe
+// nada —con el teclado capturado, el cursor puede estar en cualquier sitio—.
+//
 // Sin panel el reparto es el de siempre (hints → 0, keybinds fuera, stats
 // fuera), así que en terminales bajas esto no cambia nada de lo que se veía
 // antes. keepKeybinds impide degradar keybinds: con un aviso armado es la
 // única fuente de las teclas que espera la app.
-func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds bool) layout {
+func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds bool, formMin int) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
@@ -58,12 +64,14 @@ func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds b
 
 	sinPanel := fitLayout(height, chrome, filterH, 0, keybindsLines, keepKeybinds)
 	lay := sinPanel
-	for preview := panelHeight(height, chrome, filterH, keybindsLines); preview >= detailHeadLines; preview-- {
-		l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
-		if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
-			l.previewLines = preview
-			lay = l
-			break
+	if formMin <= 0 {
+		for preview := panelHeight(height, chrome, filterH, keybindsLines); preview >= detailHeadLines; preview-- {
+			l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
+			if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
+				l.previewLines = preview
+				lay = l
+				break
+			}
 		}
 	}
 	// El filtro es la única sección cuya visibilidad no se degrada: se pinta
