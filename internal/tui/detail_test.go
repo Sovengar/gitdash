@@ -534,3 +534,191 @@ func TestFichaElHuecoMinimoParaLosCommits(t *testing.T) {
 		t.Errorf("con el hueco mínimo no salió la cabecera de commits:\n%s", out)
 	}
 }
+
+// --- la línea de sync: cuatro formas, y solo se pintaba una ---
+
+// La ficha siempre enseña la sync branch resuelta, con su desviación o el motivo
+// de la falta. Las cuatro formas son distintas para el usuario: sin sync branch
+// no hay contra qué comparar, ref missing es un config roto, ↓N es trabajo
+// pendiente y ok es que está al día. Antes solo la cuarta tenía camino.
+func TestFichaLaLineaDeSyncTieneCuatroFormas(t *testing.T) {
+	for _, c := range []struct {
+		nombre string
+		snap   gitstatus.Snapshot
+		want   string
+		noWant string
+	}{
+		{
+			"sin sync branch: no hay contra qué comparar",
+			gitstatus.Snapshot{SyncBranch: "", SyncKnown: false},
+			"— (sin sync branch)", "ref missing",
+		},
+		{
+			"la rama existe pero el ref no: el config está roto",
+			gitstatus.Snapshot{SyncBranch: "main", SyncKnown: false},
+			"main (ref missing)", "(ok)",
+		},
+		{
+			"con retraso: hay N commits que bajar",
+			gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true, SyncBehind: 3},
+			"main (↓3)", "(ok)",
+		},
+		{
+			"al día",
+			gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true, SyncBehind: 0},
+			"main (ok)", "↓0",
+		},
+	} {
+		t.Run(c.nombre, func(t *testing.T) {
+			path := "/tmp/api"
+			snap := snapClean()
+			snap.SyncBranch = c.snap.SyncBranch
+			snap.SyncKnown = c.snap.SyncKnown
+			snap.SyncBehind = c.snap.SyncBehind
+			m, r := detailRowWith(t, path, snap)
+
+			out := stripANSI(m.renderDetail(r, 40))
+			if !strings.Contains(out, c.want) {
+				t.Errorf("la línea de sync no dice %q:\n%s", c.want, out)
+			}
+			if c.noWant != "" && strings.Contains(out, c.noWant) {
+				t.Errorf("la línea de sync dice %q, que es de otra forma:\n%s", c.noWant, out)
+			}
+		})
+	}
+}
+
+// Y el borde: SyncBehind == 0 con la ref conocida es "ok", no "↓0". Un "↓0" es
+// ruido que hace creer que hay algo que bajar.
+func TestFichaSyncBehindCeroNoSePintaComoRetraso(t *testing.T) {
+	snap := snapClean()
+	snap.SyncBranch = "main"
+	snap.SyncKnown = true
+	snap.SyncBehind = 0
+	m, r := detailRowWith(t, "/tmp/api", snap)
+
+	out := stripANSI(m.renderDetail(r, 40))
+	if strings.Contains(out, "↓0") {
+		t.Errorf("un retraso de 0 se pintó como retraso:\n%s", out)
+	}
+	if !strings.Contains(out, "main (ok)") {
+		t.Errorf("sin retraso, la línea de sync no dice (ok):\n%s", out)
+	}
+}
+
+// --- el veredicto del último comando `!` ---
+
+// La ficha guarda el último `!` con su código de salida, y ese código es el
+// veredicto: sin él, un comando que salió mal se lee como que fue bien. Además el
+// comando se recorta a un ancho mínimo (un argv de 20 caracteres mínimo) para que
+// no se coma media ficha.
+func TestFichaElVeredictoDelUltimoComando(t *testing.T) {
+	const path = "/tmp/api"
+
+	for _, c := range []struct {
+		nombre string
+		exit   string
+		want   string
+	}{
+		{"exit 0 es el caso limpio", "0", "exit 0"},
+		{"un código de salida es un fallo, y se nombra", "3", "exit 3"},
+	} {
+		t.Run(c.nombre, func(t *testing.T) {
+			m, r := detailRowWith(t, path, snapClean())
+			m.lastCmd[path] = cmdResult{command: "go test ./...", output: "ok\n", exit: c.exit}
+
+			out := stripANSI(m.renderDetail(r, 40))
+			if !strings.Contains(out, "go test ./...") {
+				t.Errorf("el comando no aparece en la ficha:\n%s", out)
+			}
+			if !strings.Contains(out, c.want) {
+				t.Errorf("el veredicto no dice %q:\n%s", c.want, out)
+			}
+			// Con exit 0 no puede aparecer un código de salida, y con exit 3 no
+			// puede aparecer el "exit 0" del caso limpio.
+			otro := "exit 0"
+			if c.want == "exit 0" {
+				otro = "exit 3"
+			}
+			if strings.Contains(out, otro) {
+				t.Errorf("apareció %q, el veredicto del otro caso:\n%s", otro, out)
+			}
+		})
+	}
+}
+
+// La salida del comando se enseña al final, y solo si hay alto para ella: con el
+// presupuesto justo no cabe y no se pinta una línea a medias.
+func TestFichaLaSalidaDelComandoRespetaElPresupuesto(t *testing.T) {
+	const path = "/tmp/api"
+	m, r := detailRowWith(t, path, snapClean())
+	m.lastCmd[path] = cmdResult{
+		command: "ls",
+		output:  "uno\ndos\ntres\ncuatro\ncinco\n",
+		exit:    "0",
+	}
+
+	conAlto := stripANSI(m.renderDetail(r, 40))
+	if !strings.Contains(conAlto, "cinco") {
+		t.Errorf("con presupuesto la salida del comando no aparece:\n%s", conAlto)
+	}
+
+	// Un comando largo se recorta, no se sale de la caja.
+	m.width = 60
+	corto := stripANSI(m.renderDetail(r, 40))
+	for _, linea := range strings.Split(corto, "\n") {
+		if w := len([]rune(linea)); w > m.width {
+			t.Errorf("la ficha mide %d con un terminal de %d: %q", w, m.width, linea)
+		}
+	}
+}
+
+// Cuántas líneas de la salida del `!` se ven depende del presupuesto que se le
+// da a la cola, así que el barrido afirma las dos cosas que tienen que ser
+// ciertas: la cola NUNCA excede su presupuesto, y crece con él. Un presupuesto
+// mayor no puede pintar más de lo que la caja da.
+func TestFichaLaColaDelComandoRespetaSuPresupuesto(t *testing.T) {
+	const path = "/tmp/api"
+
+	lineasVisibles := func(rows, lineas int) int {
+		m, r := detailRowWith(t, path, snapClean())
+		m.lastCmd[path] = cmdResult{
+			command: "ls",
+			output:  strings.TrimSuffix(strings.Repeat("salida\n", lineas), "\n"),
+			exit:    "0",
+		}
+		out := stripANSI(m.renderDetail(r, rows))
+		n := 0
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, "salida") {
+				n++
+			}
+		}
+		return n
+	}
+
+	for _, rows := range []int{20, 30, 40, 60} {
+		prev := -1
+		for _, lineas := range []int{1, 3, 8, 20, 40, 80} {
+			n := lineasVisibles(rows, lineas)
+			if n < prev {
+				t.Errorf("rows=%d: con %d líneas se ven %d y con menos se veían %d: "+
+					"más salida no puede tapar más salida", rows, lineas, n, prev)
+			}
+			prev = n
+			// El presupuesto de la cola son 12 líneas menos las del resto de la
+			// ficha, con un suelo de 3: ni una línea más.
+			if presupuesto := max(3, rows-12); n > presupuesto {
+				t.Errorf("rows=%d: la cola enseña %d líneas y su presupuesto es %d",
+					rows, n, presupuesto)
+			}
+			// Y si la salida NO cabe en el presupuesto, no se pinta entera: la
+			// cola se recorta, que es justo lo que evita que el comando se coma
+			// media ficha.
+			if presupuesto := max(3, rows-12); lineas > presupuesto && n >= lineas {
+				t.Errorf("rows=%d: la cola enseñó las %d líneas enteras, "+
+					"cuando su presupuesto es %d", rows, lineas, presupuesto)
+			}
+		}
+	}
+}

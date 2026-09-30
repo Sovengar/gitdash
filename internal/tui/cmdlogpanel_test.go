@@ -759,6 +759,11 @@ func TestLogVerdict(t *testing.T) {
 		{"ok con duración", cmdlog.Entry{Exit: 0, Dur: 146 * time.Millisecond}, "146ms"},
 		{"fallido", cmdlog.Entry{Exit: 128, Dur: 20 * time.Millisecond}, "exit 128"},
 		{"lento", cmdlog.Entry{Exit: 0, Dur: 2500 * time.Millisecond}, "2.5s"},
+		// El segundo exacto: a partir de un segundo se pintan segundos, y no
+		// milisegundos. Con un ">" en vez de un ">=", un comando de 1.000 s
+		// caería en el final y saldría "1000ms" al lado de un "2.5s" de al lado.
+		{"un segundo justo", cmdlog.Entry{Exit: 0, Dur: time.Second}, "1.0s"},
+		{"milésimas por debajo del segundo, en ms", cmdlog.Entry{Exit: 0, Dur: 999 * time.Millisecond}, "999ms"},
 		{"handoff sin código ni duración", cmdlog.Entry{Exit: -1}, "no exit"},
 		{"nada que medir", cmdlog.Entry{Exit: 0}, ""},
 		{"intención", cmdlog.Entry{Intent: true, Exit: -1}, ""},
