@@ -53,10 +53,10 @@ func resize(m Model, width, height int) Model {
 }
 
 // formPainted dice si la CAJA del formulario está en la vista. Se busca el
-// título con su borde y no la palabra "new PR" a secas: desde que `pr` es una
-// acción, los hints de keybinds traen "O new PR" siempre, así que la búsqueda
-// laxa daría un falso positivo con el overlay cerrado y dejaría sin comprobar
-// justo lo que estos tests quieren comprobar.
+// título con su borde, no la palabra a secas: el prompt de keybinds del overlay
+// abierto también dice "new PR", así que la búsqueda laxa daría un falso positivo
+// con el overlay cerrado y dejaría sin comprobar justo lo que estos tests
+// quieren comprobar.
 func formPainted(t *testing.T, m Model) bool {
 	t.Helper()
 	for _, l := range strings.Split(stripANSI(m.View().Content), "\n") {
