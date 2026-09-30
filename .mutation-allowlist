@@ -121,8 +121,8 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:69
 #   ruido, ya NO están: las mata TestPreviewConFiltroRespetaElShareDelHueco.)
 
 # --- internal/tui/cmdlogpanel.go -----------------------------------------
-ARITHMETIC_BASE internal/tui/cmdlogpanel.go:101
-INVERT_NEGATIVES internal/tui/cmdlogpanel.go:101
+ARITHMETIC_BASE internal/tui/cmdlogpanel.go:104
+INVERT_NEGATIVES internal/tui/cmdlogpanel.go:104
 #   El segundo clamp del offset: `min(m.logOffset, max(0, len(entries)-visible))`.
 #   logOffset ya está acotado a [0, maxOffset] en logScroll, así que este clamp
 #   es la red de seguridad para cuando cambia `visible` (un resize) y el offset
@@ -130,8 +130,8 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:101
 #   observable: el offset que llega aquí nunca lo supera, y el único sitio donde
 #   se usa es `len(entries)-visible-offset`, cuyo recorte por start ya lo acota.
 
-ARITHMETIC_BASE internal/tui/cmdlogpanel.go:105
-INVERT_NEGATIVES internal/tui/cmdlogpanel.go:105
+ARITHMETIC_BASE internal/tui/cmdlogpanel.go:108
+INVERT_NEGATIVES internal/tui/cmdlogpanel.go:108
 #   El segundo término del min de la ventana: `min(visible, len(entries)-start)`.
 #   Es una IDENTIDAD, y la demostración es el offset de al lado. offset >= 0
 #   siempre (logScroll lo acota con max(0, ...), y el resto de sitios lo ponen a
