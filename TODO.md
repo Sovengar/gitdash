@@ -60,9 +60,10 @@ caveat de arriba); `líneas` son las sospechosas concretas.
 | 4 | `internal/tui/app.go` | 4 | 454, 458, 464, 853 | ✅ hecho: `commandTimeout` ya lo mata un test (NOT COVERED era falso). Las dos guardas de cancelación de `startScanCmd` son equivalencias por el contrato de `sendEvent` (su `select` tiene `case <-ctx.Done()`) → allowlistadas |
 | 5 | `internal/tui/toast.go` | 6 | 25, 188, 190 | ✅ hecho: los 6 ya los matan tests existentes (NOT COVERED era falso entero). Verificado a mano, uno por uno |
 | 6 | `internal/tui/proverlay.go` | 6 | 46, 66, 376, 379 | ✅ hecho: los mínimos del formulario en el borde exacto (una línea menos no abre, una más sí) **y contra su composición** (`prMinBodyLines == prFixedLines+2`, `prMinValueWidth == prLabelWidth`), porque un test que compara contra la propia constante no la ata: si el mutante la mueve, el test se mueve con ella. El `1` de `prValueSlack` solo necesita ser ≥1 → allowlistado |
-| 7 | `internal/tui/sections.go` | 11 | — | ⬜ |
-| 8 | `internal/tui/update.go` | 11 | — | ⬜ |
-| 9 | `internal/gitstatus/parse.go` | 17 | — | ⬜ parser puro, buen blanco |
+| 7 | `internal/tui/sections.go` | 11 | 79-85, 138, 232-234, 310-322 | ✅ hecho: **cero trabajo real**. 6 los matan tests existentes y los otros son mutaciones NO VIABLES (gremlins cambia un `+` entre strings por un `-`, que no compila) |
+| 8 | `internal/tui/update.go` | 11 | 60, 66, 81, 83, 104, 180, 319, 321, 505 | ✅ hecho: 7 los matan tests. Los 3 reales: el fetch de **un** repo no lleva recuento ("fetch ok (1 repos)"), el `!` distingue éxito de fallo por su código de salida (y el repo queda libre aunque falle), y `end` sobre tabla vacía no saca el cursor de rango (ese es el `max(0, len-1)`) |
+| 9 | `internal/gitstatus/parse.go` | 17 | — | ⬜ parser puro, buen blanco
+| 9b | `cmd/gitdash/main.go` | 2 | — | ⬜ artefacto probable (gremlins no corre el paquete `main`) — verificar antes de escribir nada |
 | 10 | `internal/tui/detail.go` | 24 | — | ⬜ grande |
 | 11 | `internal/tui/cmdlogpanel.go` | 24 | — | ⬜ grande |
 | 12 | `internal/tui/table.go` | 31 | 59, 61, 604, 652-656, 740-766 | ✅ ya cubiertos (verificado a mano), falta re-verificar |

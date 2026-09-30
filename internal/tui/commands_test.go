@@ -537,3 +537,78 @@ func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, accion stri
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// --- los tres huecos que el run destapó ---
+
+// El fetch de UN solo repo no lleva recuento: "fetch ok" y no "fetch ok (1
+// repos)", que además suena mal. El caso vive solo si nadie lo afirma: con la
+// condición invertida, un fetch de un repo caería en el mensaje de N.
+func TestFetchDeUnSoloRepoNoLlevaRecuento(t *testing.T) {
+	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 1})
+	plano := stripANSI(out.(Model).View().Content)
+	if !strings.Contains(plano, "fetch ok") {
+		t.Errorf("el toast no dice que el fetch fue bien:\n%s", plano)
+	}
+	if strings.Contains(plano, "(1 repos)") {
+		t.Errorf("un fetch de un repo no lleva recuento, y menos con la palabra \"repos\":\n%s", plano)
+	}
+}
+
+// El comando `!` distinguía el éxito del fallo por su código de salida, y con un
+// solo repo el mensaje de un fallo dice exit 0 y el de un éxito lo omite: un
+// toast que-announces "falló" con exit 0 hace que el usuario vaya a mirar un
+// comando que salió bien.
+func TestComandoExitoYSalidaNoSeConfunden(t *testing.T) {
+	for _, c := range []struct {
+		nombre string
+		exit   string
+		quiere string
+	}{
+		{"exit 0 no es un fallo", "0", "ok"},
+		{"un código de salida sí lo es", "3", "exit 3"},
+	} {
+		out, _ := newTestModel(t, nil, nil).Update(cmdResultMsg{
+			path: "/tmp/dirty-api", command: "echo hola", exit: c.exit,
+		})
+		m := out.(Model)
+		plano := stripANSI(m.View().Content)
+		if !strings.Contains(plano, c.quiere) {
+			t.Errorf("%s: el aviso no dice %q:\n%s", c.nombre, c.quiere, plano)
+		}
+		// El resultado queda guardado para la ficha aunque el comando falle: el
+		// código de salida es parte del dato, no solo del aviso.
+		if got := m.lastCmd["/tmp/dirty-api"]; got.exit != c.exit {
+			t.Errorf("%s: lastCmd.exit = %q, want %q", c.nombre, got.exit, c.exit)
+		}
+		if got := m.lastCmd["/tmp/dirty-api"]; got.command != "echo hola" {
+			t.Errorf("%s: lastCmd.command = %q, want el comando tecleado", c.nombre, got.command)
+		}
+		// Y el repo queda libre: un `!` que falla no puede dejar la fila
+		// bloqueada con "already running" para siempre.
+		if _, busy := m.running["/tmp/dirty-api"]; busy {
+			t.Errorf("%s: el repo quedó con una acción en curso tras el comando", c.nombre)
+		}
+	}
+}
+
+// `end` sobre una tabla VACÍA tiene que dejar el cursor en 0, no en un índice
+// que no existe: el clamp de max(0, len-1) existe justo para ese caso, y sin él
+// el cursor se sale de las entradas y el render lee una fila que no hay.
+func TestEndSobreTablaVaciaNoSeSaleDelCursor(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if len(m.entries()) != 0 {
+		t.Fatalf("el modelo sin proyectos tiene %d entradas, want 0", len(m.entries()))
+	}
+
+	m, _ = press(m, "end")
+	if got := m.cursor; got != 0 {
+		t.Errorf("cursor = %d en una tabla vacía, want 0", got)
+	}
+	// Y con filas, `end` va a la última de verdad.
+	projects, states := fixtureProjects()
+	m2 := newTestModel(t, projects, states)
+	m2, _ = press(m2, "end")
+	if want := len(m2.entries()) - 1; m2.cursor != want {
+		t.Errorf("cursor = %d, want %d (la última fila)", m2.cursor, want)
+	}
+}
