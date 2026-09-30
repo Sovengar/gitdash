@@ -53,6 +53,9 @@ func computeLogColumns(inner int) logColumns {
 		case c.repo > 0:
 			c.repo = 0
 		case c.kind > 4:
+			// KIND se recorta pero no desaparece: es la columna que explica el
+			// argv ("key p" vs "exec"), y sin ella la línea no se lee. Por eso
+			// el render la pinta sin guarda: kind nunca vale 0.
 			c.kind = 4
 		default:
 			// Sin sitio para más: el argv se queda con lo que hay.
@@ -124,9 +127,7 @@ func (m *Model) logSection(bodyLines int) string {
 func (m Model) logHeader(c logColumns) string {
 	var b strings.Builder
 	b.WriteString(pad("TIME", logColTime))
-	if c.kind > 0 {
-		b.WriteString(pad("KIND", c.kind) + strings.Repeat(" ", logColSep))
-	}
+	b.WriteString(pad("KIND", c.kind) + strings.Repeat(" ", logColSep))
 	if c.repo > 0 {
 		b.WriteString(pad("REPO", c.repo) + strings.Repeat(" ", logColSep))
 	}
@@ -156,15 +157,13 @@ func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 	}
 	var b strings.Builder
 	b.WriteString(style.Render(pad(e.At.Format("15:04:05.000"), logColTime)))
-	if c.kind > 0 {
-		// La intención se rotula con su tecla ("key p"): es lo que explica
-		// el argv de la línea siguiente.
-		kind := "key " + e.Key
-		if !e.Intent {
-			kind = "exec"
-		}
-		b.WriteString("  " + style.Render(pad(truncate(sanitizeLogText(kind), c.kind), c.kind)))
+	// La intención se rotula con su tecla ("key p"): es lo que explica
+	// el argv de la línea siguiente.
+	kind := "key " + e.Key
+	if !e.Intent {
+		kind = "exec"
 	}
+	b.WriteString("  " + style.Render(pad(truncate(sanitizeLogText(kind), c.kind), c.kind)))
 	if c.repo > 0 {
 		b.WriteString("  " + style.Render(pad(truncate(sanitizeLogText(e.Repo), c.repo), c.repo)))
 	}

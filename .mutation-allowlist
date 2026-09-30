@@ -27,26 +27,6 @@
 # ---------------------------------------------------------------------------
 
 # --- cmd/gitdash/print.go ------------------------------------------------
-ARITHMETIC_BASE cmd/gitdash/print.go:111
-#   El score del comparador de sortPrintRows: `if score != score { return score
-#   > score }`. La guarda ES la negación de la comparación, así que dentro de la
-#   rama los dos score son distintos por construcción y `>` y `>=` coinciden.
-#   (La TUI tiene el mismo patrón en rowLess; ver más abajo.) La TERCERA clave
-#   —el nombre— sí está cubierta con test: no hay guarda que la compare antes y
-#   un `<=` invierte el orden de dos repos con el mismo `name`. Y ESO tampoco es
-#   un contrato: sort.Slice no es estable, así que el orden de dos filas que
-#   empatan en las tres claves no está garantizado ni en el código original (por
-#   eso el test del orden no afirma nada sobre ellas: afirmarlo sería atar el test
-#   a una propiedad que el producto no tiene).
-#
-#   OJO con cómo se midió esto: TODAS las mutaciones de cmd/gitdash/print.go
-#   salen NOT COVERED aunque los tests las ejecuten (comprobado con
-#   `go test -coverprofile`: el bloque del sort sale con count 1). La fase de
-#   cobertura de gremlins no corre el paquete main de cmd/, así que ese archivo
-#   no se mide: su "not covered" es un artefacto, no un hueco. Por eso esta
-#   entrada se sostiene con una verificación a mano (mutando el fichero, la
-#   suite sigue verde) y no con el informe.
-
 # --- internal/tui/app.go -------------------------------------------------
 CONDITIONALS_NEGATION internal/tui/app.go:370
 #   `if path, err := cache.Path(); err == nil { m.projects = cache.Load(...) }`.
@@ -54,17 +34,11 @@ CONDITIONALS_NEGATION internal/tui/app.go:370
 #   valida cada entrada contra la existencia del marcador en disco, así que con
 #   una ruta inválida no puede devolver ningún proyecto: el resultado es el
 #   mismo (m.projects vacío, que el scan de Init repuebla acto seguido). La
-#   mutación solo hace una lectura inútil. No hay forma de observar la diferencia
-#   sin interceptar os.UserConfigDir.
-
-CONDITIONALS_NEGATION internal/tui/app.go:377
-CONDITIONALS_NEGATION internal/tui/app.go:378
-#   Las dos guardas de nil del store en New: el store lo crea state.NewStore()
-#   dentro del propio New y su error se descarta, así que llegar a New con un
-#   store nil no tiene camino desde la app (no hay constructor que lo acepte).
-#   Invertir la primera cargaría el estado con un store inexistente (panic) y la
-#   segunda entraría con persisted nil. Sin costura de inyección no hay forma de
-#   observar ninguno de los dos: no es un hueco de test, es unreachable.
+#   mutación solo hace una lectura inútil. Y el error se puede forzar sin
+#   interceptar nada: con XDG_CACHE_HOME y HOME vacíos `cache.Path()` falla y la
+#   carga se salta. Tampoco se nota, porque lo que devuelva `cache.Load` con una
+#   ruta inválida se descarta igual. Es equivalente por resultado, no porque sea
+#   imposible de probar.
 
 # RETIRADA en 82bd563: la guarda `if cmdlog.Active() == nil { return }` de
 #   logIntent ya la mata un test. Se deja el motivo por el que esa guarda era
@@ -173,16 +147,6 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:105
 #   y un panel alto, start == 0 y len < visible: ahí sí recorta), pero su
 #   segundo término no puede ser el que decide.
 
-CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:127
-CONDITIONALS_BOUNDARY internal/tui/cmdlogpanel.go:159
-#   La guarda `c.kind > 0` de la columna KIND, en la cabecera y en la línea. El
-#   ladder de computeLogColumns baja kind de 7 a 4 y ahí para: el
-#   `case c.kind > 4` es justamente la salida del bucle, así que kind ∈ {7, 4} y
-#   la guarda nunca puede ser falsa — `>= 0` da el mismo resultado. La guarda NO
-#   se borra a propósito: `pad(s, 0)` devuelve s sin truncar (n >= w), así que sin
-#   ella un cambio futuro del ladder que bajara kind a 0 pintaría un "KIND" de
-#   ancho 0 en vez de omitir la columna.
-
 # --- internal/tui/proverlay.go -------------------------------------------
 # El presupuesto del formulario ya NO tiene vivos: los mata
 # TestPROverlayElPresupuestoEsElQueDiceElComentario, que lo sujeta por su
@@ -216,16 +180,6 @@ CONDITIONALS_NEGATION internal/tui/update.go:66
 #   TestElFinDelScanLanzaElFetchAutomatico: mira el evento, no el retorno.
 
 # --- internal/gitstatus/status.go ----------------------------------------
-ARITHMETIC_BASE internal/gitstatus/status.go:144
-#   El tope de workers del pool (`runtime.NumCPU()*4`). El clamp solo limita
-#   cuántos subprocess git corren a la vez: resultados, orden y snapshots son
-#   idénticos con 1 worker o con 9999 (el semáforo serializa, no cambia el
-#   resultado). Ningún test puede observar la concurrencia: mutar el 4 no rompe
-#   nada observable, solo el consumo de recursos. Riesgo consciente.
-#   (Las guardas que SÍ eran mutables —0, negativos y el `> del tope`— ya no
-#   existen: ahora es un clamp min/max.)
-#
-# --- internal/config/forge.go --------------------------------------------
 ARITHMETIC_BASE internal/config/forge.go:149
 ARITHMETIC_BASE internal/config/forge.go:169
 #   La pista de capacidad de los dos mapas que resuelven los forges:

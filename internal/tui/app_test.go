@@ -4,6 +4,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -624,4 +625,54 @@ func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) b
 	case <-time.After(plazo):
 		return false
 	}
+}
+
+// --- New sin sitio donde guardar el plegado ---
+
+// Las dos guardas de nil de New. El store lo crea `state.NewStore()` y New
+// descarta su error, así que con el estado sin resolver (ni XDG_STATE_HOME ni
+// HOME) el store es nil DE VERDAD: son las guardas las que evitan que
+// `LoadCollapsed` se ejecute sobre un puntero nulo. Sin ellas, New revienta
+// con un nil pointer dereference al arrancar, y un usuario sin HOME (contenedor,
+// systemd tmpfiles, un home que no monta) no podría ni abrir la app.
+//
+// El segundo caso es el control: si la guarda se invirtiera, el plegado
+// persistido dejaría de cargarse aunque el sitio exista, que es el otro modo de
+// romper lo mismo.
+func TestNewAguantaQueNoHayDondeGuardarElPlegado(t *testing.T) {
+	t.Run("sin directorio de estado", func(t *testing.T) {
+		t.Setenv("XDG_STATE_HOME", "")
+		t.Setenv("HOME", "")
+
+		m := New(config.Defaults()) // no debe reventar
+		t.Cleanup(m.cancel)
+
+		if len(m.collapsed) != 0 || len(m.expanded) != 0 {
+			t.Errorf("sin store no hay plegado que cargar, pero %v / %v",
+				m.collapsed, m.expanded)
+		}
+	})
+
+	t.Run("con plegado persistido", func(t *testing.T) {
+		base := t.TempDir()
+		store := state.NewStoreAt(filepath.Join(base, "gitdash"))
+		if err := os.MkdirAll(store.Base(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		raw := fmt.Sprintf(`{"g/s":true,%q:true}`, state.WorktreePrefix+"/tmp/api")
+		if err := os.WriteFile(store.CollapsedFile(), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("XDG_STATE_HOME", base)
+
+		m := New(config.Defaults())
+		t.Cleanup(m.cancel)
+
+		if !m.collapsed["g/s"] {
+			t.Error("el grupo colapsado persistido no se cargó")
+		}
+		if !m.expanded["/tmp/api"] {
+			t.Errorf("el worktree expandido persistido no se cargó: %v", m.expanded)
+		}
+	})
 }
