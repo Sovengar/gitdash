@@ -119,14 +119,17 @@ func (m *Model) renderDetail(r row, rows int) string {
 	// sync branch vs HEAD: la rama resuelta siempre
 	// visible, con su desviación o el motivo de la falta.
 	syncLine := "— (sin sync branch)"
-	switch {
-	case r.snap.SyncBranch == "":
-	case !r.snap.SyncKnown:
-		syncLine = r.snap.SyncBranch + " (ref missing)"
-	case r.snap.SyncBehind > 0:
-		syncLine = r.snap.SyncBranch + fmt.Sprintf(" (↓%d)", r.snap.SyncBehind)
-	default:
-		syncLine = r.snap.SyncBranch + " (ok)"
+	// El primer case no hacia nada: sin sync branch se queda el placeholder.
+	// Anidado queda mas claro que un switch con un brazo vacio.
+	if r.snap.SyncBranch != "" {
+		switch {
+		case !r.snap.SyncKnown:
+			syncLine = r.snap.SyncBranch + " (ref missing)"
+		case r.snap.SyncBehind > 0:
+			syncLine = r.snap.SyncBranch + fmt.Sprintf(" (↓%d)", r.snap.SyncBehind)
+		default:
+			syncLine = r.snap.SyncBranch + " (ok)"
+		}
 	}
 	b.WriteString(key("sync    ") + syncLine + "\n")
 

@@ -79,22 +79,27 @@ func (st State) String() string {
 // ahead > behind > detached > no-upstream > clean. Dirty es independiente
 // del upstream: un repo dirty sin upstream se reporta dirty.
 func (s Status) Derive() State {
-	switch {
-	case s.Ahead > 0 && s.Behind > 0:
+	// if y no switch: asi el estado derivado es ORDEN DE PRECEDENCIA explicito
+	// (y el instrumento de cobertura puede medir cada condicion).
+	if s.Ahead > 0 && s.Behind > 0 {
 		return StateDiverged
-	case s.Dirty() > 0:
-		return StateDirty
-	case s.Ahead > 0:
-		return StateAhead
-	case s.Behind > 0:
-		return StateBehind
-	case s.Detached:
-		return StateDetached
-	case !s.HasUpstream:
-		return StateNoUpstream
-	default:
-		return StateClean
 	}
+	if s.Dirty() > 0 {
+		return StateDirty
+	}
+	if s.Ahead > 0 {
+		return StateAhead
+	}
+	if s.Behind > 0 {
+		return StateBehind
+	}
+	if s.Detached {
+		return StateDetached
+	}
+	if !s.HasUpstream {
+		return StateNoUpstream
+	}
+	return StateClean
 }
 
 // Score es la prioridad de atención para el orden del panel y el modo

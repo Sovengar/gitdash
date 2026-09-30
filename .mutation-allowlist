@@ -58,7 +58,7 @@ CONDITIONALS_NEGATION internal/tui/app.go:464
 #   cancelara a mitad de scan vería exactamente los mismos eventos.
 
 # --- internal/tui/table.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:267
+CONDITIONALS_BOUNDARY internal/tui/table.go:273
 CONDITIONALS_BOUNDARY internal/tui/table.go:270
 #   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
 #   negación de la comparación que devuelve, así que dentro de la rama `sa` y
@@ -119,6 +119,26 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:69
 #   TestToastDuracionCeroExpiraYa (un toast con duration 0 está expirado ya).
 #   (Las sumas internas del alto libre del panel, que también entraban aquí por
 #   ruido, ya NO están: las mata TestPreviewConFiltroRespetaElShareDelHueco.)
+
+# --- internal/tui/table.go (relativeTime) ---------------------------------
+CONDITIONALS_BOUNDARY internal/tui/table.go:758
+CONDITIONALS_BOUNDARY internal/tui/table.go:761
+CONDITIONALS_BOUNDARY internal/tui/table.go:764
+CONDITIONALS_BOUNDARY internal/tui/table.go:767
+CONDITIONALS_BOUNDARY internal/tui/table.go:770
+#   Los cinco bordes de los buckets de "ahora": <1m, <1h, <24h, <7d, <30d.
+#   Todos son identidades por la granularidad del dato, no por el reloj: la
+#   funcion recibe un epoch de SEGUNDO ENTERO (LastCommit), asi que
+#   `time.Since(time.Unix(epoch, 0))` siempre cae con un resto sub-segundo
+#   (los nanosegundos del instante actual). No puede valer EXACTAMENTE un
+#   umbral, ni approaching desde dentro: el valor mas pequeno que puede tomar
+#   junto al borde es 59.999999s o 60.000001s. Mutar `<` por `<=` cambia el
+#   caso que cae exactamente en el umbral, y ese caso no existe. Ningun test
+#   puede matarlos porque no hay entrada que los alcance, y no es un hueco del
+#   test: es que el dominio del valor no incluye el borde.
+#   Los bordes ESCOGIDOS si estan probados (TestRelativeTimePinnaLosBordes):
+#   dentro de cada bucket y con los五条 redondeos de abajo y arriba. Lo que no
+#   se puede fijar es el borde exacto, y no por falta de test.
 
 # --- internal/tui/cmdlogpanel.go -----------------------------------------
 ARITHMETIC_BASE internal/tui/cmdlogpanel.go:104

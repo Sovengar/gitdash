@@ -184,12 +184,11 @@ func wrapText(text string, maxWidth int) []string {
 				lines = append(lines, head)
 				w = tail
 			}
-			switch {
-			case cur == "":
+			if cur == "" {
 				cur = w
-			case ansi.StringWidth(cur)+1+ansi.StringWidth(w) <= maxWidth:
+			} else if ansi.StringWidth(cur)+1+ansi.StringWidth(w) <= maxWidth {
 				cur += " " + w
-			default:
+			} else {
 				lines = append(lines, cur)
 				cur = w
 			}

@@ -81,16 +81,39 @@ tidy: ## go mod tidy
 # recorre .worktrees/ (Worktrunk) y mide una COPIA completa del repo en otro
 # commit: duplica el informe, infla el "not covered" y mezcla codigo viejo. El
 # patron se ancla al path, no al nombre del directorio.
-MUTATE_EXCLUDE ?= '\.worktrees/'
+#
+# internal/testutil queda fuera por un motivo distinto: es andamiaje de tests.
+# Su correccion la ejercitan TODOS los suites del modulo (por eso --coverpkg lo
+# da por cubierto), pero gremlins muta paquete a paquete y ejecuta solo los tests
+# de ESE paquete: contra testutil solo correrian sus dos tests, que unicamente
+# llaman a Marker. Medirlo asi produce 11 supervivientes que no son riesgos, son
+# la contradiccion entre medir con todos los paquetes y ejecutar con uno solo.
+MUTATE_EXCLUDE ?= '(\.worktrees/|internal/testutil/)'
+
+# MUTATE_COVERPKG: sin esto gremlins mide SOLO el paquete bajo test, y aqui eso
+# miente: internal/testutil lo llaman los tests de otros paquetes, asi que sus
+# lineas salen "not covered" siendo codigo vivo. Con ./... el perfil mide todo
+# el modulo, que es lo que el gate necesita para ser cierto.
+MUTATE_COVERPKG ?= ./...
+
+# El timeout por mutante es (duracion medida de la suite) x este coeficiente, no
+# el timeout por defecto de go test. La suite tarda ~23s, asi que 2 deja 46s: de
+# sobra para un test lento de verdad yjusto para que un mutante que no termina
+# cuelgue el run entero. Con 1 (23s) un runner de CI cargado daria timeout falso,
+# y los TIMED OUT no van a report.json: se convertiran en huecos invisibles.
+MUTATE_TIMEOUT_COEFFICIENT ?= 2
+
+MUTATE_FLAGS = --exclude-files $(MUTATE_EXCLUDE) --coverpkg $(MUTATE_COVERPKG) \
+	--workers 4 --timeout-coefficient $(MUTATE_TIMEOUT_COEFFICIENT)
 
 mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
-	go tool gremlins unleash --exclude-files $(MUTATE_EXCLUDE) --workers 4 --timeout-coefficient 3 --output report.json
+	go tool gremlins unleash $(MUTATE_FLAGS) --output report.json
 
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — advisory
 	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		go tool gremlins unleash --diff $(MUTATE_BASE) --exclude-files $(MUTATE_EXCLUDE) --workers 4 --timeout-coefficient 3 --output report.json; \
+		go tool gremlins unleash --diff $(MUTATE_BASE) $(MUTATE_FLAGS) --output report.json; \
 	else \
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi

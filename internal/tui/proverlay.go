@@ -376,11 +376,11 @@ func (m *Model) prSubmit() tea.Cmd {
 	// los 3 s y se va justo cuando el usuario está mirando el campo culpable.
 	// Aquí además dice cuál de los dos falta, y sigue ahí hasta que se
 	// corrige o se cierra.
-	switch {
-	case p.Title == "":
+	if p.Title == "" {
 		m.pr.err = "title required"
 		return nil
-	case p.Base == "":
+	}
+	if p.Base == "" {
 		m.pr.err = "base branch required"
 		return nil
 	}

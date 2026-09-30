@@ -212,6 +212,9 @@ func sanitizeLogText(s string) string {
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
 		i += size
+		// else-if y no switch: el orden ES la regla (un whitespace colapsa, un
+		// control se descarta, y lo demas se pinta), y asi cada condicion queda
+		// dentro de un bloque que el instrumento puede medir.
 		switch {
 		case r == '\n' || r == '\r' || r == '\t':
 			if !lastSpace {
@@ -305,18 +308,19 @@ func logVerdict(e cmdlog.Entry) string {
 	if e.Intent {
 		return ""
 	}
-	switch {
-	case e.Exit > 0:
+	if e.Exit > 0 {
 		return fmt.Sprintf("exit %d", e.Exit)
-	case e.Exit < 0 && e.Dur == 0:
-		return "no exit"
-	case e.Dur >= time.Second:
-		return fmt.Sprintf("%.1fs", e.Dur.Seconds())
-	case e.Dur == 0:
-		return ""
-	default:
-		return fmt.Sprintf("%dms", e.Dur.Milliseconds())
 	}
+	if e.Exit < 0 && e.Dur == 0 {
+		return "no exit"
+	}
+	if e.Dur >= time.Second {
+		return fmt.Sprintf("%.1fs", e.Dur.Seconds())
+	}
+	if e.Dur == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dms", e.Dur.Milliseconds())
 }
 
 // logLegend es el aviso persistente del panel: qué teclas hacen qué, igual que

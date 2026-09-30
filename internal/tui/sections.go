@@ -75,6 +75,8 @@ func (m Model) keybindsLines() int {
 // se solaparan mandan los armados y el formulario sobre la leyenda. Vacío si no
 // hay nada que anunciar.
 func (m Model) promptLine() string {
+	// La precedencia de los estados armados es el requisito (gana el mas
+	// especifico), y asi queda en if en vez de en el orden de los case.
 	switch {
 	case m.armed != nil:
 		return m.removePrompt()
