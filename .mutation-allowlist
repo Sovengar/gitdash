@@ -67,7 +67,7 @@ CONDITIONALS_BOUNDARY internal/tui/table.go:270
 #   cubierta: ahí no hay guarda que compare antes, y un `<=` invierte el orden.
 
 # --- internal/tui/update.go ----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/update.go:309
+CONDITIONALS_BOUNDARY internal/tui/update.go:308
 #   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
 #   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
 #   una operación real sobre tokens en vuelo. Para el resto de teclas no se
@@ -90,16 +90,16 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:175
 #   devuelve (w, "") y la línea se cierra igual. Es la misma clase que truncar a
 #   un ancho >= el suyo.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:232
-CONDITIONALS_BOUNDARY internal/tui/toast.go:236
-CONDITIONALS_NEGATION internal/tui/toast.go:236
+CONDITIONALS_BOUNDARY internal/tui/toast.go:231
+CONDITIONALS_BOUNDARY internal/tui/toast.go:235
+CONDITIONALS_NEGATION internal/tui/toast.go:235
 #   Las dos guardas de entrada de overlayToasts. Con width == 0 (y no < 0) el
 #   splice es una identidad pura: x == 0 y bw == 0, así que
 #   `Truncate(l,0) + bloque + TruncateLeft(l,0)` reconstruye la línea. Con
 #   height == len(lines) las dos ramas asignan el mismo valor (height ya está
 #   acotado). Ni width == 0 ni height == len(lines) cambian nada observable.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:249
+CONDITIONALS_BOUNDARY internal/tui/toast.go:248
 #   `if top < 0` del bloque que no cabe entero. Solo difiere con top == 0, donde
 #   keep == bottom+1 == bh: el recorte `block[bh-keep:]` deja el bloque entero.
 #   Es la guarda de "no cabe" escrita al revés por un paso, y en el borde exacto

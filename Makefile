@@ -106,42 +106,32 @@ MUTATE_TIMEOUT_COEFFICIENT ?= 2
 MUTATE_FLAGS = --exclude-files $(MUTATE_EXCLUDE) --coverpkg $(MUTATE_COVERPKG) \
 	--workers 4 --timeout-coefficient $(MUTATE_TIMEOUT_COEFFICIENT)
 
-# El coeficiente acota CADA mutante; esto acota el RUN entero, para que un
-# cuelgue no se quede esperando indefinidamente. Cortarlo obliga a devolver el
-# arbol a su estado, porque gremlins MUTA LOS FICHEROS EN SITIO: si se va a
-# mitad, quedan mutados.
+# El coeficiente acota CADA mutante; esto acota el RUN entero, y ademas lo
+# corta si se QUEDA PARADO (sin salida durante MUTATE_STALL_LIMIT), que es lo
+# que de verdad duele: un techo absoluto de 45m no acorta un atasco de 2m.
+#
+# NO hace falta restaurar nada al cortar. gremlins NO muta el repo: copia el
+# arbol fuente a un temporal por paquete (workdir.CachedDealer) y muta la copia
+# (TokenMutator.SetWorkdir). Medido: matando el proceso con SIGKILL en cinco
+# ventanas distintas, el md5 del fuente no cambia ni una vez. Lo que SI deja un
+# corte duro son temporales huerfanos en /tmp/gremlins-*, porque Clean() es un
+# defer y SIGKILL no lo ejecuta; no se limpian aqui a proposito, que podrian
+# ser de otro run de gremlins en marcha.
 MUTATE_HARD_LIMIT ?= 45m
+MUTATE_STALL_LIMIT ?= 5m
 
-# Por eso los targets se niegan a correr con el arbol sucio. Sin cambios sin
-# commitear, `git checkout -- .` no puede perder trabajo, y ese es el unico
-# automatico que tiene sentido: cualquier restauracion mas agresiva seria
-# capaz de comerse trabajo que no es nuestro.
-MUTATE_GUARD = @git diff --quiet && git diff --cached --quiet || { \
-	echo "arbol sucio: gremlins muta en sitio, y si el run se corta deja los ficheros a medias."; \
-	echo "Commitea o guarda (stash) los cambios antes de mutar."; exit 1; }
-
-MUTATE_RUN = @timeout $(MUTATE_HARD_LIMIT) go tool gremlins unleash $(MUTATE_FLAGS) \
-	--output report.json; \
-	rc=$$?; \
-	if [ $$rc -ne 0 ]; then \
-		if [ $$rc -eq 124 ]; then \
-			echo "run cortado tras $(MUTATE_HARD_LIMIT) (exit 124 de timeout)."; \
-		fi; \
-		echo "restaurando los ficheros que gremlins muto en sitio..."; \
-		git checkout -- .; \
-	fi; \
-	exit $$rc
+MUTATE_RUN = @scripts/mutate-watchdog.sh $(MUTATE_STALL_LIMIT) $(MUTATE_HARD_LIMIT) -- \
+	go tool gremlins unleash $(MUTATE_FLAGS) --output report.json
 
 mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
-	$(MUTATE_GUARD)
 	$(MUTATE_RUN)
 
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — advisory
 	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		$(MUTATE_GUARD) \
-		$(MUTATE_RUN) ; \
+		scripts/mutate-watchdog.sh $(MUTATE_STALL_LIMIT) $(MUTATE_HARD_LIMIT) -- \
+			go tool gremlins unleash --diff $(MUTATE_BASE) $(MUTATE_FLAGS) --output report.json; \
 	else \
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi
