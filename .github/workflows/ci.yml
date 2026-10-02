@@ -86,8 +86,14 @@ jobs:
       # The suite is self-contained: every git fixture is created under
       # t.TempDir() via internal/testutil, so no `make fixtures` / testdata
       # checkout is needed.
+      # -coverpkg ./... es lo que hace que el perfil incluya los paquetes
+      # CRUZADOS: sin el, cada test binary solo mide el suyo, y los helpers que
+      # se usan desde otros (internal/testutil sobre todo) salen sin cubrir. Medido
+      # en este repo: sin -coverpkg el total es 97.30%, con el 98.17%. El Makefile
+      # lo pasa y el gate mide sobre lo mismo; si divergen, el gate de local y el
+      # de CI estan midiendo dos cosas distintas.
       - name: Test
-        run: go test -race -count=1 -coverprofile=coverage.out ./...
+        run: go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...
       # `func main()` llama a os.Exit, asi que no puede correr dentro del binario
       # de test: corre en un subproceso (cmd/gitdash/main_test.go), y sus
       # contadores caen en un GOCOVERDIR aparte que `go test -coverprofile` no
@@ -107,13 +113,28 @@ jobs:
       # El gate va al final y sin `continue-on-error`: si el perfil no se
       # escribio (suite rota antes), el step falla, que es lo que tiene que
       # pasar. Un gate que se salta cuando algo falla no protege nada.
+      # La base del diff NO es el nombre de la rama: en el runner eso no existe
+      # como ref comparable (Actions deja el checkout en un merge sintetico), y
+      # `git diff main...HEAD` sale vacio — el gate informaria "sin lineas
+      # tocadas", o sea un 100% de un diff que no existe. Lo que funciona en los
+      # dos casos (PR y push a main) es el MERGE-BASE explicito, queActions si
+      # materializa en refs/pull/N/merge.
       - name: Coverage gate
         run: |
           set -euo pipefail
           if [ ! -f coverage.out ]; then
-            echo "::error::no coverage.out (los tests fallaron antes de escribirlo)"
+            echo "::error::no coverage.out (los tests no lo produjeron)"
             exit 1
           fi
-          base="${{ github.event.pull_request.base.ref || 'main' }}"
-          scripts/diff-coverage.sh coverage.out "$base" -a "$PWD/.covmain/main.txt" \
+          base="origin/${{ github.event.pull_request.base.ref || 'main' }}"
+          if ! git rev-parse --verify --quiet "$base" >/dev/null; then
+            base="${{ github.event.pull_request.base.ref || 'main' }}"
+          fi
+          merge_base="$(git merge-base "$base" HEAD)"
+          if [ -z "$merge_base" ]; then
+            echo "::error::no hay merge-base entre HEAD y $base"
+            exit 1
+          fi
+          echo "diff contra el merge-base $merge_base ($base)"
+          scripts/diff-coverage.sh coverage.out "$merge_base" -a "$PWD/.covmain/main.txt" \
             | tee -a "$GITHUB_STEP_SUMMARY"
