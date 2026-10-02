@@ -15,7 +15,7 @@ go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
 ```
 
 Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **97.96% (2733/2790), 51 sin cubrir**.
+Progreso: **98.18% (2745/2796), 45 sin cubrir**.
 
 Meta: 2790/2790.
 
@@ -166,21 +166,26 @@ darse: si se saltan, el bloque vuelve a estar sin cubrir sin que nadie se entere
 
 Estos no los cubre ningún test sin cambiar el código o la métrica:
 
-1. **`internal/testutil` — 8 bloques.** Todos son `t.Fatal(err)` tras
-   `os.WriteFile`/`os.MkdirAll`/`git`. Solo se ejecutan si el disco falla.
-   Opciones: inyectar el error, o **excluir el paquete de la métrica** (es un
-   helper, no código de producción). Recomiendo excluir: medirse a uno mismo da
-   una cobertura que no significa nada.
-2. **`func main()` de `cmd/gitdash/main.go`.** Por definición no se llama desde
-   un test. Se puede mover la lógica a `run()` (ya está) y dejar `main` como un
-   `os.Exit(run(...))` de tres líneas — pero Go lo instrumenta igual. Acaba en la
-   lista de exclusión, o se acepta como el `main` que es.
-3. **`tea.Tick` / `tea.ExecProcess` reales.** Con el seam ya no son un problema;
-   lo que queda es la construcción del `tea.Cmd`, que sí se ejecuta al armar.
+**Nada de esto quedó inalcanzable.** Los tres casos que había dado por perdidos
+salen, y la lección es que "no se puede testear" y "no lo he pensado" se parecen
+mucho:
+
+1. ~~`internal/testutil` — 8 bloques de `t.Fatal`.~~ **Resuelto, 8 → 1.** Los
+   helpers tomato un `TB` (interface con `Helper`/`Fatal`/`Fatalf`/`TempDir`) en
+   vez de `*testing.T`, y `MockTB` registra el fallo en vez de matar el proceso.
+   `*testing.T` satisface el interface, así que las 160 llamadas del repo no
+   cambian. El fallo se provoca DE VERDAD: un fichero donde debería ir el
+   directorio da ENOTDIR.
+2. ~~`func main()`.~~ **Resuelto** (ver `cmd/main.go` en el todolist).
+3. ~~`tea.Tick`.~~ **Resuelto**: `tea.Tick` devuelve una `tea.Cmd` que se puede
+   invocar directamente. Cuesta 1s por test y ejecuta el closure.
+
+Lo que **sí** queda fuera del objetivo, y no por inalcanzable:
+
 4. **Los 83 NOT COVERED de mutación.** No son cobertura: 36 son un bug del
    lookup de gremlins (ver `WATCHDOG-PLAN.md` §0) y 47 son condiciones de `case`,
-   que Go instrumenta desde la columna del cuerpo. **Fuera del objetivo de este
-   documento**, y el refactor `switch`→`if` ya se probó que no los baja.
+   que Go instrumenta desde la columna del cuerpo. El refactor `switch`→`if` se
+   probó y **no los baja**.
 
 ---
 
