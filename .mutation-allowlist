@@ -58,13 +58,18 @@ CONDITIONALS_NEGATION internal/tui/app.go:464
 #   cancelara a mitad de scan vería exactamente los mismos eventos.
 
 # --- internal/tui/table.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:273
-CONDITIONALS_BOUNDARY internal/tui/table.go:270
+CONDITIONALS_BOUNDARY internal/tui/table.go:295
+CONDITIONALS_BOUNDARY internal/tui/table.go:292
 #   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
 #   negación de la comparación que devuelve, así que dentro de la rama `sa` y
 #   `sb` son distintos por construcción: `>` y `>=` dan lo mismo. Idéntico con
-#   LastCommit (línea 270). La TERCERA clave (el nombre, línea 272) sí está
-#   cubierta: ahí no hay guarda que compare antes, y un `<=` invierte el orden.
+#   LastCommit (línea 292). La TERCERA clave (el nombre) sí está cubierta: ahí no
+#   hay guarda que compare antes, y un `<=` invierte el orden.
+#
+#   Las líneas cambiaron de 273/270 a 295/292 al reescribir sortRows con `range`
+#   (ver el comentario de sortRows en table.go: era un bucle cuyo mutante
+#   INCREMENT_DECREMENT era un cuelgue infinito). Es el mismo mutante con otra
+#   línea, porque el allowlist se indexa por línea; la demostración no cambia.
 
 # --- internal/tui/update.go ----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/update.go:308
