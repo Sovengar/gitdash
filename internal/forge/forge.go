@@ -16,7 +16,7 @@ import (
 // Forges soportados. Son los únicos dos que gitdash sabe abrir: cada uno tiene
 // su puerta (gh/glab) y su forma de nombrar un proyecto.
 const (
-	ForgeGitHub = "github" // y un comentario que mueve la linea
+	ForgeGitHub = "github"
 	ForgeGitLab = "gitlab"
 )
 
