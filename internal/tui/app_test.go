@@ -1036,3 +1036,22 @@ func TestVisualOptionParaTeclaDesconocida(t *testing.T) {
 		}
 	}
 }
+
+// tickCmd devuelve un tea.Tick de un segundo, y el closure que emite tickMsg solo
+// se ejecuta cuando esa tea.Cmd se invoca. El caso importa porque tickMsg es lo
+// que expira los toasts: si el tick dejara de emitirse, un aviso se quedaría
+// pintado para siempre y la tabla parecería congelada.
+//
+// Cuesta un segundo porque el timer es real: no hay reloj inyectable en
+// bubbletea, y falsearlo exigiria el seam entero de tea.Tick por un segundo de
+// suite. Un segundo en la suite entera es un precio aceptable.
+func TestTickCmdEmiteElTick(t *testing.T) {
+	start := time.Now()
+	msg := tickCmd()()
+	if _, ok := msg.(tickMsg); !ok {
+		t.Fatalf("tickCmd()() = %#v, want un tickMsg", msg)
+	}
+	if d := time.Since(start); d < 900*time.Millisecond {
+		t.Errorf("el tick volvio en %v, want ~1s (un tick que no espera no expira nada)", d)
+	}
+}

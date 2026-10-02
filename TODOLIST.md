@@ -15,7 +15,7 @@ go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
 ```
 
 Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **98.18% (2745/2796), 45 sin cubrir**.
+Progreso: **98.35% (2750/2796), 41 sin cubrir**.
 
 Meta: 2790/2790.
 
@@ -83,7 +83,7 @@ Meta: 2790/2790.
 - [x] `1066` — `saveCollapsed` con store nil
 - [ ] `417` — `Init()` (arranca scan + ticker de 1s)
 - [ ] `430` — `startScanCmd` con evento que no es `scanMsg`
-- [ ] `446` — `tickCmd` (devuelve `tea.Tick`; no ejecutable sin reloj)
+- [x] `446` — `tickCmd` (su `tea.Cmd` se invoca: 1s reales, y emite el tick)
 - [ ] `468` — `ctx.Err() != nil` en el colector
 - [ ] `477` — `sendEvent(collectDoneMsg)`
 - [ ] `487` — `!p.HasRepo` en el fetch automático
@@ -129,7 +129,8 @@ Meta: 2790/2790.
 - [x] `print.go 51,57,62,65,69` — worktree duplicado, sufijo `[wt]`, detached,
       rama vacía, contador de worktrees (se extrajo `printRowOf` para poder
       probarlos sobre filas fabricadas: un HEAD real no se puede dejar detached)
-- [ ] `main.go 21` — `func main()` (llama a `os.Exit`; ver §inalcanzables)
+- [x] `main.go 21` — `func main()`, en un SUBPROCESO (`go build` + exec)
+- [x] `main.go 57,58` — los dos closures de `depsProd`
 - [ ] `print.go 29` — error de `discovery.Scan` a stderr
 
 ### `internal/discovery/scan.go` — 7 → quedan 5

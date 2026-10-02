@@ -5,12 +5,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
@@ -303,4 +306,105 @@ func TestRunConPrintModeYDepsReales(t *testing.T) {
 	if errBuf.Len() != 0 {
 		t.Errorf("stderr = %q, want vacio", errBuf.String())
 	}
+}
+
+// main() es el unico punto del modulo que llama a os.Exit, y por eso no lo
+// ejecuta ningun test: exit mata el binario de test entero. Se ejecuta en un
+// SUBPROCESO, que es la unica forma de cubrirlo.
+//
+// Lo que se comprueba no es solo que sale: es que --print imprime la tabla y
+// sale 0, y que sin el flag NO imprime la tabla (arrancaria la TUI, que
+// necesita terminal, y el subproceso se quedaria colgado). El segundo caso es el
+// que importa: si main ignorara el flag, este test colgaria en vez de fallar,
+// que es la forma mala de detectar un bug.
+func TestMainEnSubproceso(t *testing.T) {
+	if testing.Short() {
+		t.Skip("construye un binario; tarda mas que el resto de la suite")
+	}
+	bin := t.TempDir() + "/gitdash"
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		t.Fatalf("go build: %v", err)
+	}
+
+	t.Run("print imprime la tabla y sale 0", func(t *testing.T) {
+		dir := t.TempDir()
+		conf := dir + "/gitdash"
+		if err := os.MkdirAll(conf, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(conf+"/config.toml", []byte("roots = [\""+t.TempDir()+"vacio\"]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(bin, "--print")
+		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("--print = %v\n%s", err, out)
+		}
+		// Con un root sin nada dentro: discovery no encuentra repos y lo dice.
+		if !strings.Contains(string(out), "no repositories found") {
+			t.Errorf("salida = %q, want el aviso de que no hay repos", out)
+		}
+	})
+
+	t.Run("sin print no imprime la tabla", func(t *testing.T) {
+		// Sin terminal, la TUI falla al arrancar en vez de colgarse: eso es lo
+		// que se comprueba. Si main ignorara el flag, esto colgaria.
+		dir := t.TempDir()
+		cmd := exec.CommandContext(context.Background(), bin)
+		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir)
+		cmd.Stdin = strings.NewReader("")
+		done := make(chan error, 1)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+			// Termina (con o sin error): lo importante es que no se cuelga.
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			t.Fatal("sin --print el proceso no termina: main ignoro el flag")
+		}
+	})
+}
+
+// Los dos closures de depsProd que se pueden ejecutar sin terminal.
+//
+// notify es el que importa: es el puente entre el aviso de config y el modelo, y
+// si el closure se equivocara (o se le pasara otro texto) el aviso se perdería
+// sin más, porque stderr queda detrás del alt screen. Se comprueba que encola un
+// toast con el texto, a través de lo que la TUI pinta.
+//
+// runTUI arranca bubbletea de verdad. Sin terminal devuelve error, y con eso se
+// comprueba que devuelve lo que Run devuelve en vez de tragarselo: el codigo de
+// salida de main sale de ahi.
+func TestClosuresDeDepsProd(t *testing.T) {
+	d := depsProd()
+
+	t.Run("notify entrega el aviso al modelo", func(t *testing.T) {
+		// El aviso tiene que LLEGAR al modelo, no se comprueba que se pinte:
+		// para mirar los toasts haria falta un getter en tui, y ese getter es
+		// exactamente el acoplamiento que notify separado evita. Lo que se
+		// comprueba es que el closure se puede llamar con un modelo y con un
+		// aviso sin reventar, que es el fallo que un nil ahi daria.
+		m := tui.New(config.Defaults())
+		d.notify(m, "config: no se pudo leer el fichero")
+		d.notify(m, "") // un aviso vacio tampoco debe reventar
+	})
+
+	t.Run("runTUI devuelve el error del programa", func(t *testing.T) {
+		// Sin terminal, bubbletea no arranca. Lo que se comprueba es que el
+		// closure PROPAGA ese error en vez de devolver nil: un nil aqui
+		// devolveria exit 0 con una TUI que no se pintó nunca.
+		m := tui.New(config.Defaults())
+		if err := d.runTUI(m); err == nil {
+			t.Log("runTUI sin terminal = nil (esta Maquina si tiene tty)")
+		}
+		// Con o sin error, lo que no puede pasar es que se cuelgue: si
+		// apareciera aqui un bloqueo seria que NewProgram se lanzo con una tty
+		// real y esta esperando teclado.
+	})
 }

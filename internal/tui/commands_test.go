@@ -996,3 +996,24 @@ func TestLazygitOcupadoDiceLaAccionQueCorre(t *testing.T) {
 		t.Errorf("aviso = %q, want que nombre el push en marcha", msg.text)
 	}
 }
+
+// `!` con el repo ocupado no abre una shell ni captura nada: avisa. Es el mismo
+// guard que los handoffs, aqui para el comando capturado, que ademas es la via
+// que mas se usa (no necesita tecla separada).
+func TestComandoCapturadoConRepoOcupadoAvisa(t *testing.T) {
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	m.running = map[string]string{"/tmp/api": "pull"}
+
+	msg, ok := m.openCmdCmd("/tmp/api", "git status")().(notifyMsg)
+	if !ok {
+		t.Fatal("openCmdCmd con el repo ocupado no devolvio un aviso")
+	}
+	if !strings.Contains(msg.text, "already running") {
+		t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+	}
+	// Y no se ha lanzado nada: el flag sigue siendo el del pull.
+	if got := m.running["/tmp/api"]; got != "pull" {
+		t.Errorf("running = %q, want pull (el guard devuelve antes de escribir)", got)
+	}
+}
