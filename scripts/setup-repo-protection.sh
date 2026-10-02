@@ -32,7 +32,7 @@
 # Requiere: gh (autenticado, admin del repo) y jq.
 #
 # Uso:
-#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test] [--sha <commit>]
+#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test,"Mutation (diff)"] [--sha <commit>]
 #
 # Variables de entorno:
 #   RULESET_NAME=protect-<rama>   BRANCH=<default del repo>   GH_ACTIONS_APP_ID=15368
@@ -41,7 +41,7 @@ set -euo pipefail
 
 # GitHub Actions es la integración que reporta nuestros check runs de CI.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
-REQUIRED_DEFAULT=(Build Lint Test)
+REQUIRED_DEFAULT=(Build Lint Test "Mutation (diff)")
 
 # Labels referenciadas por .github/dependabot.yml, como "nombre|color|descripción".
 LABELS=(
@@ -158,7 +158,7 @@ else
   fi
   if [ -z "$sha" ] || [ "$sha" = "null" ]; then
     echo "ERROR: no hay SHA de head de PR para derivar los nombres de check requeridos." >&2
-    echo "       Abre un PR cuya CI haya corrido, o pasa --sha <commit> / --contexts Build,Lint,Test." >&2
+    echo "       Abre un PR cuya CI haya corrido, o pasa --sha <commit> o --contexts con los cuatro checks." >&2
     exit 1
   fi
   echo "==> Derivando contexts de los check runs de ${sha}"

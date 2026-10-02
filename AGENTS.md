@@ -42,29 +42,67 @@ rename del marcador).
 
 ## CI y protección de `main`
 
-CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
-a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
-en pending para siempre y bloquea todos los PRs). Tres jobs:
+Hay **dos workflows** y **cuatro required checks**: `Build`, `Lint`, `Test` y
+`Mutation (diff)`. Todos corren sin filtros `paths` a propósito: un workflow
+filtrado se salta, y un check obligatorio saltado se queda en *pending* para
+siempre y bloquea todos los PRs que no toquen las rutas filtradas.
+
+### `CI` (`.github/workflows/ci.yml`) — PR y push a `main`
 
 - **`Build`**: `go build ./...` y `go vet ./...`.
 - **`Lint`**: `make lint` → vet + fmt-check (gofmt) + golangci-lint
-  **v2.13.2** (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre
-  el set de linters por defecto).
-- **`Test`**: `go test -race -coverprofile=coverage.out ./...` (suite completa,
-  sin `-short`) y un resumen de cobertura en el step summary. La suite es
-  **autocontenida**: cada fixture git se crea bajo `t.TempDir()` con
-  `internal/testutil`, así que CI **no** necesita `make fixtures` ni
-  `testdata/playground`.
+  **v2.13.2** (pineado en el `Makefile`; no hay `.golangci.yml`, corre el set de
+  linters por defecto).
+- **`Test`**: tres steps.
+  1. `go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...`
+     (suite completa, sin `-short`). La suite es **autocontenida**: cada fixture
+     git se crea bajo `t.TempDir()` con `internal/testutil`, así que CI **no**
+     necesita `make fixtures` ni `testdata/playground`.
+  2. `Coverage of the subprocess`: `go build -cover` + `GOCOVERDIR` para medir
+     `func main()`, que llama `os.Exit` y no puede correr en el binario de test.
+     **`-coverpkg ./...` no es opcional**: sin él el perfil no incluye los
+     paquetes cruzados y los helpers usados desde otros (`internal/testutil`)
+     salen sin cubrir. Medido: 97.30% sin él, 98.17% con él.
+  3. `Coverage gate` → `scripts/diff-coverage.sh`: el **diff del PR al 100%** y
+     el **total con suelo** (`scripts/coverage-floor`, 97.97%, commiteado y solo
+     sube). La base del diff es el **merge-base explícito**, no el nombre de la
+     rama: en el runner `git diff main...HEAD` sale vacío y el gate aprobaría en
+     silencio. Por eso el checkout va con `fetch-depth: 0`.
+
+### `Mutation (diff)` (`.github/workflows/mutation.yml`) — solo PR
+
+Mutation testing con gremlins **sobre el diff del PR**, no el módulo entero (por
+eso dura ~20s; `make mutate` sobre el módulo entero son ~10min). Falla si aparece
+un mutante `LIVED` nuevo que no esté en `.mutation-allowlist`.
+
+**El job no se salta nunca**, y esa es la condición para que sea required: la
+calibración del allowlist es un *step*, no un `needs:` + `if:`. Si falta el
+allowlist, el job **falla** diciendo cómo sembrarlo. Con la estructura anterior
+(el job saltándose) el gate no podía ser obligatorio: un check saltado se queda
+en pending para siempre.
 
 Reglas de la rama `main` (ruleset **`protect-main`**, reproducible con
 `scripts/setup-repo-protection.sh`, idempotente y con `--dry-run`):
 
-- Merge **solo vía PR**, con los tres checks en verde; force-push y borrado de
-  `main` bloqueados.
+- Merge **solo vía PR**, con los **cuatro** checks en verde; force-push y borrado
+  de `main` bloqueados.
 - Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
   admin *podría* pushear directo, pero la intención de trabajo es siempre el
   camino PR. Ningún actor no-admin puede hacerlo.
 - `delete_branch_on_merge=true`: GitHub borra la rama remota al mergear.
+
+### Trampas de los workflows (las dos se han pagado)
+
+- **`runs-on` duplicado hace que GitHub rechace el workflow entero**, con
+  `conclusion: failure` y **0 jobs**. PyYAML no se queja: en un mapa una clave
+  repetida se pisa en silencio, así que el YAML "valida" y el workflow no existe
+  para Actions. Al tocar estos ficheros, comprobar claves duplicadas.
+- **Los logs de un run se leen del ZIP**, no con `gh run view --log`: la API de
+  `gh` los trunca a ~300 líneas y el step que falla suele estar después. Para ver
+  un step concreto, `curl` con token a `/actions/runs/<id>/logs` y descomprimir.
+- **Un gate nuevo no está probado hasta que ha pasado de verdad.** El de
+  cobertura falló dos veces en el PR #19, y las dos por el workflow, no por el
+  código: faltaba `-coverpkg` y la base del diff era una ref no comparable.
 
 Ante un merge: verificar que el workflow `push` de `main` quedó verde y que el
 badge del README reporta `passing` (el badge cachea unos segundos).
