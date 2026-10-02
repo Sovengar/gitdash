@@ -4,10 +4,16 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"gitdash/internal/discovery"
+	"gitdash/internal/gitstatus"
 
 	"gitdash/internal/config"
 	"gitdash/internal/tui"
@@ -155,5 +161,146 @@ func TestLaConfigLlegaIgualAModoConsumidor(t *testing.T) {
 	runWith(x2.d, false, io.Discard)
 	if x2.modelCfg.Roots == nil {
 		t.Errorf("modo TUI: el modelo no recibió la config cargada")
+	}
+}
+
+// printRowOf es donde se toman las decisiones que se leen en la tabla de
+// --print, y todas se prueban sobre filas fabricadas: en un repo real el HEAD
+// no se puede dejar detached a voluntad, asi que el sufijo "(detached)" nunca se
+// veria en un test de integracion.
+//
+// La tabla y la TUI comparten el mapeo del estado (printState usa el mismo
+// Derive), asi que lo que se comprueba aqui es que la fila no lose informacion
+// que la TUI si enseña: una rama en detached, un worktree suelto, un repo sin
+// rama todavia (recien inicializado).
+func TestPrintRowDeCadaFormaDeRepo(t *testing.T) {
+	casos := []struct {
+		nombre string
+		proj   discovery.Project
+		snap   gitstatus.Snapshot
+		quiere map[string]string
+	}{
+		{
+			nombre: "detached conserva la rama",
+			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap: gitstatus.Snapshot{Status: gitstatus.Status{
+				Branch: "feat/x", Detached: true, HasUpstream: true,
+			}},
+			quiere: map[string]string{"branch": "feat/x (detached)", "wt": ""},
+		},
+		{
+			nombre: "sin rama todavia",
+			proj:   discovery.Project{Path: "/nuevo", Name: "nuevo", HasRepo: true},
+			snap:   gitstatus.Snapshot{Status: gitstatus.Status{HasUpstream: true}},
+			quiere: map[string]string{"branch": "-", "name": "nuevo"},
+		},
+		{
+			nombre: "worktree suelto lleva sufijo",
+			proj: discovery.Project{
+				Path: "/api-wt", Name: "api-wt", HasRepo: true,
+				IsWorktree: true, MainRepo: "/api",
+			},
+			snap: gitstatus.Snapshot{Status: gitstatus.Status{
+				Branch: "feat/y", HasUpstream: true,
+			}},
+			quiere: map[string]string{"name": "api-wt [wt]", "branch": "feat/y"},
+		},
+		{
+			nombre: "con worktrees cuenta",
+			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap: gitstatus.Snapshot{
+				Status:    gitstatus.Status{Branch: "main", HasUpstream: true},
+				Worktrees: []gitstatus.Worktree{{Path: "/api-wt", Branch: "a"}},
+			},
+			quiere: map[string]string{"wt": "1"},
+		},
+		{
+			nombre: "sin worktrees no cuenta",
+			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap:   gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
+			quiere: map[string]string{"wt": ""},
+		},
+		{
+			nombre: "grupo vacio sale como guion",
+			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap:   gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
+			quiere: map[string]string{"group": "-"},
+		},
+	}
+
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			row := printRowOf(c.proj, c.snap)
+			got := map[string]string{
+				"name": row.name, "branch": row.branch,
+				"wt": row.wt, "group": row.group,
+			}
+			for campo, quiere := range c.quiere {
+				if got[campo] != quiere {
+					t.Errorf("%s = %q, want %q", campo, got[campo], quiere)
+				}
+			}
+			if row.path != c.proj.Path {
+				t.Errorf("path = %q, want %q", row.path, c.proj.Path)
+			}
+		})
+	}
+}
+
+// depsProd son las dependencias REALES. Que no se ejecute en los tests no significa que
+// no se ejecuten: arrancan una TUI de verdad (necesita terminal) y pintan en
+// stdout. Lo que se comprueba es que estan todas puestas y que son las
+// funciones que dicen ser, no nil: un nil ahí es un panic en el primer arranque,
+// y el seam no lo delata porque sus dobles si estan.
+func TestDepsProdEstaCompleta(t *testing.T) {
+	d := depsProd()
+	for nombre, fn := range map[string]any{
+		"load": d.load, "print": d.print, "newModel": d.newModel,
+		"notify": d.notify, "runTUI": d.runTUI,
+	} {
+		if fn == nil {
+			t.Errorf("depsProd().%s = nil", nombre)
+		}
+	}
+	// Y load es la de verdad: con un HOME aislado y una config mia, devuelve
+	// ESA config, no unos defaults.
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "gitdash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(dir, "gitdash", "config.toml")
+	if err := os.WriteFile(conf, []byte("roots = [\"/tmp/raiz-mia\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, warn := d.load()
+	if len(cfg.Roots) != 1 || cfg.Roots[0] != "/tmp/raiz-mia" {
+		t.Errorf("depsProd().load() leyo %v, want la config del fichero", cfg.Roots)
+	}
+	if warn != "" {
+		t.Errorf("aviso = %q, want vacio con una config valida", warn)
+	}
+}
+
+// run es el cuerpo de main con las dependencias REALES: el unico camino que no
+// se puede probar con dobles. Con --print no arranca la TUI (eso ya lo cubre el
+// seam), asi que lo unico que se comprueba es que sale 0 y no toca stderr.
+func TestRunConPrintModeYDepsReales(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "gitdash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(dir, "gitdash", "config.toml")
+	// Un root vacio: discovery no encuentra nada y sale rapido.
+	if err := os.WriteFile(conf, []byte("roots = [\""+t.TempDir()+"zz\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var errBuf bytes.Buffer
+	if code := run(true, &errBuf); code != 0 {
+		t.Errorf("run(--print) = %d, want 0", code)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("stderr = %q, want vacio", errBuf.String())
 	}
 }

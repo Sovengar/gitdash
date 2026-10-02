@@ -15,7 +15,7 @@ go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
 ```
 
 Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **97.31% (2715/2790), 69 sin cubrir**.
+Progreso: **97.56% (2722/2790), 62 sin cubrir**.
 
 Meta: 2790/2790.
 
@@ -123,14 +123,15 @@ Meta: 2790/2790.
 - [ ] `cmdlogpanel 176` — `cmdline` vacía → `-`
 - [x] `bordered 90,93` — `leftChar`/`rightChar` vacíos
 
-### `cmd/gitdash/` — 11
+### `cmd/gitdash/` — 11 → quedan 4
 
-- [ ] `main.go 21` — `func main()` (no se llama desde un test)
-- [ ] `main.go 52,57,58` — `depsProd`: los closures reales
-- [ ] `main.go 65` — `run(printMode, eout)`
-- [ ] `print.go 29` — error de `config.Load` al stderr
-- [ ] `print.go 51,57` — worktree duplicado y sufijo `[wt]`
-- [ ] `print.go 62,65,69` — detached, rama vacía, worktrees
+- [x] `main.go 52,57,58` — `depsProd`: las cinco funciones no son nil y `load` lee de verdad
+- [x] `main.go 65` — `run(printMode, eout)` con deps reales
+- [x] `print.go 51,57,62,65,69` — worktree duplicado, sufijo `[wt]`, detached,
+      rama vacía, contador de worktrees (se extrajo `printRowOf` para poder
+      probarlos sobre filas fabricadas: un HEAD real no se puede dejar detached)
+- [ ] `main.go 21` — `func main()` (llama a `os.Exit`; ver §inalcanzables)
+- [ ] `print.go 29` — error de `discovery.Scan` a stderr
 
 ### `internal/discovery/scan.go` — 7
 
