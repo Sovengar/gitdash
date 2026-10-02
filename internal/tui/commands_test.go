@@ -799,13 +799,16 @@ func TestHandoffEjecutaElProcesoEnElRepo(t *testing.T) {
 		t.Run(c.accion, func(t *testing.T) {
 			m, spy := handoffRecorder(t)
 			m.cfg.Editor = "vi"
-			// El shell del handoff tiene que existir para pasar la guarda.
-			if c.accion == "shell" {
+			// El handoff necesita que su binario exista en el PATH. Solo shell y
+			// lazygit lo miran: el editor no pasa por LookPath. Un switch en vez
+			// de if/else-if porque las ramas no son intercambiables — la de
+			// lazygit escribe un ejecutable falso para sortear el LookPath sin
+			// tener lazygit instalado, y sin lanzar nada (el handoff esta
+			// inyectado).
+			switch c.accion {
+			case "shell":
 				t.Setenv("SHELL", "/bin/sh")
-			} else if c.accion == "lazygit" {
-				// El LookPath de lazygit mira el PATH de verdad: se le da un
-				// ejecutable falso para pasar la guarda sin tener lazygit
-				// instalado, y sin lanzar nada (el handoff esta inyectado).
+			case "lazygit":
 				bin := filepath.Join(t.TempDir(), "lazygit")
 				if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 					t.Fatal(err)

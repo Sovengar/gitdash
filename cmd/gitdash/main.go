@@ -69,7 +69,10 @@ func run(printMode bool, eout io.Writer) int {
 func runWith(d deps, printMode bool, eout io.Writer) int {
 	cfg, warn := d.load()
 	if warn != "" {
-		fmt.Fprintln(eout, "gitdash:", warn) // notificar sin abortar
+		// El error de escritura se descarta a proposito: `eout` es stderr y ya
+		// estamos avisando de un problema. Si stderr falla, no hay a quien
+		// avisarle, y abortar por ello dejaria al usuario sin dashboard.
+		_, _ = fmt.Fprintln(eout, "gitdash:", warn) // notificar sin abortar
 	}
 
 	if printMode {
@@ -81,7 +84,7 @@ func runWith(d deps, printMode bool, eout io.Writer) int {
 	// El aviso va también a la TUI: stderr se queda detrás del alt screen.
 	d.notify(model, warn)
 	if err := d.runTUI(model); err != nil {
-		fmt.Fprintln(eout, "gitdash:", err)
+		_, _ = fmt.Fprintln(eout, "gitdash:", err)
 		return 1
 	}
 	return 0
