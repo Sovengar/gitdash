@@ -64,3 +64,32 @@ func TestPullReasonIgnoresLocale(t *testing.T) {
 		t.Errorf("reason = %q, want mensaje en inglés pese al locale", reason)
 	}
 }
+
+// FailureReason tiene tres salidas y solo se probaba la primera. Las otras dos:
+//
+//   - salida vacía con error: el mensaje es el del proceso. Es lo que pasa con un
+//     fallo de red o un remoto caido, donde git no imprime nada y lo unico que
+//     hay que enseñar es el error.
+//   - salida vacía SIN error: no hay nada que decir. La UI tiene que poder pintar
+//     cadena vacia en vez de un "error" inventado, porque un fallo sin texto se
+//     ve como un fallo sin explicacion.
+func TestFailureReasonSinSalida(t *testing.T) {
+	// Con error del proceso y salida vacía.
+	boom := errors.New("exit status 128")
+	if got := FailureReason("", boom); got != "exit status 128" {
+		t.Errorf("FailureReason vacio con error = %q, want el texto del error", got)
+	}
+	// Con salida que solo tiene hints y líneas en blanco: todo se salta.
+	out := "\n\nhint: si esto fuera un rebase...\n   \nhint: outro hint\n"
+	if got := FailureReason(out, boom); got != "exit status 128" {
+		t.Errorf("FailureReason solo-hints = %q, want el fallback al error", got)
+	}
+	// Sin salida y sin error: vacío, no un placeholder.
+	if got := FailureReason("", nil); got != "" {
+		t.Errorf("FailureReason sin nada = %q, want vacio", got)
+	}
+	// Y con salida real, gana la salida sobre el error.
+	if got := FailureReason("fatal: could not read Username\nhint: x\n", boom); got != "fatal: could not read Username" {
+		t.Errorf("FailureReason = %q, want la primera linea de salida", got)
+	}
+}

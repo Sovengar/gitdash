@@ -1,6 +1,7 @@
 package gitstatus
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strconv"
@@ -602,5 +603,56 @@ func TestParseLogDescartaCommitsMalformados(t *testing.T) {
 	}
 	if commits[0].Sha != "abc123" || commits[0].Subject != "primer commit" {
 		t.Errorf("commit = %+v, want el bien formado", commits[0])
+	}
+}
+
+// StreamPool con un contexto YA cancelado: el primer select (el que pide hueco
+// al semaforo) tiene un `case <-ctx.Done()` que devuelve sin emitir nada. Ese
+// caso es el que evita que un scan cancelado siga lanzando subprocess de git:
+// sin el, cancelar no pararia nada hasta que terminara el trabajo en vuelo, y
+// Ctrl-C en mitad de un scan de 50 repos lo dejaria seguir.
+func TestStreamPoolConContextoCancelado(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	projects := []discovery.Project{
+		{Path: dir, HasRepo: true},
+		{Path: dir + "-no-existe", HasRepo: true},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancelado ANTES de arrancar
+
+	var mu sync.Mutex
+	emitidas := 0
+	StreamPool(ctx, projects, "", false, 1, func(string, Snapshot) {
+		mu.Lock()
+		emitidas++
+		mu.Unlock()
+	})
+	// Con el contexto muerto puede no emitirse nada: lo que no puede es lanzar
+	// git. Se comprueba que devuelve y no se cuelga, y que el numero de eventos
+	// es como mucho uno por repo (nunca mas, que seria emissions fantasma).
+	if emitidas > len(projects) {
+		t.Errorf("emite %d eventos con el contexto cancelado, want <= %d", emitidas, len(projects))
+	}
+}
+
+// syncBehind con una ref que NO EXISTE devuelve known=false, no un 0. La
+// diferencia es toda la columna SYNC de la tabla: `known=false` hace que la UI
+// diga "— (sin sync branch)" (un dato que no tenemos), mientras que un 0
+// conocido se pintaría como "al día" (una afirmación falsa sobre un repo que
+// puede tener 40 commits sin traer).
+func TestSyncBehindConRefInexistente(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	n, known := syncBehind(t.Context(), dir, "origin/una-rama-que-no-existe")
+	if known {
+		t.Errorf("syncBehind con ref inexistente = %d, known=true; want known=false (no es que este al dia)", n)
+	}
+	// Una ref que sí existe y HEAD está en ella: 0 commits, y eso sí es conocido.
+	testutil.CommitFiles(t, dir, map[string]string{"a.txt": "x\n"}, "commit")
+	n, known = syncBehind(t.Context(), dir, "main")
+	if !known {
+		t.Error("syncBehind contra HEAD = known=false, want true (0 commitsbehind es un dato)")
+	}
+	if n != 0 {
+		t.Errorf("syncBehind contra HEAD = %d, want 0", n)
 	}
 }

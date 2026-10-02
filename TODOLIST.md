@@ -15,7 +15,7 @@ go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
 ```
 
 Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **97.56% (2722/2790), 62 sin cubrir**.
+Progreso: **97.71% (2726/2790), 58 sin cubrir**.
 
 Meta: 2790/2790.
 
@@ -133,20 +133,25 @@ Meta: 2790/2790.
 - [ ] `main.go 21` — `func main()` (llama a `os.Exit`; ver §inalcanzables)
 - [ ] `print.go 29` — error de `discovery.Scan` a stderr
 
-### `internal/discovery/scan.go` — 7
+### `internal/discovery/scan.go` — 7 → quedan 5
 
-- [ ] `47,57` — `filepath.Abs` y `os.Stat` fallando por root
-- [ ] `85` — `WalkDir` con error (directorio ilegible)
-- [ ] `100` — error del walk que aborta
-- [ ] `173,187` — `MarkerPrompt` con marcador ilegible / malformado
-- [ ] `222` — `.git` que no se puede leer
+- [x] `47,57` — roots inexistentes y que son un fichero (error agregado)
+- [x] `85` — `WalkDir` sobre un directorio sin permiso (se salta, no aborta)
+- [x] `173` — `MarkerPrompt` con marcador inexistente (vacío, no error)
+- [x] `187` — `MarkerPrompt` con marcador malformado (sí error)
+- [x] `222` — `.git` ilegible por permisos
+- [ ] `100` — el walk que ABORTA (devuelve error, no solo salta)
 
-### `internal/gitstatus/status.go` — 4 · `state.go` — 2 · `cache.go` — 1
+Nota: los tests de permisos se saltan si el proceso corre como root, que no
+puede impedirse leer un 0o000. Aquí no es root, pero en un contenedor de CI puede
+darse: si se saltan, el bloque vuelve a estar sin cubrir sin que nadie se entere.
 
-- [ ] `status.go 140` — `rev-list` a un ref inexistente
-- [ ] `status.go 176` — `case <-ctx.Done()` del pool
+### `internal/gitstatus/status.go` — 2 · `state.go` — 2 · `cache.go` — 1
+
+- [x] `status.go 140` — `syncBehind` a una ref inexistente → `known=false`
+- [x] `status.go 176` — `StreamPool` con contexto ya cancelado
+- [x] `status.go 333` — `FailureReason` sin salida / solo hints
 - [ ] `status.go 263` — `rev-parse` devolviendo vacío
-- [ ] `status.go 333` — `git log` sin salida
 - [ ] `state.go 70` — `json.Marshal` fallando (mapa no serializable)
 - [ ] `state.go 78` — `os.WriteFile` fallando
 - [ ] `cache.go 106` — `json.MarshalIndent` fallando

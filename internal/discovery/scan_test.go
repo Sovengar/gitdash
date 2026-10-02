@@ -401,3 +401,70 @@ func TestMarkerPromptSinMarcadorNoEsError(t *testing.T) {
 		t.Errorf("prompt = %q, want vacio", p)
 	}
 }
+
+// Un directorio sin permiso de lectura es el caso real de la rama de error del
+// walk: el usuario tiene un repo dentro de algo que no puede leer y Scan tiene
+// que SALTARSELO, no abortar el escaneo entero. Abortar seria perder todos los
+// repos que sí se ven por un directorio ajeno.
+func TestScanSaltaDirectorioIlegible(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("como root los permisos de directorio no impiden la lectura")
+	}
+	root := t.TempDir()
+	bueno := filepath.Join(root, "proyecto")
+	testutil.Init(t, bueno)
+	testutil.Marker(t, bueno, "", "", "", false)
+
+	// Un directorio sin permiso, dentro del root pero sin marcador.
+	bloqueado := filepath.Join(root, "sin-acceso")
+	if err := os.MkdirAll(bloqueado, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bloqueado, 0o755) })
+
+	projects, err := Scan(cfgRoots(root))
+	if len(projects) != 1 || projects[0].Path != bueno {
+		t.Errorf("projects = %+v, want solo %s (un dir ilegible no aborta)", projects, bueno)
+	}
+	if err != nil {
+		t.Errorf("Scan = %v, want nil (el dir ilegible se salta en silencio)", err)
+	}
+}
+
+// MarkerPrompt con un marcador MALFORMADO sí es error, a diferencia del
+// inexistente. La diferencia importa: sin prompt la acción AI no se lanza (un
+// aviso), pero con un marcador corrupto el usuario tiene un `.gitdash.toml`
+// roto que debe arreglar, y avisar de eso es mas util que decir "no hay prompt".
+func TestMarkerPromptMalformadoEsError(t *testing.T) {
+	dir := t.TempDir()
+	writeMarker(t, dir, "name = [roto\n")
+	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
+	if err == nil {
+		t.Fatal("MarkerPrompt con marcador malformado = nil, want error (el fichero esta roto)")
+	}
+	if !strings.Contains(err.Error(), "marker") {
+		t.Errorf("error = %q, want que nombre el marcador", err)
+	}
+	if p != "" {
+		t.Errorf("prompt = %q con error, want vacio", p)
+	}
+}
+
+// classifyGit con un `.git` que existe pero no se puede LEER (es un fichero sin
+// permiso) no es un worktree: no hay gitdir que seguir, asi que se descarta. La
+// comprobacion es de que no devuelve un repo principal inventado.
+func TestClassifyGitConFicheroIlegible(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("como root los permisos de fichero no impiden la lectura")
+	}
+	dir := t.TempDir()
+	git := filepath.Join(dir, ".git")
+	if err := os.WriteFile(git, []byte("gitdir: /no/se/puede/leer\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(git, 0o644) })
+
+	if k, main := classifyGit(git); k != gitNone || main != "" {
+		t.Errorf("classifyGit(ilegible) = %v/%q, want gitNone/%q", k, main, "")
+	}
+}
