@@ -255,11 +255,31 @@ func TestNew(t *testing.T) {
 	if r.Bin != "gh" {
 		t.Errorf("Bin = %q", r.Bin)
 	}
-	if r.Timeout != DefaultTimeout {
-		t.Errorf("Timeout = %v, quiero %v", r.Timeout, DefaultTimeout)
+	if r.Timeout != DefaultTimeout() {
+		t.Errorf("Timeout = %v, quiero %v", r.Timeout, DefaultTimeout())
 	}
 	if !slicesHas(r.Extra, "GH_PROMPT_DISABLED=1") {
 		t.Errorf("Extra = %q", r.Extra)
+	}
+}
+
+// El plazo por defecto son 30 SEGUNDOS y está escrito como producto
+// (`30 * time.Second`), así que el mutante de ARITHMETIC_BASE lo convierte en
+// `30 / time.Second` = 30ms. Con un plazo tan corto, `gh pr create` de una PR
+// real nunca llega a responder y el overlay falla siempre: un bug de producción
+// disfrazado de constante.
+//
+// La aserción va en unidades, no contra la constante: comparar `r.Timeout` con
+// `DefaultTimeout` (como hace TestNew) no puede fallar, porque los dos lados
+// llevan el mismo error. Aquí se compara contra 30s, un número del enunciado.
+func TestDefaultTimeoutSonTreintaSegundos(t *testing.T) {
+	if DefaultTimeout() != 30*time.Second {
+		t.Errorf("DefaultTimeout() = %v, want 30s (un %v mata cualquier gh/glab real)",
+			DefaultTimeout(), DefaultTimeout())
+	}
+	r := New("gh")
+	if r.Timeout != 30*time.Second {
+		t.Errorf("Runner.Timeout = %v, want 30s", r.Timeout)
 	}
 }
 
@@ -275,4 +295,26 @@ func slicesHas(hay []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// Error() solo añade el código de salida cuando NO es cero. El caso de un fallo
+// sin código (que se corta por contexto, o que no viene de un *exec.ExitError)
+// tiene que decir lo mismo sin el sufijo "(exit N)": un "(exit 0)" en un error
+// seria un mensaje que se contradice, y el texto es lo que lee el usuario en el
+// panel del log.
+func TestErrorSinCodigoNoDiceExit(t *testing.T) {
+	e := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "contexto cancelado"}
+	got := e.Error()
+	want := "gh pr list: contexto cancelado"
+	if got != want {
+		t.Errorf("Error() = %q, want %q (sin sufijo de exit)", got, want)
+	}
+	if strings.Contains(got, "exit") {
+		t.Errorf("Error() = %q, want sin la palabra exit", got)
+	}
+	// Y con código sigue apareciendo: el caso de arriba no puede romper el otro.
+	e2 := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "boom", ExitCode: 2}
+	if !strings.Contains(e2.Error(), "(exit 2)") {
+		t.Errorf("Error() = %q, want el sufijo (exit 2)", e2.Error())
+	}
 }

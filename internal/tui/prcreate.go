@@ -106,7 +106,7 @@ func (m *Model) prCreateCmd() tea.Cmd {
 			fail(fmt.Sprintf("%s: %s not installed", repo, bin))
 			return
 		}
-		// El plazo (tool.DefaultTimeout) lo aplica el Runner, no el contexto de
+		// El plazo (tool.DefaultTimeout()) lo aplica el Runner, no el contexto de
 		// la app: uno cancela gitdash, el otro una CLI colgada.
 		start := time.Now()
 		out, runErr := tool.New(bin, forge.PromptEnv(ref)...).Run(appCtx, argv[1:]...)

@@ -4,6 +4,8 @@
 package gitstatus
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gitdash/internal/testutil"
@@ -73,5 +75,37 @@ func TestRebaseInProgressEnWorktree(t *testing.T) {
 	}
 	if RebaseInProgress(t.Context(), dir) {
 		t.Error("el rebase del worktree se le atribuyó al repo principal")
+	}
+}
+
+// Un rebase a medias del que no se llego a pickear nada deja el directorio de
+// estado (rebase-merge o rebase-apply) en el worktree del repo principal, no en
+// un worktree real. Los dos nombres cuentan, y quitarlos devuelve a false.
+//
+// El test de worktree de arriba monta el caso real (un pull --rebase que
+// choca); este monta el caso temprano, que es el que se da cuando el conflicto
+// se produce en el commit que se esta aplicando: git crea el directorio de
+// estado antes de intentar el pick, asi que el aviso tiene que aparecer tambien
+// sin historial reescrito.
+func TestRebaseInProgressSinPickear(t *testing.T) {
+	dir := t.TempDir()
+	testutil.Init(t, dir)
+
+	for _, nombre := range []string{"rebase-merge", "rebase-apply"} {
+		t.Run(nombre, func(t *testing.T) {
+			estado := filepath.Join(dir, ".git", nombre)
+			if err := os.MkdirAll(estado, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if !RebaseInProgress(t.Context(), dir) {
+				t.Errorf("RebaseInProgress = false con %s en disco, want true", nombre)
+			}
+			if err := os.RemoveAll(estado); err != nil {
+				t.Fatal(err)
+			}
+			if RebaseInProgress(t.Context(), dir) {
+				t.Errorf("RebaseInProgress = true tras quitar %s", nombre)
+			}
+		})
 	}
 }

@@ -40,10 +40,6 @@ const (
 	// textarea se dimensiona con lo que sobra en vez de crecer: un campo que
 	// cambia de alto al escribirse hace saltar todo lo que tiene debajo.
 	prFixedLines = 6
-	// prMinBodyLines es el alto mínimo del overlay: los rótulos y al menos
-	// dos líneas de cuerpo. Por debajo el formulario no se dibuja (media caja
-	// es peor que no abrirlo) y ni siquiera se abre.
-	prMinBodyLines = prFixedLines + 2
 	// prLabelWidth es la columna de los rótulos: dos de sangría, el marcador
 	// de foco, la etiqueta rellenada a 7 y el espacio que la separa del valor.
 	prLabelWidth = 12
@@ -57,14 +53,27 @@ const (
 	// el ancho de la columna de rótulos, que es lo que hay justo al lado: por
 	// debajo el rótulo y el valor ya no se distinguen de un vistazo.
 	prMinValueWidth = 12
-	// prMinWidth es el ancho EXTERIOR mínimo del overlay: los dos bordes de la
-	// caja, la columna de rótulos, la celda de margen del input y la columna de
-	// valor mínima. Es el otro eje del mismo principio que prMinBodyLines —por
-	// debajo el formulario no se abre, porque no cabe entero— y se deriva de
-	// las partes en vez de salirse de un número redondo: lo que garantiza es
-	// que el ancho del input sea un ancho, y no un clamp a 1 de un negativo.
-	prMinWidth = 2 + prLabelWidth + prValueSlack + prMinValueWidth
 )
+
+// prMinBodyLines es el alto mínimo del overlay: los rótulos y al menos dos
+// líneas de cuerpo. Por debajo el formulario no se dibuja (media caja es peor
+// que no abrirlo) y ni siquiera se abre.
+//
+// Es una FUNCIÓN y no una const por lo mismo que los plazos de app.go: Go no
+// instrumenta las expresiones de constante, así que `prFixedLines + 2` a nivel
+// de paquete no genera bloque y su mutante sale NOT COVERED para siempre. Aquí
+// dentro sí se instrumenta, y el mutante se ejecuta.
+func prMinBodyLines() int { return prFixedLines + 2 }
+
+// prMinWidth es el ancho EXTERIOR mínimo del overlay: los dos bordes de la
+// caja, la columna de rótulos, la celda de margen del input y la columna de
+// valor mínima. Es el otro eje del mismo principio que prMinBodyLines —por
+// debajo el formulario no se abre, porque no cabe entero— y se deriva de las
+// partes en vez de salirse de un número redondo: lo que garantiza es que el
+// ancho del input sea un ancho, y no un clamp a 1 de un negativo.
+//
+// Función y no const por el mismo motivo que prMinBodyLines.
+func prMinWidth() int { return 2 + prLabelWidth + prValueSlack + prMinValueWidth }
 
 // prField es el campo con el foco del formulario. El head NO es un campo: se
 // leyó del snapshot al armar y se enseña atenuado, porque editarlo a mano
@@ -238,7 +247,7 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 // que el ancho del input sea un ancho y no un clamp a 1 de una resta negativa.
 // Un terminal angosto y alto es el caso que el alto solo no ve.
 func (m Model) prFits() bool {
-	return m.pr != nil && m.layout().bodyLines >= prMinBodyLines && m.width >= prMinWidth
+	return m.pr != nil && m.layout().bodyLines >= prMinBodyLines() && m.width >= prMinWidth()
 }
 
 // prValueWidth es el ancho de la columna de valor de los inputs: el interior de
@@ -412,7 +421,7 @@ func (m Model) prParams() forge.Params {
 // cuerpo multilínea y la línea de aviso. Devuelve "" si el hueco no llega al
 // mínimo, para que quien lo compone no deje una caja a medias.
 func (m Model) prSection(rows int) string {
-	if m.pr == nil || rows < prMinBodyLines {
+	if m.pr == nil || rows < prMinBodyLines() {
 		return ""
 	}
 	// Los campos se pintan con el View() de su widget, no con su Value(): es

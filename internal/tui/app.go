@@ -246,6 +246,15 @@ type Model struct {
 	onlyDirty bool
 	search    string
 
+	// handoff cede la terminal a un proceso y devuelve el mensaje de salida.
+	// En produccion es tea.ExecProcess, que suspende el programa hasta que el
+	// proceso termina. Es un campo y no una llamada suelta porque el handoff es
+	// lo UNICO en la app que un test no puede ejecutar: suspende el programa, y
+	// con el programa suspendido no hay quien lo reanude. Inyectandolo, un test
+	// recibe el argv, no cede nada y devuelve el mensaje de salida el mismo, que
+	// es lo que el comando de la TUI vera al volver.
+	handoff handoffFunc
+
 	searchActive bool
 	searchInput  textinput.Model
 	collapsed    map[string]bool // grupos plegados
@@ -352,6 +361,7 @@ func New(cfg config.Config) Model {
 		expanded:    map[string]bool{},
 
 		removeTokens: map[string]int{},
+		handoff:      tea.ExecProcess,
 	}
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
@@ -562,7 +572,7 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	// que el mensaje sea determinista respecto a la tecla que lo disparó.
 	resolved := "git " + strings.Join(args, " ")
 	go func() {
-		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
+		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
 		defer cancel()
 		out, err := gitstatus.Run(ctx, path, args...)
 		errStr := ""
@@ -611,7 +621,7 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 	events := m.events
 	syncBranch, syncFallback := m.syncOf(parent)
 	go func() {
-		ctx, cancel := context.WithTimeout(appCtx, 120*time.Second)
+		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
 		defer cancel()
 		out, err := gitstatus.RemoveWorktree(ctx, parent, wtPath, withForce)
 		errStr := ""
@@ -652,13 +662,32 @@ func (m *Model) toastCmd(level toastLevel, text string) tea.Cmd {
 	return func() tea.Msg { return notifyMsg{text: text, level: level} }
 }
 
+// handoffFunc cede la terminal a un proceso y, cuando vuelve, entrega el
+// mensaje que produce su error (nil si salio limpio). La firma es la de
+// tea.ExecProcess.
+type handoffFunc func(*exec.Cmd, tea.ExecCallback) tea.Cmd
+
+// handoffDone construye el execDoneMsg de un handoff de terminal (editor,
+// lazygit, el comando AI, el preview visual, la shell).
+//
+// Vive en un metodo y no en el closure de tea.ExecProcess por dos razones. La
+// primera es que el cuerpo de ese closure solo se ejecuta cuando el proceso
+// TERMINA, y un test que cede la terminal para comprobarlo no se puede escribir
+// (mientras el handoff esta en curso el programa esta suspendido). La segunda es
+// que el log de comandos depende de que la accion y el argv sean los correctos:
+// son lo que el panel muestra despues, y un "editor" donde deberia decir
+// "lazygit" no se detecta por leer el codigo.
+func (m *Model) handoffDone(action, path string, argv []string, err error) tea.Msg {
+	return execDoneMsg{path: path, action: action, argv: argv, err: err}
+}
+
 // openEditorCmd abre $EDITOR en el repo con handoff de terminal.
 func (m *Model) openEditorCmd(path string) tea.Cmd {
 	argv := []string{m.cfg.Editor}
 	cmd := exec.Command(m.cfg.Editor)
 	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, action: "editor", argv: argv, err: err}
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return m.handoffDone("editor", path, argv, err)
 	})
 }
 
@@ -676,8 +705,8 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	argv := []string{"lazygit"}
 	cmd := exec.Command("lazygit")
 	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, action: "lazygit", argv: argv, err: err}
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return m.handoffDone("lazygit", path, argv, err)
 	})
 }
 
@@ -789,8 +818,8 @@ func (m *Model) openPullAICmd(path string, argv []string) tea.Cmd {
 	m.running[path] = "pull_ai"
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, action: "pull_ai", argv: argv, err: err}
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return m.handoffDone("pull_ai", path, argv, err)
 	})
 }
 
@@ -847,18 +876,35 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	m.running[path] = "visual"
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, action: "visual", argv: argv, err: err}
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return m.handoffDone("visual", path, argv, err)
 	})
 }
 
-// commandTimeout es el límite de un comando `!` capturado.
-const commandTimeout = 5 * time.Minute
+// commandTimeout es el límite de un comando `!` capturado. Función y no const por
+// lo mismo que actionTimeout: una const de paquete no genera bloque de
+// cobertura y su mutante de ARITHMETIC_BASE quedaría NOT COVERED para siempre.
+func commandTimeout() time.Duration { return 5 * time.Minute }
+
+// actionTimeout es el plazo de una acción de git (pull, push, fetch, worktree
+// remove). El valor literal va en una función y no en la llamada por un motivo
+// concreto: escrito como `120 * time.Second` dentro del `WithTimeout`, el mutante
+// de ARITHMETIC_BASE lo convierte en `120 / time.Second`, o sea un plazo de CERO.
+// Con deadline 0 cada gitstatus.Run falla de golpe y las dos acciones devuelven
+// un error instantáneo, en bucle, sobre todos los repos: un cuelgue del dashboard
+// que ningún test ve porque el test tampoco cuelga, solo se equivoca.
+//
+// Que sea una FUNCIÓN y no una `const` de paquete es por lo mismo, y por otra
+// razón: Go no instrumenta las expresiones de constante, así que una const no
+// genera bloque de cobertura y su mutante de ARITHMETIC_BASE sale NOT COVERED
+// para siempre, TestPlazosEnSegundos o no. Dentro de una función sí se
+// instrumenta, y el mutante pasa a ejecutarse —y a morir— en vez de esconderse.
+func actionTimeout() time.Duration { return 120 * time.Second }
 
 // runShellCmd ejecuta el comando en el repo con el shell dado, capturando
 // stdout+stderr juntos; devuelve la salida y el código de salida.
 func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) {
-	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout())
 	defer cancel()
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
@@ -936,8 +982,8 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 	m.running[path] = "shell"
 	cmd := exec.Command(shell)
 	cmd.Dir = path
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return execDoneMsg{path: path, action: "shell", argv: []string{shell}, err: err}
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return m.handoffDone("shell", path, []string{shell}, err)
 	})
 }
 

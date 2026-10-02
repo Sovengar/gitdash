@@ -447,7 +447,7 @@ func TestSinLineaPermanenteDeNotificacion(t *testing.T) {
 	if len(m.toasts.toasts) != 1 {
 		t.Fatalf("la notificación no se convirtió en toast")
 	}
-	m.toasts.toasts[0].created = time.Now().Add(-toastDuration - time.Second)
+	m.toasts.toasts[0].created = time.Now().Add(-toastDuration() - time.Second)
 	m.toasts.update()
 	if strings.Contains(stripANSI(m.View().Content), "boom") {
 		t.Error("la notificación quedó en pantalla de forma permanente")
@@ -552,7 +552,7 @@ func TestToastsExpiranConElTick(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("el tick no se rearmó")
 	}
-	m.toasts.toasts[0].created = time.Now().Add(-toastDuration - time.Second)
+	m.toasts.toasts[0].created = time.Now().Add(-toastDuration() - time.Second)
 	updated, _ = m.Update(tickMsg{})
 	m = updated.(Model)
 	if len(m.toasts.toasts) != 0 {
@@ -649,8 +649,27 @@ func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
 
 	t.Run("ninguna", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
+		m.scanning = false
 		if got := m.activityIndicator(); got != "" {
 			t.Errorf("indicador = %q, want vacío sin acciones", got)
+		}
+	})
+
+	// El scan tiene su propia línea y su propia precedencia sobre las acciones:
+	// si el escaneo está en marcha lo que se muestra es el escaneo, no el
+	// contador. Los casos de abajo solo probaban las acciones, con lo que la
+	// rama del scanning no la ejecutaba nunca y su mutante de ARITHMETIC_BASE
+	// sobre el "+ " salia NOT COVERED.
+	t.Run("scanning tiene precedencia", func(t *testing.T) {
+		m := newTestModel(t, projects, states)
+		m.scanning = true
+		m.running = map[string]string{"/tmp/dirty-api": "pull"}
+		got := m.activityIndicator()
+		if !strings.Contains(got, "scanning") {
+			t.Errorf("indicador = %q, want el escaneo por encima de la acción", got)
+		}
+		if strings.Contains(got, "pull") {
+			t.Errorf("indicador = %q, want la acción oculta mientras se escanea", got)
 		}
 	})
 
@@ -767,6 +786,35 @@ func TestResumenDeGrupoSoloPintaLoQueHay(t *testing.T) {
 		}
 		if strings.Contains(out, "errors") {
 			t.Errorf("errors a cero en un grupo sin errores:\n%s", out)
+		}
+	})
+
+	// El caso anterior carga los cuatro estados que un repo puede tener sin
+	// fallar, pero se le escapan los dos que el resumen tambien pinta y que
+	// salen de una fuente distinta: `errors` viene del estado derivado
+	// StateError, y `wt` de Worktrees. Un grupo donde ninguno de los dos
+	// aparecia nunca ejecutaba esas dos lineas, asi que sus mutantes de
+	// ARITHMETIC_BASE estaban NOT COVERED sin que hubiera un hueco real detras:
+	// la rama existia y simplemente no la miraba nadie.
+	t.Run("con errores y worktrees", func(t *testing.T) {
+		states := map[string]gitstatus.Snapshot{
+			"/a": func() gitstatus.Snapshot {
+				s := snapClean()
+				s.Err = "boom"
+				return s
+			}(),
+			"/b": func() gitstatus.Snapshot {
+				s := snapClean()
+				s.Worktrees = []gitstatus.Worktree{{Path: "/a-wt", Branch: "wt"}}
+				return s
+			}(),
+		}
+		m := newTestModel(t, projects, states)
+		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
+		for _, quiere := range []string{"repos    2", "errors   1", "wt       1"} {
+			if !strings.Contains(out, quiere) {
+				t.Errorf("falta %q en el resumen:\n%s", quiere, out)
+			}
 		}
 	})
 }
@@ -1094,3 +1142,27 @@ func TestPreviewConFiltroRespetaElShareDelHueco(t *testing.T) {
 // stats, el de keybinds y sus hints. El panel se suma aparte.
 const reservedConFiltro = tableChrome + filterSectionLines + statsSectionLines +
 	keybindsChrome + defaultHintLines
+
+// Los tres plazos del TUI se afirman aqui, en UNIDADES y no contra su propia
+// fuente: comparar `actionTimeout()` con `actionTimeout()` no puede fallar,
+// porque los dos lados llevan el mismo error.
+//
+// El valor vive en una funcion y no en una const de paquete por una razon que no
+// es de estilo: Go no instrumenta las expresiones de constante, asi que una const
+// no genera bloque de cobertura y el mutante de ARITHMETIC_BASE de `120 *
+// time.Second` sale NOT COVERED para siempre, con este test o sin el. Dentro de
+// una funcion si se instrumenta, y el mutante se ejecuta. Con `3 / time.Second`
+// el toast dura 0 y caduca en el instante; con `120 / time.Second` el plazo de
+// git es 0 y cada gitstatus.Run falla al instante, en bucle, sobre todos los
+// repos: el cuelgue que este test existe para que no vuelva colado.
+func TestPlazosEnUnidades(t *testing.T) {
+	if d := actionTimeout(); d != 120*time.Second {
+		t.Errorf("actionTimeout() = %v, want 2m (un %v hace fallar cada git al instante)", d, d)
+	}
+	if d := commandTimeout(); d != 5*time.Minute {
+		t.Errorf("commandTimeout() = %v, want 5m (un %v mata un comando lento de verdad)", d, d)
+	}
+	if d := toastDuration(); d != 3*time.Second {
+		t.Errorf("toastDuration() = %v, want 3s (un %v se leeria demasiado rapido)", d, d)
+	}
+}

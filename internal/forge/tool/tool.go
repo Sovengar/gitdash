@@ -22,7 +22,15 @@ import (
 
 // DefaultTimeout es el plazo por invocación de una CLI de forge. Sin él, un
 // `gh` colgado deja la TUI esperando para siempre.
-const DefaultTimeout = 30 * time.Second
+//
+// Es una FUNCIÓN y no una const por lo mismo que los plazos del TUI: Go no
+// instrumenta las expresiones de constante, así que una const de paquete no
+// genera bloque de cobertura y el mutante de ARITHMETIC_BASE de `30 *
+// time.Second` sale NOT COVERED para siempre. Dentro de una función sí se
+// instrumenta, y el mutante pasa a ejecutarse. Con `30 / time.Second` el plazo
+// sería 0: un timeout inmediato en cada invocación, que es un fallo que se
+// parece sospechosamente a "gh está roto".
+func DefaultTimeout() time.Duration { return 30 * time.Second }
 
 // Runner ejecuta un binario con plazo y entorno no interactivo.
 type Runner struct {
@@ -36,7 +44,7 @@ type Runner struct {
 
 // New construye un Runner con el plazo por defecto y las variables extra dadas.
 func New(bin string, extra ...string) *Runner {
-	return &Runner{Bin: bin, Timeout: DefaultTimeout, Extra: extra}
+	return &Runner{Bin: bin, Timeout: DefaultTimeout(), Extra: extra}
 }
 
 // Error es el fallo de una CLI, con el argv y el código de salida preservados y
@@ -68,7 +76,7 @@ func (e *Error) Unwrap() error { return e.Err }
 func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 	timeout := r.Timeout
 	if timeout <= 0 {
-		timeout = DefaultTimeout
+		timeout = DefaultTimeout()
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

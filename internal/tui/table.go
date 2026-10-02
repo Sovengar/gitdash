@@ -256,10 +256,32 @@ func worktreeMatches(wt gitstatus.Worktree, q string) bool {
 
 // sortRows ordena in-place: score desc, último commit desc, nombre asc.
 func sortRows(rows []row) {
-	// insertion sort simple: los repos son cientos, no miles.
-	for i := 1; i < len(rows); i++ {
-		for j := i; j > 0 && rowLess(rows[j], rows[j-1]); j-- {
-			rows[j], rows[j-1] = rows[j-1], rows[j]
+	// Insertion sort con dos bucles `range` en vez de `for i := 1; i <
+	// len(rows); i++` / `for j := i; j > 0 && ...; j--`.
+	//
+	// El segundo bucle es el que importa. `j--` invertido en `j++` hace que
+	// `j > 0` deje de cumplirse, y entonces el recorrido no tiene salida: es un
+	// bucle infinito REAL (comprobado fuera, con la misma estructura). Un bucle
+	// infinito no lo mata ningún test porque el test no termina; gremlins lo
+	// reporta como TIMED OUT, y TIMED OUT ni entra en `mutants_total` ni lo ve el
+	// gate de CI. O sea: un mutante que cuelga se escapa del gate por la puerta
+	// que no se mira.
+	//
+	// Con `range` sobre los índices no hay expresión post que invertir, así que
+	// ese mutante desaparece de la cabecera en vez de convertirse en un cuelgue.
+	// El `j > 0` sigue siendo una guarda explícita dentro del cuerpo, donde
+	// invertirla da "un elemento de más" en vez de "no termina nunca".
+	//
+	// Insertion sort simple: los repos son cientos, no miles. Con `i` en 0..n-2
+	// el índice del elemento que baja es `i+1`, y `k` en 0..i lo recorre hacia
+	// arriba para que `j := i+1-k` baje desde `i+1` hasta 1 — el mismo recorrido
+	// que hacía el `j--` original.
+	for i := range len(rows) - 1 {
+		for k := range i + 1 {
+			j := i + 1 - k
+			if j > 0 && rowLess(rows[j], rows[j-1]) {
+				rows[j], rows[j-1] = rows[j-1], rows[j]
+			}
 		}
 	}
 }

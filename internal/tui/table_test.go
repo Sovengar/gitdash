@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,42 @@ func TestSortRowsAtencionPrimero(t *testing.T) {
 		if got := nombresDe(rows); !equalStrings(got, c.want) {
 			t.Errorf("%s: orden = %v, want %v", c.nombre, got, c.want)
 		}
+	}
+
+	// Los casos de arriba son todos de dos filas, que es el mínimo que hace
+	// trabajo el segundo bucle. Con más filas el insertion sort tiene que seguir
+	// metiendo elementos EN SU SITIO, no soloparable el primero con el segundo: un
+	// recorrido que solo compara vecinos deja la lista a medio ordenar y dos
+	// elementos ya ordenados.
+	for _, n := range []int{0, 1, 3, 5, 9, 17} {
+		t.Run(fmt.Sprintf("%d filas ya ordenadas", n), func(t *testing.T) {
+			rows := make([]row, 0, n)
+			for i := range n {
+				// score decreciente: el orden correcto es el de entrada.
+				rows = append(rows, rowDe(fmt.Sprintf("r%02d", i), gitstatus.StateDirty, ahora-int64(i)))
+			}
+			sortRows(rows)
+			want := nombresDe(append([]row(nil), rows...))
+			for i, got := range nombresDe(rows) {
+				if got != want[i] {
+					t.Fatalf("n=%d: la fila %d quedó como %q, want %q (la lista no está ordenada)", n, i, got, want[i])
+				}
+			}
+		})
+		// Al revés: el commit CRECE con el índice, así que el orden correcto es
+		// r(n-1) … r00. Todos con el mismo score, para que solo mande la fecha.
+		t.Run(fmt.Sprintf("%d filas al revés", n), func(t *testing.T) {
+			rows := make([]row, 0, n)
+			for i := range n {
+				rows = append(rows, rowDe(fmt.Sprintf("r%02d", i), gitstatus.StateDirty, ahora-int64(n-i)))
+			}
+			sortRows(rows)
+			for i, got := range nombresDe(rows) {
+				if want := fmt.Sprintf("r%02d", n-1-i); got != want {
+					t.Fatalf("n=%d: la fila %d quedó como %q, want %q", n, i, got, want)
+				}
+			}
+		})
 	}
 
 	// rowLess no puede decir "menor" en los dos sentidos: es lo que rompe el
@@ -286,6 +323,25 @@ func TestRelativeTimeBuckets(t *testing.T) {
 		{"semanas", 3 * 7 * 24 * time.Hour, "3w"},
 		{"meses", 3 * 30 * 24 * time.Hour, "3mo"},
 		{"años", 400 * 24 * time.Hour, "13mo"},
+
+		// Los bordes. Los casos de arriba están en el CENTRO de cada bucket y
+		// ningún mutante de la guarda (`<` por `>`) los alcanza: con el signo
+		// cambiado, 3h cae en el bucket de días y da "0d", no "3h"... salvo que
+		// el centro de un bucket ancho dé el mismo número tras el salto, que es
+		// justo lo que pasa con "3mo" (3 meses = 90 días, y 90 días cae igual en
+		// el bucket de meses con el signo cambiado).
+		//
+		// Lo que sí distingue son los bordes exactos, porque ahí el signo decide
+		// si el valor cae en este bucket o en el siguiente: 59m es "59m" con `<`
+		// y "1h" con `>`.
+		{"justo antes de la hora", 59*time.Minute + 59*time.Second, "59m"},
+		{"justo en la hora", 60 * time.Minute, "1h"},
+		{"justo antes del día", 23*time.Hour + 59*time.Minute, "23h"},
+		{"justo en el día", 24 * time.Hour, "1d"},
+		{"justo antes de la semana", 7*24*time.Hour - time.Hour, "6d"},
+		{"justo en la semana", 7 * 24 * time.Hour, "1w"},
+		{"justo antes del mes", 30*24*time.Hour - time.Hour, "4w"},
+		{"justo en el mes", 30 * 24 * time.Hour, "1mo"},
 	}
 	for _, c := range casos {
 		epoch := ahora.Add(-c.edad).Unix()
@@ -607,5 +663,132 @@ func TestStripANSISoloQuitaSecuencias(t *testing.T) {
 	// naïvo confundiría.
 	if got := stripANSI("↑2 ↓0 ¿q?"); got != "↑2 ↓0 ¿q?" {
 		t.Errorf("texto con símbolos: %q", got)
+	}
+}
+
+// styleFor mapea cada estado derivado a un estilo. El mapa entero se comprueba
+// contra el NOMBRE del estilo, no contra otro estado: lo que importa es que un
+// repo divergido no se pinte como uno dirty, y comparar estilos entre si no lo
+// diria (styleError y styleDirty serian "distintos" igual).
+func TestStylePorEstado(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	for _, c := range []struct {
+		state gitstatus.State
+		want  string
+	}{
+		{gitstatus.StateError, styleError.Render("x")},
+		{gitstatus.StateNoRepo, styleDim.Render("x")},
+		{gitstatus.StateNoUpstream, styleWarn.Render("x")},
+		{gitstatus.StateDetached, styleWarn.Render("x")},
+		{gitstatus.StateDiverged, styleDiverged.Render("x")},
+		{gitstatus.StateDirty, styleDirty.Render("x")},
+		{gitstatus.StateAhead, styleAhead.Render("x")},
+		{gitstatus.StateBehind, styleBehind.Render("x")},
+	} {
+		got := m.styleFor(row{state: c.state})
+		if got.Render("x") != c.want {
+			t.Errorf("styleFor(%v) = %q, want %q", c.state, got.Render("x"), c.want)
+		}
+	}
+}
+
+// El header de un primario lleva glifo de expandido o de colapsado. El glifo es
+// lo UNICO que distingue "pulsar enter despliega" de "pulsar enter pliega", asi
+// que se comprueba el glifo y no el texto entero.
+func TestHeaderPrimarioCambiaGlifoAlPlegar(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.projects = []discovery.Project{
+		{Path: "/a", Name: "a", PrimaryGroup: "backend", HasRepo: true},
+	}
+	if got := m.primaryHeaderLine("backend"); !strings.Contains(got, "▾") {
+		t.Errorf("header expandido = %q, want el glifo ▾", got)
+	}
+	m.collapsed = map[string]bool{"backend": true}
+	got := m.primaryHeaderLine("backend")
+	if !strings.Contains(got, "▸") || strings.Contains(got, "▾") {
+		t.Errorf("header colapsado = %q, want el glifo ▸", got)
+	}
+}
+
+// El worktree sintetico de un repo NO cuenta como repos en la barra, y eso se
+// decide con worktreeHidden: si el worktree tiene MainRepo y ese repo esta
+// entre los descubiertos, es una fila plegada y no un proyecto. Sin el, la
+// cuenta de la barra sube con cada worktree.
+func TestSummaryNoCuentaWorktreesPlegados(t *testing.T) {
+	main := discovery.Project{Path: "/repos/api", Name: "api", PrimaryGroup: "backend", HasRepo: true}
+	wt := discovery.Project{
+		Path: "/repos/api-wt", Name: "api-wt",
+		PrimaryGroup: "backend", HasRepo: true,
+		IsWorktree: true, MainRepo: main.Path,
+	}
+	solo := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{
+		main.Path: snapClean(),
+	})
+	conWt := newTestModel(t, []discovery.Project{main, wt}, map[string]gitstatus.Snapshot{
+		main.Path: snapClean(),
+		wt.Path:   snapClean(),
+	})
+	a, _, _, _ := solo.summary()
+	b, _, _, _ := conWt.summary()
+	if a != b {
+		t.Errorf("summary con worktree plegado = %d repos, want %d (no cuenta)", b, a)
+	}
+
+	// Y si el repo principal NO esta entre los descubiertos, el worktree si
+	// cuenta: esta solo, es la unica fila de su repo.
+	huerfano := newTestModel(t, []discovery.Project{wt}, map[string]gitstatus.Snapshot{
+		wt.Path: snapClean(),
+	})
+	c, _, _, _ := huerfano.summary()
+	if c != 1 {
+		t.Errorf("summary con worktree huerfano = %d repos, want 1 (no hay principal que lo oculte)", c)
+	}
+}
+
+// repoExpanded tiene tres caminos: expandido por el mapa, inducido por una
+// busqueda que matchea un worktree, y colapsado. El segundo es el que hace que
+// una busqueda "feature" muestre los worktrees aunque el repo este plegado.
+func TestRepoExpandedInducidoPorBusqueda(t *testing.T) {
+	proj := discovery.Project{Path: "/api", Name: "api", HasRepo: true}
+	snap := snapClean()
+	snap.Worktrees = []gitstatus.Worktree{{Path: "/api-wt", Branch: "feature/x"}}
+	m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: snap})
+	r := row{project: proj, snap: snap}
+
+	if m.repoExpanded(r) {
+		t.Error("repoExpanded = true sin busqueda ni expansion (want colapsado)")
+	}
+	m.expanded = map[string]bool{"/api": true}
+	if !m.repoExpanded(r) {
+		t.Error("repoExpanded = false con el repo marcado expandido")
+	}
+	m.expanded = map[string]bool{}
+	m.search = "feature"
+	if !m.repoExpanded(r) {
+		t.Error("repoExpanded = false con una busqueda que matchea un worktree (tiene que inducirlo)")
+	}
+	// Una busqueda que no matchea nada no despliega.
+	m.search = "no-existe-este-worktree"
+	if m.repoExpanded(r) {
+		t.Error("repoExpanded = true con una busqueda que no matchea ningun worktree")
+	}
+}
+
+// worktreeBranchLabel dice la rama del worktree, o "(detached)" con el sha
+// corto si lo tiene, o "(detached)" a secas si no. El caso sin sha es el que
+// estaba sin cubrir: es un worktree recién creado sin commit, y sin el sha la
+// etiqueta seria un "(detached) " con un espacio colgando.
+func TestWorktreeBranchLabel(t *testing.T) {
+	for _, c := range []struct {
+		wt   gitstatus.Worktree
+		want string
+	}{
+		{gitstatus.Worktree{Branch: "feat/x"}, "feat/x"},
+		{gitstatus.Worktree{Head: "abc1234"}, "(detached) abc1234"},
+		{gitstatus.Worktree{}, "(detached)"},
+	} {
+		if got := worktreeBranchLabel(c.wt); got != c.want {
+			t.Errorf("worktreeBranchLabel(%+v) = %q, want %q", c.wt, got, c.want)
+		}
 	}
 }

@@ -65,7 +65,7 @@ func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds b
 	sinPanel := fitLayout(height, chrome, filterH, 0, keybindsLines, keepKeybinds)
 	lay := sinPanel
 	if formMin <= 0 {
-		for preview := panelHeight(height, chrome, filterH, keybindsLines); preview >= detailHeadLines; preview-- {
+		for _, preview := range panelCandidates(height, chrome, filterH, keybindsLines) {
 			l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
 			if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
 				l.previewLines = preview
@@ -87,6 +87,48 @@ func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds b
 func panelHeight(height, chrome, filterH, keybinds int) int {
 	free := max(0, height-(chrome+filterH+statsSectionLines+keybindsChrome+max(0, keybinds)+previewChrome))
 	return min(max(minPreviewLines, free*previewShare/5), free)
+}
+
+// panelCandidates son los altos de panel a probar, del share del hueco libre
+// hacia el suelo del panel, ambos extremos incluidos.
+//
+// Vive aparte y devuelve la lista porque el bucle original `for preview :=
+// panelHeight(...); preview >= detailHeadLines; preview--` NO SE PUEDE MATAR: al
+// invertir `preview--` en `preview++` la condición sigue siendo cierta desde la
+// primera vuelta —el suelo no depende de preview—, así que el mutante es un
+// bucle infinito. Y un bucle infinito no lo mata ningún test: el test no
+// termina, y gremlins lo reporta como TIMED OUT, un estado que ni entra en
+// mutants_total ni ve el gate de CI. O sea: el mutante se escapa del gate por
+// la vía del cuelgue, que es la peor forma de escaparse.
+//
+// El rango se cuenta hacia abajo desde `top` CON UN LÍMITE DE VUELTAS, no
+// comparando contra el suelo: `for i := 0; i <= alto; i++` con `preview := top-i`
+// dentro recorre exactamente los mismos valores (top, top-1, …, detailHeadLines)
+// y su condición no depende de un contador que se pueda invertir hacia arriba. Un
+// `i++` en `>=` sale del bucle al segundo elemento y devuelve una lista corta —un bug
+// real, con su aserción— en vez de colgar el run entero.
+//
+// La búsqueda no cambia: computeLayout sigue cogiendo el primer elemento de la
+// lista que cumple sus dos condiciones, y la lista está en orden descendente.
+func panelCandidates(height, chrome, filterH, keybinds int) []int {
+	top := panelHeight(height, chrome, filterH, keybinds)
+	if top < detailHeadLines {
+		return nil
+	}
+	vueltas := top - detailHeadLines + 1
+	// El recorrido va con `range` sobre el número de vueltas, no con un contador
+	// en la cabecera del for. Es la diferencia entre un bucle cuyo mutante
+	// INCREMENT_DECREMENT es "devuelve la lista al revés" y uno cuyo mutante es
+	// "se cuelga": range no tiene expresión que invertir, así que el mutante de
+	// la cabecera desaparece entero en vez de convertirse en un cuelgue.
+	//
+	// El valor sale de `top-i` con i en orden ASCENDENTE, que es la forma segura:
+	// un `i--` aquí tocaría el índice de la lista, no su condición de salida.
+	c := make([]int, 0, vueltas)
+	for i := range vueltas {
+		c = append(c, top-i)
+	}
+	return c
 }
 
 // fitLayout reparte el alto con un panel de altura fija, degradando en el orden
@@ -113,7 +155,19 @@ func fitLayout(height, chrome, filterH, preview, keybindsLines int, keepKeybinds
 		return n
 	}
 	if !keepKeybinds {
-		for hint > 0 && reserved()+1 > height {
+		// Se degrada uno a uno mientras no quepan, en vez de `for hint > 0 &&
+		// reserved()+1 > height { hint-- }`. El `hint--` invertido no es un
+		// cuelgue —reserved() baja al quitar un hint, así que la guarda se
+		// cumple y el bucle sale—, pero el recorrido al revés degrada hints de
+		// más y el layout sale con el alto equivocado sin que nada falle.
+		//
+		// Con `range` no hay expresión post que invertir: el bucle da exactamente
+		// tantas vueltas como hints había, y es la guarda la que dice hasta
+		// dónde. El `break` es el que decide, no el contador.
+		for range hint {
+			if reserved()+1 <= height {
+				break
+			}
 			hint--
 		}
 	}

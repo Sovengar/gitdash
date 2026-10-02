@@ -517,3 +517,152 @@ func TestComandoVacioDeUnaAccionDesconocidaNoSeRegistra(t *testing.T) {
 		t.Errorf("commands[\"real\"] = %q, want el valor declarado", got)
 	}
 }
+
+// HintBarLines deriva sus lineas de los keybindings CONFIGURADOS, no de una
+// lista fija: una accion sin tecla no se anuncia, y por eso el bucle tiene una
+// rama de "no esta bindeada" que salta. Ese skip es lo que hace que una config
+// vieja (sin la tecla de `pr`, digamos) no invente un hint que no se puede
+// pulsar.
+//
+// El skip se comprueba con un hint COMPLETO ("f fetch"), no con la palabra suelta:
+// "fetch" es subcadena de "fetch all", asi que buscarla suelta daria un falso
+// positivo siempre que `fetch_all` estuviera bindeado.
+func TestHintBarOmiteAccionesSinTecla(t *testing.T) {
+	cfg := Defaults()
+	delete(cfg.Keybindings, "fetch")
+	delete(cfg.Keybindings, "pr")
+	rows := cfg.HintBarLines()
+	if len(rows) != 3 {
+		t.Fatalf("HintBarLines devolvio %d lineas, want 3", len(rows))
+	}
+	antes := Defaults().HintBarLines()
+	for i, r := range rows {
+		for _, hint := range []string{"f fetch", "O open PR"} {
+			if strings.Contains(r, hint) {
+				t.Errorf("la linea %d (%q) anuncia %q, que ya no tiene tecla", i, r, hint)
+			}
+		}
+	}
+	// Y lo que sigue bindeado se sigue anunciando, en su fila.
+	if len(rows[2]) >= len(antes[2]) {
+		t.Errorf("la linea de tools no se acorto al quitar pr: %q", rows[2])
+	}
+	if !strings.Contains(rows[2], "e edit") {
+		t.Errorf("la linea de tools (%q) perdio edit, que si esta bindeado", rows[2])
+	}
+	if !strings.Contains(rows[1], "F fetch all") {
+		t.Errorf("la linea de git (%q) perdio fetch all, que no se toco", rows[1])
+	}
+}
+
+// KeyByAction invierte el mapa tecla → accion, que es como la TUI despacha una
+// pulsacion sin recorrer todas las acciones. La inversion tiene que ser
+// bidireccional: la tecla que seConfigured es la accion que se dispara.
+func TestKeyByActionInvierteElMapa(t *testing.T) {
+	cfg := Defaults()
+	cfg.Keybindings["fold"] = "w"
+	inv := cfg.KeyByAction()
+	if len(inv) == 0 {
+		t.Fatal("KeyByAction = vacio")
+	}
+	if got := inv["w"]; got != "fold" {
+		t.Errorf("KeyByAction()[\"w\"] = %q, want fold", got)
+	}
+	if _, ok := inv["enter"]; ok {
+		t.Error("la tecla por defecto de fold (enter) sigue en el invertido tras redefinirla")
+	}
+	// Con el mapa por defecto, cada tecla del default aparece invertida.
+	def := Defaults()
+	for accion, tecla := range def.Keybindings {
+		if got := def.KeyByAction()[tecla]; got != accion {
+			t.Errorf("KeyByAction()[%q] = %q, want %q", tecla, got, accion)
+		}
+	}
+}
+
+// KeyFor y CmdArgs tienen las dos ramas: la entrada del mapa y el default. KeyFor
+// con una accion INVENTADA tiene que devolver "" (no hay default), mientras que
+// CmdArgs con una accion inventada devuelve lo que haya en DefaultCommands, que
+// es "" → un slice vacio. Que los dos difieran es lo que se comprueba.
+func TestKeyForYCmdArgsCaeAlDefault(t *testing.T) {
+	cfg := Defaults()
+	if got := cfg.KeyFor("accion_inventada"); got != "" {
+		t.Errorf("KeyFor(inventada) = %q, want vacio (no hay default para ella)", got)
+	}
+	if got := cfg.CmdArgs("accion_inventada"); len(got) != 0 {
+		t.Errorf("CmdArgs(inventada) = %q, want slice vacio", got)
+	}
+	// Y el default de una accion REAL, quitada del mapa, sale de DefaultCommands.
+	delete(cfg.Commands, "pull")
+	argv := cfg.CmdArgs("pull")
+	if len(argv) == 0 || argv[0] != "pull" {
+		t.Errorf("CmdArgs(pull) sin override = %q, want el default que empieza por pull", argv)
+	}
+}
+
+// LoadFrom nunca falla: ante un fichero ilegible devuelve los defaults y un
+// warning. El caso que se comprueba aqui es un DIRECTORIO en vez de un
+// fichero, que hace que os.ReadFile falle con EISDIR sin ser "no existe". Si esa
+// rama devolviera un warning vacio, un config.toml convertido en directorio
+// arrancaria el dashboard sin avisar de nada.
+func TestLoadFromDirectorioAvisa(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, warn := LoadFrom(dir)
+	if warn == "" {
+		t.Error("LoadFrom de un directorio = sin warning, want aviso (un config ilegible se avisa)")
+	}
+	if !strings.HasPrefix(warn, "config: ") {
+		t.Errorf("warning = %q, want el prefijo 'config: '", warn)
+	}
+	if cfg.Marker != Defaults().Marker {
+		t.Errorf("Marker = %q, want el default (un config ilegible no cambia nada)", cfg.Marker)
+	}
+}
+
+// Load (no LoadFrom) es el camino de arranque, y su unica rama de error es que
+// UserConfigDir no pueda decidir el HOME/XDG. Se aísla con un HOME y un XDG que
+// no existen, que es lo que devuelve error en Linux.
+func TestLoadSinUserConfigDirDaDefaults(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "no-existe"))
+	// En Linux os.UserConfigDir usa XDG_CONFIG_HOME y solo falla si esta vacio.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	cfg, warn := Load()
+	if warn != "" {
+		t.Errorf("Load sin HOME = warning %q, want vacio (sin ruta no hay nada que avisar)", warn)
+	}
+	if !reflect.DeepEqual(cfg.Roots, Defaults().Roots) {
+		t.Errorf("Roots = %v, want los defaults", cfg.Roots)
+	}
+}
+
+// Marker y Editor son punteros en el TOML para poder distinguir "ausente" de
+// "puesto a cadena vacia". El contrato es que la cadena vacia conserva el
+// default: escribir `marker = ""` no deja a gitdash sin marcador (que seria
+// descubrir repos de otra manera), se queda con el de siempre.
+func TestMarkerYEditorVaciosConservanElDefault(t *testing.T) {
+	path := write(t, `marker = ""
+editor = ""
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("warning = %q, want vacio", warn)
+	}
+	if cfg.Marker != Defaults().Marker {
+		t.Errorf("Marker = %q, want el default %q (una cadena vacia no borra el marcador)",
+			cfg.Marker, Defaults().Marker)
+	}
+	if cfg.Editor != Defaults().Editor {
+		t.Errorf("Editor = %q, want el default %q (una cadena vacia no borra el editor)",
+			cfg.Editor, Defaults().Editor)
+	}
+	// Y puestos de verdad, se respetan.
+	path2 := write(t, "marker = \".mi-marcador\"\neditor = \"nano\"\n")
+	cfg2, _ := LoadFrom(path2)
+	if cfg2.Marker != ".mi-marcador" || cfg2.Editor != "nano" {
+		t.Errorf("Marker/Editor = %q/%q, want los del fichero", cfg2.Marker, cfg2.Editor)
+	}
+}

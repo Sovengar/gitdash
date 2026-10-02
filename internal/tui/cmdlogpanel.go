@@ -109,10 +109,10 @@ func (m *Model) logSection(bodyLines int) string {
 		rows = append(rows, m.logLine(e, cols))
 	}
 	// Rellenar hasta el presupuesto: la caja no debe encogerse porque el log
-	// tenga pocas entradas.
-	for len(rows) < visible {
-		rows = append(rows, "")
-	}
+	// tenga pocas entradas. rellenaHasta en vez de `for len(rows) < visible`
+	// porque comparar-y-appendar convierte el mutante `<`->`>=` en un cuelgue
+	// (ver el comentario de rellenaHasta en sections.go).
+	rows = rellenaHasta(rows, visible)
 
 	title := "log · actions"
 	if m.logShowAll {

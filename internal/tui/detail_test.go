@@ -11,6 +11,67 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
+// Los dos errores que puede tener un repo se pintan en la ficha, y cada uno con
+// su prefijo. Son las dos únicas líneas de renderDetail cuyo texto viene del
+// error y no de un dato del repo, así que son las que un test de contenido no
+// cubre por accidente: sin esto, `MarkerErr` o `snap.Err` podrían desaparecer de
+// la ficha y ningún test se enteraría (son NOT COVERED, no supervivientes).
+func TestFichaPintaLosErroresDelRepo(t *testing.T) {
+	casos := []struct {
+		nombre    string
+		markerErr string
+		gitErr    string
+		want      []string
+		ausente   []string
+	}{
+		{
+			nombre:    "marcador roto",
+			markerErr: "línea 3: valor inválido",
+			want:      []string{"marker:", "línea 3: valor inválido"},
+			ausente:   []string{"git:"},
+		},
+		{
+			nombre: "repo sin git",
+			gitErr: "fatal: not a git repository",
+			want:   []string{"git:", "fatal: not a git repository"},
+			// Sin error de marcador no se pinta la línea del marcador, ni
+			// siquiera vacía: es la otra mitad de la guarda de arriba.
+			ausente: []string{"marker:"},
+		},
+		{
+			nombre:    "los dos a la vez",
+			markerErr: "malo",
+			gitErr:    "roto",
+			want:      []string{"marker:", "malo", "git:", "roto"},
+		},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			path := "/tmp/api"
+			snap := snapClean()
+			snap.Err = c.gitErr
+			p := discovery.Project{
+				Path: path, Name: "api", PrimaryGroup: "vsocial",
+				HasRepo: true, MarkerErr: c.markerErr,
+			}
+			m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{path: snap})
+			r := row{project: p, snap: snap, state: snap.State(true)}
+
+			out := stripANSI(m.renderDetail(r, 40))
+			for _, w := range c.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("la ficha no dice %q:\n%s", w, out)
+				}
+			}
+			for _, a := range c.ausente {
+				if strings.Contains(out, a) {
+					t.Errorf("la ficha dice %q y no debería (no hay ese error):\n%s", a, out)
+				}
+			}
+		})
+	}
+}
+
 // listBudget reparte las líneas de una lista. Lo que se mira aquí son los bordes
 // Justos, porque un "> " mal puesto cambia la respuesta justo cuando la lista
 // cabe exacta (y ahí no debe quedar un aviso de "N más" con N=0).
@@ -760,5 +821,67 @@ func TestFichaRecortaElComandoAlAnchoQueLeQueda(t *testing.T) {
 				t.Errorf("width=%d: el comando se recortó sin necesidad: %q", width, linea)
 			}
 		}
+	}
+}
+
+// La cabecera de la ficha dice el estado REAL del repo, y hay tres formas del
+// mismo dato que se confunden entre si:
+//
+//   - rama + " (detached)" cuando el HEAD esta suelto pero hay rama (la rama se
+//     guardo antes del detach, y saber cual era evita "se me ha perdido el
+//     nombre").
+//   - "-" cuando no hay rama en absoluto.
+//   - "— (no upstream)" en la fila del upstream, que es distinto de orDash: un
+//     upstream vacio es informacion (no trackea), no un dato ausente.
+func TestCabeceraDistingueDetachedYSinUpstream(t *testing.T) {
+	proj := discovery.Project{Path: "/api", Name: "api", HasRepo: true}
+
+	t.Run("detached conserva la rama", func(t *testing.T) {
+		s := snapClean()
+		s.Status.Branch = "feat/x"
+		s.Status.Detached = true
+		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		if !strings.Contains(out, "feat/x (detached)") {
+			t.Errorf("la ficha = %q, want la rama con el sufijo (detached)", out)
+		}
+	})
+
+	t.Run("sin rama", func(t *testing.T) {
+		s := snapClean()
+		s.Status.Branch = ""
+		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		if !strings.Contains(out, "branch  -") {
+			t.Errorf("la ficha = %q, want '-' en la rama", out)
+		}
+	})
+
+	t.Run("sin upstream", func(t *testing.T) {
+		s := snapClean()
+		s.Status.HasUpstream = false
+		s.Status.Upstream = ""
+		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		if !strings.Contains(out, "no upstream") {
+			t.Errorf("la ficha = %q, want '— (no upstream)'", out)
+		}
+	})
+}
+
+// Las rutas de worktree se muestran RELATIVAS al repo cuando se pueden, y
+// absolutas cuando no. El caso que no se puede es un worktree en otra raiz (por
+// ejemplo /mnt/wt contra un repo en /home): filepath.Rel devuelve error y hay que
+// enseñar la ruta entera, porque una ruta truncada que no vale no sirve.
+func TestWorktreeDeOtraRaizMuestraRutaAbsoluta(t *testing.T) {
+	proj := discovery.Project{Path: "/home/api", Name: "api", HasRepo: true}
+	s := snapClean()
+	s.Worktrees = []gitstatus.Worktree{
+		{Path: "/mnt/wt-otro", Branch: "feat/x"},
+	}
+	m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
+	out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+	if !strings.Contains(out, "/mnt/wt-otro") {
+		t.Errorf("la ficha = %q, want la ruta absoluta del worktree de otra raiz", out)
 	}
 }

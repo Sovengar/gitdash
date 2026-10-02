@@ -22,10 +22,16 @@ const (
 )
 
 const (
-	toastDuration = 3 * time.Second
 	toastMinWidth = 20
 	toastMaxWidth = 60
 )
+
+// toastDuration es el plazo de un aviso. Va en una FUNCION y no en una const de
+// paquete por una razon medida: Go no instrumenta las expresiones de constante,
+// asi que un `3 * time.Second` a nivel de paquete no genera bloque y su mutante
+// de ARITHMETIC_BASE sale NOT COVERED para siempre, con o sin tests. Dentro de
+// una funcion si se instrumenta, y el mutante pasa a ser ejecutable.
+func toastDuration() time.Duration { return 3 * time.Second }
 
 // toast es un aviso efímero (posiblemente de varias líneas) con su instante de
 // creación.
@@ -52,7 +58,7 @@ func (t *toastManager) show(text string, level toastLevel) {
 		text:     strings.ReplaceAll(text, "\r", ""),
 		level:    level,
 		created:  time.Now(),
-		duration: toastDuration,
+		duration: toastDuration(),
 	})
 }
 

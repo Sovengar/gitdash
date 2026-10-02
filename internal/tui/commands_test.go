@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"gitdash/internal/cmdlog"
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
@@ -18,6 +21,27 @@ import (
 	"gitdash/internal/state"
 	"gitdash/internal/testutil"
 )
+
+// El plazo de un comando `!` son 5 MINUTOS, escritos como producto
+// (`5 * time.Minute`). El mutante de ARITHMETIC_BASE lo convierte en
+// `5 / time.Minute`, o sea 8.3ms: cualquier comando real —un build, un test, un
+// `git fetch`— se cortaría antes de imprimir nada, y el usuario vería un fallo
+// seco sin salida.
+//
+// Se comprueba con un `sleep` de medio segundo, que pasa con 5m y no con 8ms. No
+// se baja la constante ni se espera a que expire de verdad: un test de 5 minutos
+// para tapar un mutante no es un test, es un castigo. La aserción mira el código
+// de salida, que es donde se ve el corte por contexto.
+func TestComandoNoSeCortaEnMedioSegundo(t *testing.T) {
+	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "sleep 0.5; echo tardado")
+	if code != 0 {
+		t.Fatalf("un comando de medio segundo debe salir con 0, dio %d (salida %q): "+
+			"el plazo de %v lo cortó antes de terminar", code, out, commandTimeout())
+	}
+	if !strings.Contains(out, "tardado") {
+		t.Errorf("el comando no llegó a imprimir su salida: %q", out)
+	}
+}
 
 func TestRunShellCmdCapturaSalidaYExit(t *testing.T) {
 	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "echo hola && exit 0")
@@ -611,4 +635,290 @@ func TestEndSobreTablaVaciaNoSeSaleDelCursor(t *testing.T) {
 	if want := len(m2.entries()) - 1; m2.cursor != want {
 		t.Errorf("cursor = %d, want %d (la última fila)", m2.cursor, want)
 	}
+}
+
+// El execDoneMsg de un handoff es lo que el comando de la TUI ve al VOLVER del
+// proceso, y de el salen dos cosas: la entrada del log de comandos (con la accion
+// y el argv) y el recollect del estado. Por eso la accion tiene que ser la de la
+// tecla que se pulso, no la de otra: con "editor" donde deberia decir "lazygit",
+// el panel muestra un comando que el usuario nunca ejecuto.
+//
+// Se prueba el metodo y no el closure de tea.ExecProcess porque el cuerpo de ese
+// closure solo corre cuando el proceso termina, con el programa suspendido: no
+// hay forma de escribir un test que lo alcance sin ceder la terminal de verdad.
+func TestHandoffDoneIdentificaLaAccion(t *testing.T) {
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	for _, accion := range []string{"editor", "lazygit", "pull_ai", "visual", "shell"} {
+		msg, ok := m.handoffDone(accion, "/tmp/repo", []string{"argv", "de", accion}, nil).(execDoneMsg)
+		if !ok {
+			t.Fatalf("handoffDone(%q) no devolvio un execDoneMsg", accion)
+		}
+		if msg.action != accion {
+			t.Errorf("handoffDone(%q).action = %q, want %q (la accion va al log tal cual)",
+				accion, msg.action, accion)
+		}
+		if msg.path != "/tmp/repo" {
+			t.Errorf("handoffDone(%q).path = %q, want /tmp/repo", accion, msg.path)
+		}
+		if len(msg.argv) != 3 || msg.argv[2] != accion {
+			t.Errorf("handoffDone(%q).argv = %q, want el argv intacto (es lo que se registra)",
+				accion, msg.argv)
+		}
+		if msg.err != nil {
+			t.Errorf("handoffDone(%q).err = %v, want nil", accion, msg.err)
+		}
+	}
+
+	// Y el error del proceso se propaga tal cual: un handoff que salio con
+	// codigo 1 tiene que recollectar igual, no quedarse creyendo que fue limpio.
+	boom := errors.New("salida con codigo 1")
+	msg, ok := m.handoffDone("editor", "/tmp/repo", []string{"vim"}, boom).(execDoneMsg)
+	if !ok {
+		t.Fatal("handoffDone no devolvio un execDoneMsg")
+	}
+	if !errors.Is(msg.err, boom) {
+		t.Errorf("err = %v, want el error del proceso propagado", msg.err)
+	}
+}
+
+// Los dos handoffs con guarda LookPath comprueban el binario ANTES de mirar si
+// el repo ya esta ocupado, y en ese orden por un motivo concreto: si la Maquina
+// no tiene lazygit, el aviso tiene que ser "no instalado" y no "ya hay un
+// lazygit corriendo en este repo", que seria mentira.
+//
+// Se prueban las dos guardas por separado porque son guards distintas: la
+// primera es del entorno, la segunda es del modelo.
+func TestHandoffsConGuardaDeLookPath(t *testing.T) {
+	t.Run("lazygit no instalado", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir()) // sin lazygit
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		msg, ok := m.openLazygitCmd("/tmp/repo")().(notifyMsg)
+		if !ok {
+			t.Fatal("openLazygitCmd sin lazygit no devolvio un notifyMsg")
+		}
+		if msg.level != toastWarning || !strings.Contains(msg.text, "not installed") {
+			t.Errorf("aviso = %+v, want un warning de que no esta instalado", msg)
+		}
+		// Y no se marco el repo como ocupado: no se lanzo nada.
+		if len(m.running) != 0 {
+			t.Errorf("running = %v, want vacio (no se lanzo el handoff)", m.running)
+		}
+	})
+
+	t.Run("shell no encontrada", func(t *testing.T) {
+		t.Setenv("SHELL", "una-shell-que-no-existe-98765")
+		t.Setenv("PATH", t.TempDir())
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		msg, ok := m.openShellCmd("/tmp/repo")().(notifyMsg)
+		if !ok {
+			t.Fatal("openShellCmd sin shell no devolvio un notifyMsg")
+		}
+		if msg.level != toastWarning || !strings.Contains(msg.text, "shell") {
+			t.Errorf("aviso = %+v, want un warning de shell not found", msg)
+		}
+		if len(m.running) != 0 {
+			t.Errorf("running = %v, want vacio", m.running)
+		}
+	})
+
+	// La guarda de ocupado: con el repo ya en `running`, el segundo handoff se
+	// rechaza y lo dice. Aqui el binario SI esta (el shell del sistema), asi que
+	// se llega a la segunda guarda, que es la que se quiere probar.
+	t.Run("repo ya ocupado", func(t *testing.T) {
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		m.running = map[string]string{"/tmp/repo": "pull"}
+		msg, ok := m.openShellCmd("/tmp/repo")().(notifyMsg)
+		if !ok {
+			t.Fatal("openShellCmd con el repo ocupado no devolvio un notifyMsg")
+		}
+		if !strings.Contains(msg.text, "already running") {
+			t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+		}
+		if !strings.Contains(msg.text, "pull") {
+			t.Errorf("aviso = %q, want que nombre la accion que esta corriendo", msg.text)
+		}
+	})
+}
+
+// recorder de handoffs: NO cede la terminal.
+//
+// tea.ExecProcess suspende el programa entero hasta que el proceso termina, y un
+// programa suspendido no lo reanuda nadie. Por eso el `return tea.ExecProcess(...)`
+// de cada handoff era un statement que no ejecutaba nadie: era el techo de la
+// cobertura de la TUI, no un hueco de tests. Con la inyeccion, el handoff se
+// ejecuta entero en el test —guardas, armado del comando y mensaje de salida— y
+// lo que se comprueba es lo de verdad: que el comando apunta al repo correcto y
+// que el execDoneMsg lleva la accion y el argv que el panel del log va a pintar.
+func handoffRecorder(t *testing.T) (*Model, *handoffSpy) {
+	t.Helper()
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	spy := &handoffSpy{t: t, done: func(error) tea.Msg { return nil }}
+	m.handoff = spy.exec
+	return m, spy
+}
+
+type handoffSpy struct {
+	t    *testing.T
+	done tea.ExecCallback
+	argv []string
+	dir  string
+	vals int
+}
+
+func (h *handoffSpy) exec(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
+	h.argv, h.dir = c.Args, c.Dir
+	h.vals++
+	// Se guarda el callback sin llamarlo: quien lo llama es el runtime, y el
+	// test lo invoca explicitamente para ver el mensaje de salida.
+	h.done = fn
+	return func() tea.Msg { return nil }
+}
+
+// salir entrega el mensaje de salida del proceso, como haria el runtime al
+// terminar el handoff.
+func (h *handoffSpy) salir(err error) tea.Msg {
+	h.t.Helper()
+	return h.done(err)
+}
+
+func TestHandoffEjecutaElProcesoEnElRepo(t *testing.T) {
+	for _, c := range []struct {
+		accion string
+		abrir  func(m *Model, path string) tea.Cmd
+		argv0  string
+	}{
+		{"editor", (*Model).openEditorCmd, "vi"},
+		{"lazygit", (*Model).openLazygitCmd, "lazygit"},
+		{"shell", (*Model).openShellCmd, ""},
+	} {
+		t.Run(c.accion, func(t *testing.T) {
+			m, spy := handoffRecorder(t)
+			m.cfg.Editor = "vi"
+			// El shell del handoff tiene que existir para pasar la guarda.
+			if c.accion == "shell" {
+				t.Setenv("SHELL", "/bin/sh")
+			} else if c.accion == "lazygit" {
+				// El LookPath de lazygit mira el PATH de verdad: se le da un
+				// ejecutable falso para pasar la guarda sin tener lazygit
+				// instalado, y sin lanzar nada (el handoff esta inyectado).
+				bin := filepath.Join(t.TempDir(), "lazygit")
+				if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
+			}
+
+			if c.abrir(m, "/tmp/repo") == nil {
+				t.Fatalf("%s no devolvio comando", c.accion)
+			}
+			if spy.vals != 1 {
+				t.Fatalf("handoff llamado %d veces, want 1", spy.vals)
+			}
+			if spy.dir != "/tmp/repo" {
+				t.Errorf("Dir = %q, want /tmp/repo (el handoff corre DENTRO del repo)", spy.dir)
+			}
+			if len(spy.argv) == 0 {
+				t.Fatalf("argv vacio")
+			}
+			// Al salir, el mensaje dice que repo y que accion, que es lo que
+			// despues aparece en el panel del log.
+			msg, ok := spy.salir(nil).(execDoneMsg)
+			if !ok {
+				t.Fatalf("el handoff de %s no devolvio execDoneMsg al salir", c.accion)
+			}
+			if msg.path != "/tmp/repo" || msg.action != c.accion {
+				t.Errorf("execDoneMsg = %+v, want path=/tmp/repo action=%s", msg, c.accion)
+			}
+			if len(msg.argv) == 0 || msg.argv[0] != spy.argv[0] {
+				t.Errorf("execDoneMsg.argv = %q, want el mismo que se ejecuto (%q)", msg.argv, spy.argv)
+			}
+		})
+	}
+}
+
+// Los dos handoffs que tienen guardas de dominio (el comando AI y el preview de
+// git-sim) llegan al handoff solo si todo lo de antes esta bien. Los dos casos
+// que se comprueban aqui son los que mas easily se rompen sin que se note:
+//
+//   - el repo ya esta ocupado (running): el segundo handoff se rechaza. Sin este
+//     test, dos teclas seguidas podrian ceder la terminal dos veces al mismo repo.
+//   - el handoff se arma en el repo, no en el directorio de gitdash.
+func TestHandoffsConGuardaDeOcupado(t *testing.T) {
+	t.Run("pull_ai con el repo ocupado", func(t *testing.T) {
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		m.running = map[string]string{"/tmp/repo": "pull"}
+		msg, ok := m.openPullAICmd("/tmp/repo", []string{"ai-pull", "--x"})().(notifyMsg)
+		if !ok {
+			t.Fatal("openPullAICmd con el repo ocupado no devolvio un aviso")
+		}
+		if !strings.Contains(msg.text, "already running") {
+			t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+		}
+	})
+
+	t.Run("visual con el repo ocupado", func(t *testing.T) {
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		m.running = map[string]string{"/tmp/repo": "pull_ai"}
+		msg, ok := m.startVisualCmd("/tmp/repo", "origin/main", "merge")().(notifyMsg)
+		if !ok {
+			t.Fatal("startVisualCmd con el repo ocupado no devolvio un aviso")
+		}
+		if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "pull_ai") {
+			t.Errorf("aviso = %q, want que nombre la accion que esta corriendo", msg.text)
+		}
+	})
+
+	// Y el camino de verdad: sin nada ocupado, el handoff se arma con el argv de
+	// git-sim y en el repo. El LookPath necesita un git-sim en el PATH.
+	t.Run("visual arma el argv y el dir", func(t *testing.T) {
+		bin := filepath.Join(t.TempDir(), "git-sim")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
+		t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+		mm := newTestModel(t, nil, nil)
+		m := &mm
+		spy := &handoffSpy{t: t, done: func(error) tea.Msg { return nil }}
+		m.handoff = spy.exec
+
+		if cmd := m.startVisualCmd("/tmp/repo", "origin/main", "rebase"); cmd == nil {
+			t.Fatal("startVisualCmd devolvio nil")
+		}
+		if spy.dir != "/tmp/repo" {
+			t.Errorf("Dir = %q, want /tmp/repo", spy.dir)
+		}
+		// merge/rebase necesitan el ref del upstream; pull no.
+		full := strings.Join(spy.argv, " ")
+		if !strings.Contains(full, "rebase") {
+			t.Errorf("argv = %q, want el subcomando rebase", full)
+		}
+		if !strings.Contains(full, "origin/main") {
+			t.Errorf("argv = %q, want el ref del upstream (rebase lo exige)", full)
+		}
+		if !strings.Contains(full, "--media-dir") {
+			t.Errorf("argv = %q, want --media-dir SIEMPRE (sin el, git-sim ensucia el repo)", full)
+		}
+		if m.running["/tmp/repo"] != "visual" {
+			t.Errorf("running = %v, want el repo marcado como visual en curso", m.running)
+		}
+
+		// El `pull` de git-sim NO lleva ref: no lo exige y pasarselo haria que
+		// git-sim comprobara otra cosa.
+		spy.vals = 0
+		if cmd := m.startVisualCmd("/tmp/repo2", "origin/main", "pull"); cmd == nil {
+			t.Fatal("startVisualCmd(pull) devolvio nil")
+		}
+		if strings.Contains(strings.Join(spy.argv, " "), "origin/main") {
+			t.Errorf("argv = %q, want sin ref: el pull de git-sim no lleva argumento", spy.argv)
+		}
+	})
 }
