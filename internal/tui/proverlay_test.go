@@ -1210,3 +1210,65 @@ func TestPROverlayElPresupuestoEsElQueDiceElComentario(t *testing.T) {
 		t.Errorf("prValueWidth = %d: un input de 0 o menos de ancho no es un input", got)
 	}
 }
+
+// El overlay y el panel del log son dos vistas del mismo cuerpo, no dos
+// overlays: con el log abierto, la tecla de PR no puede abrir el formulario. La
+// guarda de la tecla esta en el enrutado, pero la segunda red esta aqui, en el
+// switch de acciones, y sin ella un `O` con el log abierto dejaria los dos
+// overlays encima uno de otro.
+func TestPROverlayNoAbreConElLogAbierto(t *testing.T) {
+	// Sin overlay abierto todavia: lo que se prueba es que la llamada a openPR
+	// con el log abierto NO lo abre.
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	if m.pr != nil {
+		t.Fatal("el modelo de test ya tiene el overlay abierto")
+	}
+	m.logOpen = true
+	// Con el log abierto la tecla esta frenada antes, en el enrutado, asi que
+	// se llama a la accion directamente: esta es la segunda red.
+	// Con el log abierto NO se cierra el log ni se abre nada: la vista se queda
+	// como estaba.
+	mm, cmd := m.openPR()
+	if mm.(Model).logOpen != true {
+		t.Error("openPR con el log abierto cerro el log")
+	}
+	if mm.(Model).pr != nil {
+		t.Error("openPR abrio el overlay con el panel del log abierto")
+	}
+	if cmd != nil {
+		t.Errorf("la accion devolvió %#v con el log abierto, want nil", cmd)
+	}
+}
+
+// draftLabel nombra el estado del toggle con una palabra. El caso de draft a true
+// es el que estaba sin cubrir, y es el que se lee en la pantalla: si devolviera
+// la palabra del otro estado, el usuario creeria que va a abrir un PR normal
+// cuando va en borrador (o al reves).
+func TestDraftLabelDistingueOnYOff(t *testing.T) {
+	on := &prDraft{draft: true}
+	if got := on.draftLabel(); got != "on" {
+		t.Errorf("draftLabel con draft = %q, want on", got)
+	}
+	off := &prDraft{}
+	if got := off.draftLabel(); got != "off" {
+		t.Errorf("draftLabel sin draft = %q, want off", got)
+	}
+}
+
+// prParams y prPrompt se consultan cuando el overlay puede no estar abierto
+// (el aviso se pinta en una vista compartida, y los params se Armed antes de que
+// el overlay exista). Con m.pr == nil tienen que devolver el valor cero, no
+// panicar ni devolver un aviso de un repo que no es.
+func TestOverlaySinAbrirDevuelveValoresVacios(t *testing.T) {
+	m := newPROverlayModel(t, "")
+	if m.pr != nil {
+		t.Fatalf("el modelo de test tiene el overlay abierto: %+v", m.pr)
+	}
+	if got := m.prPrompt(); got != "" {
+		t.Errorf("prPrompt sin overlay = %q, want vacio", got)
+	}
+	params := m.prParams()
+	if params.Title != "" || params.Body != "" || params.Base != "" {
+		t.Errorf("prParams sin overlay = %+v, want el cero de forge.Params", params)
+	}
+}

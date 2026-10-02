@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"gitdash/internal/cache"
@@ -797,4 +798,177 @@ func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
 			t.Errorf("esc en la búsqueda no limpió el filtro: %q", m.search)
 		}
 	})
+}
+
+// Update devuelve `m, nil` para un mensaje que no sabe tratar, y eso no es un
+// error: es lo que evita que un msg desconocido (el de otro modulo, o uno futuro)
+// pare la TUI. El mensaje tiene que pasar por el switch entero y salir por el
+// return de abajo.
+func TestUpdateIgnoraMensajesDesconocidos(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	out, cmd := m.Update(struct{ tea.Msg }{})
+	if out == nil {
+		t.Fatal("Update devolvio nil en vez del modelo")
+	}
+	if cmd != nil {
+		t.Error("Update devolvio un comando para un mensaje desconocido, want nil")
+	}
+}
+
+// El TickMsg del spinner llega solo (lo emite el propio spinner mientras corre),
+// asi que ningun test lo produce: hay que mandarlo a mano. Lo que se comprueba es
+// que el spinner AVANZA y que su Update devuelve el siguiente tick, que es lo
+// que lo mantiene girando; si el case se perdiera, el spinner se congelaria en
+// el primer frame y nadie se enteraria salvo mirando.
+func TestSpinnerAvanzaConSuTick(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	antes := m.spinner.View()
+	out, cmd := m.Update(spinner.TickMsg{})
+	if cmd == nil {
+		t.Error("el TickMsg del spinner no devolvio comando, want el siguiente tick")
+	}
+	despues := out.(Model).spinner.View()
+	if despues == antes && len(antes) > 0 {
+		t.Errorf("el spinner no se movio: %q -> %q", antes, despues)
+	}
+}
+
+// `enter` sobre el input del comando `!` con el cursor en una fila SIN repo no
+// puede lanzar nada, y lo dice. El caso importa porque el camino de abajo abre una
+// shell: sin el aviso, `!` + enter sobre una carpeta sin repo abriria una terminal
+// en un sitio donde no hay nada que hacer.
+func TestComandoSinRepoAvisa(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m = cursorOn(t, m, "/tmp/no-repo-docs")
+	m.cmdOpen = true
+	m.cmdInput.SetValue("ls")
+
+	out, cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("enter sin repo no devolvio comando, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("el comando devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "no git repo") {
+		t.Errorf("aviso = %q, want que diga que no hay repo", msg.text)
+	}
+	// Y el input se cierra igualmente: la accion termino.
+	if out.cmdOpen {
+		t.Error("el input del comando sigue abierto tras el aviso")
+	}
+}
+
+// `enter` sin fila bajo el cursor: no hay repo, asi que tampoco hay aviso que
+// dar. Devuelve nil y cierra el input, que es lo unico que se puede hacer.
+func TestComandoSinFilaNoAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.cmdOpen = true
+	m.cmdInput.SetValue("ls")
+	out, cmd := press(m, "enter")
+	if cmd != nil {
+		t.Errorf("enter sin fila devolvió %#v, want nil", cmd())
+	}
+	if out.cmdOpen {
+		t.Error("el input sigue abierto sin fila bajo el cursor")
+	}
+}
+
+// `fetch_all` sin ningun repo con upstream tiene que decirlo, no lanzar un batch
+// vacio: un fetch de nada es un comando que no falla y no hace nada, y el usuario
+// no ve por que no paso nada.
+func TestFetchAllSinUpstreamAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	_, cmd := press(m, "F")
+	if cmd == nil {
+		t.Fatal("fetch_all sin repos devolvio nil, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "no repositories") {
+		t.Errorf("aviso = %q, want que diga que no hay nada que traer", msg.text)
+	}
+}
+
+// `r` (rescan) con un scan ya en marcha no arranca un segundo: el aviso es
+// "scan already running". El caso es el que evita el doble workerPool, que
+// fightaria por el canal de eventos.
+func TestRescanConScanEnMarchaAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.scanning = true
+	_, cmd := press(m, "r")
+	if cmd == nil {
+		t.Fatal("rescan con scan en marcha devolvio nil, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "already running") {
+		t.Errorf("aviso = %q, want 'scan already running'", msg.text)
+	}
+}
+
+// busyActionCmd es la guarda que comparten las acciones que lanzan un comando en
+// un repo: si ya hay algo en marcha en ESE repo, avisa en vez de lanzar. Sus tres
+// salidas son distintas y las tres se usan: el aviso, el nil (nada en marcha, la
+// accion puede seguir), y... solo dos, en realidad. El test las fija las dos y
+// comprueba que el aviso nombra la accion que esta corriendo.
+func TestBusyActionCmd(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.running = map[string]string{"/tmp/api": "pull"}
+
+	if cmd := m.busyActionCmd("/tmp/api"); cmd == nil {
+		t.Fatal("busyActionCmd sobre un repo ocupado devolvio nil, want un aviso")
+	} else if msg, ok := cmd().(notifyMsg); !ok {
+		t.Errorf("devolvió %T, want un aviso", cmd())
+	} else if !strings.Contains(msg.text, "pull") {
+		t.Errorf("aviso = %q, want que nombre la accion en marcha", msg.text)
+	}
+
+	// Otro repo no se ve afectado: el bloqueo es por path, no global.
+	if cmd := m.busyActionCmd("/tmp/otro"); cmd != nil {
+		t.Errorf("busyActionCmd sobre un repo libre devolvió %#v, want nil", cmd())
+	}
+}
+
+// Los dos avisos armados se callan cuando no hay nada armado. No es un detalle:
+// promptLine() es el UNICO punto por el que keybinds pinta un aviso, y sin este
+// caso un prompt de un selector que ya se canceló se quedaría pintado encima de
+// las hints, ocupando la línea que las hints necesitan.
+func TestPromptsArmadosSeCallanSinArmar(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if got := m.visualPrompt(); got != "" {
+		t.Errorf("visualPrompt sin armar = %q, want vacio", got)
+	}
+	if got := m.removePrompt(); got != "" {
+		t.Errorf("removePrompt sin armar = %q, want vacio", got)
+	}
+	// Y promptLine, que es lo UNICO que keybinds consulta para pintar un aviso:
+	// sin ningun estado armado devuelve la cadena vacia, no un aviso residual de
+	// un selector que ya se cancelo.
+	if got := m.promptLine(); got != "" {
+		t.Errorf("promptLine sin armar = %q, want vacio", got)
+	}
+}
+
+// toggleFold sin nada bajo el cursor es un no-op: no hay header que plegar ni
+// worktree que ocultar, y sin guarda el cursor se moveria a un indice que no
+// existe.
+func TestToggleFoldSinFilaNoSeMueve(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if len(m.entries()) != 0 {
+		t.Fatalf("el modelo sin proyectos tiene %d entradas", len(m.entries()))
+	}
+	out, cmd := m.toggleFold()
+	if cmd != nil {
+		t.Errorf("toggleFold sin fila devolvió %#v, want nil", cmd())
+	}
+	if got := out.(Model).cursor; got != 0 {
+		t.Errorf("cursor = %d tras plegar sin fila, want 0", got)
+	}
 }
