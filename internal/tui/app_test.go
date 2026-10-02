@@ -972,3 +972,67 @@ func TestToggleFoldSinFilaNoSeMueve(t *testing.T) {
 		t.Errorf("cursor = %d tras plegar sin fila, want 0", got)
 	}
 }
+
+// NotifyConfig es lo que main llama con el aviso de config, y lo que hace que el
+// usuario lo vea: stderr se queda detrás del alt screen, así que si el aviso no
+// llegara al modelo se perdería sin más. Se comprueba que encola un toast con el
+// texto, no que "no reviente".
+func TestNotifyConfigEncolaElAviso(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.NotifyConfig("config: no se pudo leer el fichero")
+	if len(m.toasts.toasts) != 1 {
+		t.Fatalf("toasts = %d, want 1 (el aviso tiene que verse, no ir a stderr)", len(m.toasts.toasts))
+	}
+	got := m.toasts.toasts[0]
+	if got.level != toastWarning {
+		t.Errorf("nivel = %v, want warning (un aviso de config no es un exito)", got.level)
+	}
+	if !strings.Contains(got.text, "no se pudo leer") {
+		t.Errorf("texto = %q, want el aviso entero", got.text)
+	}
+	// Y sale en lo que se pinta de verdad, que es donde el usuario lo lee: los
+	// bloques del overlay. Con un bloque vacio el aviso no existiria en pantalla.
+	bloques := m.toasts.blocks()
+	if len(bloques) != 1 {
+		t.Fatalf("bloques = %d, want 1", len(bloques))
+	}
+	pintado := stripANSI(strings.Join(bloques[0], " "))
+	if !strings.Contains(pintado, "no se pudo leer") {
+		t.Errorf("el bloque pintado = %q, want el texto del aviso", pintado)
+	}
+}
+
+// saveCollapsed con store nil no hace nada. Es el caso de un modelo construido
+// sin store (por ejemplo un test, o el modo --print si compartiera modelo), y la
+// guarda evita un nil-pointer en CADA tecla de plegado.
+func TestSaveCollapsedSinStoreNoRevienta(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.store = nil
+	m.collapsed = map[string]bool{"backend": true}
+	m.saveCollapsed() // no debe hacer nada, y sobre todo no reventar
+	if !m.collapsed["backend"] {
+		t.Error("el estado en memoria cambio: saveCollapsed no debe tocarlo")
+	}
+}
+
+// visualOptionForKey con una tecla que no es ninguna variante devuelve false, y
+// el selector visual usa ese false para no hacer nada. Sin ese caso, una tecla
+// desconocida se traduciria a una variante de git-sim inventada.
+func TestVisualOptionParaTeclaDesconocida(t *testing.T) {
+	for _, tecla := range []string{"", "x", "enter", "ESC", "mm"} {
+		if o, ok := visualOptionForKey(tecla); ok {
+			t.Errorf("visualOptionForKey(%q) = %+v, want no (no es ninguna variante)", tecla, o)
+		}
+	}
+	// Y las que sí son, con su subcomando, para que el fallback no se confunda
+	// con un caso vacío.
+	for _, o := range visualOptions {
+		got, ok := visualOptionForKey(o.key)
+		if !ok {
+			t.Errorf("visualOptionForKey(%q) = no, want %+v", o.key, o)
+		}
+		if got.sub != o.sub {
+			t.Errorf("visualOptionForKey(%q).sub = %q, want %q", o.key, got.sub, o.sub)
+		}
+	}
+}

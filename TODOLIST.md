@@ -15,7 +15,7 @@ go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
 ```
 
 Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **97.71% (2726/2790), 58 sin cubrir**.
+Progreso: **97.96% (2733/2790), 51 sin cubrir**.
 
 Meta: 2790/2790.
 
@@ -70,10 +70,17 @@ Meta: 2790/2790.
 - [ ] `538.22` — `sendEvent` de un collect que sí terminó
 - [ ] `711` — `vars["branch"]` de un worktree
 
-### `internal/tui/app.go` — 22
+### `internal/tui/app.go` — 22 → quedan 15
 
-- [ ] `200` — `visualOptionForKey` con tecla desconocida
-- [ ] `412` — `NotifyConfig` (la toca `cmd/gitdash`, no llega desde el TUI test)
+- [x] `200` — `visualOptionForKey` con tecla desconocida
+- [x] `412` — `NotifyConfig` (el aviso tiene que verse, no irse a stderr)
+- [x] `616` — `removeWorktreeCmd` con el padre ocupado
+- [x] `647` — `recollectCmd` con el repo ocupado
+- [x] `701` — `openLazygitCmd` con el repo ocupado (orden de las dos guardas)
+- [x] `930` — `startVisualCmd` con el repo ocupado
+- [x] `998` — `execExit` con un `*exec.ExitError` real (exit 3)
+- [x] `1013` — `logIntent` con recorder apagado
+- [x] `1066` — `saveCollapsed` con store nil
 - [ ] `417` — `Init()` (arranca scan + ticker de 1s)
 - [ ] `430` — `startScanCmd` con evento que no es `scanMsg`
 - [ ] `446` — `tickCmd` (devuelve `tea.Tick`; no ejecutable sin reloj)
@@ -81,19 +88,11 @@ Meta: 2790/2790.
 - [ ] `477` — `sendEvent(collectDoneMsg)`
 - [ ] `487` — `!p.HasRepo` en el fetch automático
 - [ ] `494` — repo ya en `fetchStates["fetching"]`
-- [ ] `531` — `case <-ctx.Done()` del pool
-- [ ] `616` — `busyActionCmd` desde la acción de worktree
-- [ ] `647` — `if _, busy := m.running[path]; busy` de recollect
-- [ ] `701` — `openEditorCmd` con el repo ocupado
 - [ ] `766` — worktree no encontrado
 - [ ] `789` — marcador ilegible en `p a`
-- [ ] `821` — `openPullAICmd` **ya tiene el seam pero el camino feliz no se prueba**
+- [ ] `821` — `openPullAICmd`, camino feliz con el seam
 - [ ] `835` — `pullAIArgv` con error
-- [ ] `879` — `startVisualCmd` **idem: falta el camino con git-sim en PATH**
-- [ ] `930` — `startVisualCmd` con el repo ocupado (parcial)
-- [ ] `998` — `errors.As` a `*tool.Error`
-- [ ] `1013` — `cmdlog.Active() == nil`
-- [ ] `1066` — `m.store == nil`
+- [ ] `879` — `startVisualCmd`, camino feliz con git-sim en PATH
 
 ### `internal/tui/table.go` — 0 · `detail.go` — 0 · `sections.go` — 2
 

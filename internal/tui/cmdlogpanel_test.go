@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1099,5 +1100,49 @@ func TestSanitizeLogTextDescartaBytesQueNoSonUTF8(t *testing.T) {
 		if got := sanitizeLogText(c.in); got != c.want {
 			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.nombre, c.in, got, c.want)
 		}
+	}
+}
+
+// execExit con un error REAL de proceso es el caso que se ve en el panel: un
+// git que sale con codigo 1 tiene que aparecer como "exit 1", no como el -1 que
+// significa "no se ni siemple arranco". La diferencia es la que permite
+// distinguir un conflicto de un repo de unarotta.
+//
+// El error sale de ejecutar un comando de verdad, porque un *exec.ExitError no
+// se puede fabricar a mano (su ExitCode lee del proceso).
+func TestExecExitConErrorReal(t *testing.T) {
+	cmd := osexec.Command("sh", "-c", "exit 3")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("el comando de prueba no fallo")
+	}
+	if got := execExit(err); got != 3 {
+		t.Errorf("execExit(exit 3) = %d, want 3", got)
+	}
+}
+
+// logIntent sin recorder global no hace nada, y es lo correcto: el command log
+// es opt-in (--print no lo instala, y los tests pueden no hacerlo). Sin ese
+// return, una TUI sin log reventaria al pulsar cualquier tecla, que es
+// exactamente lo que pasaria en --print si compartiera modelo.
+func TestLogIntentSinRecorderNoRevienta(t *testing.T) {
+	// El recorder se desactiva DESPUES de construir el modelo: New lo instala
+	// siempre, y lo que se prueba es que a partir de ahi no registrar nada no
+	// revienta. Si se apagara antes, newTestModel volvería a instalarlo.
+	m := newTestModel(t, nil, nil)
+	prev := cmdlog.Active()
+	cmdlog.SetRecorder(nil)
+	t.Cleanup(func() { cmdlog.SetRecorder(prev) })
+
+	if cmdlog.Active() != nil {
+		t.Fatal("no se pudo desactivar el recorder")
+	}
+	// Con el recorder apagado, ni una intencion ni un exec deben romper nada.
+	m.logIntent("p", "pull")
+	// Y la via global de exec, que es la que usan los handoffs y el `!`.
+	cmdlog.RecordExec(cmdlog.Entry{Class: cmdlog.ClassAction, Key: "p", Action: "pull"})
+	// Con el log apagado no hay ni una entrada que consultar.
+	if got := cmdlog.Entries(); len(got) != 0 {
+		t.Errorf("cmdlog.Entries() = %d con el log apagado, want 0", len(got))
 	}
 }

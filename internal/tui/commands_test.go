@@ -922,3 +922,77 @@ func TestHandoffsConGuardaDeOcupado(t *testing.T) {
 		}
 	})
 }
+
+// recollectCmd con el repo ocupado devuelve nil en vez de relanzar: el recollect
+// es una lectura, y relanzarla sobre un repo que ya tiene una acción de escritura
+// en marcha daría un snapshot a medio camino. Nil y no un aviso porque recollect
+// no es una tecla que el usuario haya pulsado con una intención (lo dispara el
+// propio programa al volver de un handoff).
+func TestRecollectConRepoOcupadoNoRelanza(t *testing.T) {
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	m.running = map[string]string{"/tmp/api": "pull"}
+	antes := len(m.running)
+
+	if cmd := m.recollectCmd("/tmp/api"); cmd != nil {
+		t.Errorf("recollectCmd sobre un repo ocupado devolvió %#v, want nil", cmd())
+	}
+	// Y no lo ha marcado como ocupado otra vez: la guarda tiene que devolver
+	// ANTES de escribir en running, no despues.
+	if got := m.running["/tmp/api"]; got != "pull" {
+		t.Errorf("running = %q, want que siga siendo la accion original", got)
+	}
+	if len(m.running) != antes {
+		t.Errorf("running tiene %d entradas, want %d (la guarda no escribe)", len(m.running), antes)
+	}
+}
+
+// removeWorktreeCmd con el padre ocupado devuelve el aviso de busyActionCmd, y
+// no borra nada. El caso importa por lo que se ve: `d` sobre un worktree cuyo
+// repo principal esta haciendo un pull tiene que decir "ya hay un pull en
+// marcha", no fallar en silencio ni borrar igual.
+func TestRemoveWorktreeConPadreOcupadoAvisa(t *testing.T) {
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	m.running = map[string]string{"/tmp/api": "pull"}
+
+	cmd := m.removeWorktreeCmd("/tmp/api", "/tmp/api-wt", "api-wt", false, 1)
+	if cmd == nil {
+		t.Fatal("removeWorktreeCmd con el padre ocupado devolvio nil, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "pull") {
+		t.Errorf("aviso = %q, want que nombre la accion en marcha", msg.text)
+	}
+	// Y no se ha escrito el flag de esta accion: sigue siendo el pull.
+	if got := m.running["/tmp/api"]; got != "pull" {
+		t.Errorf("running = %q, want pull (no worktree_remove)", got)
+	}
+}
+
+// openLazygitCmd con el repo ocupado: el LookPath pasa (hay un lazygit falso en
+// el PATH) y se llega a la segunda guarda. Es la unica forma de comprobar que el
+// orden de las dos guardas es el correcto: si la de ocupado fuera primero, con
+// lazygit ausente diria "ya hay algo en marcha" en una maquina sin lazygit.
+func TestLazygitOcupadoDiceLaAccionQueCorre(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "lazygit")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
+
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	m.running = map[string]string{"/tmp/api": "push"}
+
+	msg, ok := m.openLazygitCmd("/tmp/api")().(notifyMsg)
+	if !ok {
+		t.Fatal("openLazygitCmd con el repo ocupado no devolvio un aviso")
+	}
+	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "push") {
+		t.Errorf("aviso = %q, want que nombre el push en marcha", msg.text)
+	}
+}
