@@ -322,11 +322,22 @@ func TestMainEnSubproceso(t *testing.T) {
 		t.Skip("construye un binario; tarda mas que el resto de la suite")
 	}
 	bin := t.TempDir() + "/gitdash"
-	build := exec.Command("go", "build", "-o", bin, ".")
+	// -cover es lo que hace que el binarlo.write de cobertura del subproceso
+	// cuente: sin el, el subproceso ejecuta main() pero nadie se entera, y el
+	// bloque queda a zero igual que si no se ejecutara. GOCOVERDIR es donde el
+	// binario instrumentado deposita el perfil al salir.
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("go no esta en el PATH: %v", err)
+	}
+	build := exec.Command(goBin, "build", "-cover", "-o", bin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		t.Fatalf("go build: %v", err)
+		t.Fatalf("go build -cover: %v", err)
 	}
+	// El directorio donde el subproceso deposita su cobertura. Lo pone en el
+	// entorno de cada invocacion de mas abajo.
+	coverDir := t.TempDir()
 
 	t.Run("print imprime la tabla y sale 0", func(t *testing.T) {
 		dir := t.TempDir()
@@ -338,7 +349,7 @@ func TestMainEnSubproceso(t *testing.T) {
 			t.Fatal(err)
 		}
 		cmd := exec.Command(bin, "--print")
-		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir)
+		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir, "GOCOVERDIR="+coverDir)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("--print = %v\n%s", err, out)
@@ -354,7 +365,7 @@ func TestMainEnSubproceso(t *testing.T) {
 		// que se comprueba. Si main ignorara el flag, esto colgaria.
 		dir := t.TempDir()
 		cmd := exec.CommandContext(context.Background(), bin)
-		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir)
+		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir, "GOCOVERDIR="+coverDir)
 		cmd.Stdin = strings.NewReader("")
 		done := make(chan error, 1)
 		if err := cmd.Start(); err != nil {
@@ -369,6 +380,39 @@ func TestMainEnSubproceso(t *testing.T) {
 			t.Fatal("sin --print el proceso no termina: main ignoro el flag")
 		}
 	})
+
+	// El perfil del subproceso tiene que existir y traer main(). Sin esto, el
+	// test pasaria pero el bloque se quedaria sin marcar y nadie se enteraria:
+	// un test de integracion que no reporta nada es un test que no mide.
+	//
+	// Un binario construido con -cover vuelca contadores EN BINARIO
+	// (covcounters/covmeta), no un .out de texto: hay que pasarle el directorio
+	// a `go tool covdata textfmt` para convertirlo. Y os.Exit NO se salta el
+	// volcado (comprobado con un binario minimo), que era lo unico que hacia
+	// sospechar.
+	//
+	// Lo que NO llega al perfil que calcula `go test -coverpkg ./...` es esto:
+	// los contadores de un subproceso son un fichero aparte que hay que fusionar
+	// a mano, y el gate de CI usa el perfil combinado. main() queda asi a cero en
+	// la metrica global aunque este testeado de verdad. Se acepta a cambio de que
+	// el bloque este EJERCITADO, y el test de arriba no pasa si no lo esta.
+	if err := covdataToText(coverDir); err != nil {
+		t.Fatalf("go tool covdata textfmt sobre %s: %v", coverDir, err)
+	}
+	out := filepath.Join(coverDir, "cov.out")
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("el subproceso no escribio contadores en %s: %v", coverDir, err)
+	}
+	var tieneMain bool
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.Contains(l, "cmd/gitdash/main.go:21.") {
+			tieneMain = true
+		}
+	}
+	if !tieneMain {
+		t.Errorf("el perfil del subproceso no menciona main.go:21, want el bloque de func main()")
+	}
 }
 
 // Los dos closures de depsProd que se pueden ejecutar sin terminal.

@@ -129,7 +129,11 @@ Meta: 2790/2790.
 - [x] `print.go 51,57,62,65,69` — worktree duplicado, sufijo `[wt]`, detached,
       rama vacía, contador de worktrees (se extrajo `printRowOf` para poder
       probarlos sobre filas fabricadas: un HEAD real no se puede dejar detached)
-- [x] `main.go 21` — `func main()`, en un SUBPROCESO (`go build` + exec)
+- [x] `main.go 21` — `func main()`, en un SUBPROCESO (`go build -cover` + exec +
+      `GOCOVERDIR` + `covdata textfmt`, y el test FALLA si el perfil no trae el
+      bloque). **Ojo**: ejercitado de verdad, pero su contador no llega al perfil
+      combinado de `-coverpkg ./...` que usa el gate, así que sale a 0 en la
+      métrica global. Los contadores de un subproceso hay que fusionarlos a mano.
 - [x] `main.go 57,58` — los dos closures de `depsProd`
 - [ ] `print.go 29` — error de `discovery.Scan` a stderr
 
