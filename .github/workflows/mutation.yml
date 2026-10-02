@@ -1,17 +1,20 @@
-name: Mutation
+name: Mutation (diff)
 
-# Mutation testing via gremlins, with a blocking gate on new surviving mutants.
-# Deliberately has NO `paths` filters: a path-filtered workflow that ever becomes a
-# required check leaves that check stuck in "pending" on every PR that skips it,
-# which deadlocks those PRs. The .go scope is enforced INSIDE the job instead,
-# mirroring the guard in `make mutate-diff`.
-# Because there are no path filters, this workflow is SAFE to mark as a required
-# status check; do that in branch protection if you want the gate to block merges.
-# The Mutation job is gated on a Calibration job: in a repo without
-# .mutation-allowlist the Mutation job is SKIPPED (visibly not-a-pass) instead of
-# reporting green while measuring nothing. Consequence: a skipped job is a skipped
-# check, so `Mutation` must NOT be marked as a required status check in branch
-# protection - same deadlock class as path filters.
+# Mutation testing via gremlins sobre EL DIFF del PR (no el módulo entero), con
+# un gate que bloquea los mutantes NUEVOS que sobreviven. Required status check:
+# Build, Lint, Test y Mutation bloquean el merge.
+#
+# Deliberadamente sin filtros `paths`: un workflow filtrado se salta, y un check
+# obligatorio saltado se queda en "pending" para siempre. Aquí no hay filtro y el
+# scope se decide DENTRO del job, así que el job SIEMPRE acaba en pass o fail.
+#
+# Por eso este workflow es apto como required check, y por eso `Calibration` NO
+# se salta: si .mutation-allowlist falta, el job de mutación se salta, y un check
+# saltado es un check colgado. La versión anterior tenía exactamente ese `if:` y
+# por eso el comentario de aquí decía que NO se marcara como obligatorio. La
+# calibración se comprueba ahora DENTRO del job (step `Calibration`), así que el
+# job siempre reporta: si no está calibrado, falla con un mensaje que dice cómo
+# calibrarlo, que es más útil que un job verde que no midió nada.
 on:
   pull_request:
   workflow_dispatch:
@@ -26,33 +29,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  Calibration:
-    name: Mutation calibration
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      calibrated: ${{ steps.check.outputs.calibrated }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-
-      - name: Check calibration
-        id: check
-        run: |
-          if [ -f .mutation-allowlist ]; then
-            echo "calibrated=true" >> "$GITHUB_OUTPUT"
-            echo "calibrated: .mutation-allowlist present"
-          else
-            echo "calibrated=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate, then commit .mutation-allowlist"
-          fi
-
   Mutation:
-    name: Mutation
-    needs: Calibration
-    if: needs.Calibration.outputs.calibrated == 'true'
+    name: Mutation (diff)
+    # Sin `needs:` ni `if:` a proposito: el job tiene que REPORTAR siempre. Un job
+    # saltado en un required check se queda en pending para siempre y bloquea
+    # todos los PRs (la misma clase de fallo que un filtro de paths). La
+    # calibracion se comprueba en un step de aqui, y si falta, este job falla
+    # diciendo como calibrarlo.
+    runs-on: ubuntu-24.04
     runs-on: ubuntu-24.04
     # Hard cap. gremlins is never signalled: on SIGTERM it panics
     # ("send on closed channel") and writes no report.json, so a timeout can only
@@ -77,6 +61,20 @@ jobs:
             go.sum
             Makefile
 
+      # Sin este step el gate no puede hacer nada: sin allowlist, cualquier
+      # mutante nuevo parecería "nuevo" y el gate no tendria con que compararlo.
+      # Falla aqui en vez de saltarse el job, porque un job saltado en un required
+      # check bloquea todos los PRs para siempre.
+      - name: Calibration
+        id: calibration
+        run: |
+          set -euo pipefail
+          if [ ! -f .mutation-allowlist ]; then
+            echo "::error title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate, then commit .mutation-allowlist"
+            exit 1
+          fi
+          echo "calibrated: $(grep -cvE '^[[:space:]]*(#|$)' .mutation-allowlist) allowlisted mutants"
+
       - name: Resolve mutation scope
         id: scope
         env:
@@ -88,6 +86,8 @@ jobs:
           # Belt and braces: guarantee the base ref is fetched even on shallow setups.
           git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" || \
             echo "could not fetch base ref $BASE_BRANCH; continuing with what is present"
+          # El scope es el DIFF contra la base, no el modulo entero: por eso este
+          # check dura segundos. `make mutate` (modulo entero) es el caro.
           if git diff --name-only "$BASE...HEAD" | grep -q '\.go$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             git diff --name-only "$BASE...HEAD" | grep '\.go$' | sed 's/^/  changed: /'
@@ -131,12 +131,11 @@ jobs:
           jq -r '.files[] | .file_name as $f | .mutations[] | select(.status=="LIVED") | "\(.type) \($f):\(.line)"' report.json | sort -u > /tmp/lived.txt
           total=$(wc -l < /tmp/lived.txt)
 
-          if [ ! -f "$ALLOWLIST" ]; then
-            echo "- surviving in diff: $total" >> "$S"
-            echo "- gate NOT calibrated: $ALLOWLIST is missing, so this run reports only and cannot block" >> "$S"
-            exit 0
-          fi
-
+          # Sin la comprobacion de "existe el allowlist" aqui: el step Calibration
+          # de este mismo job ya aborta el job si falta, con un mensaje que dice
+          # como sembrarlo. Tenerla en dos sitios era una puerta trasera mas: si
+          # el allowlist desaparecia entre steps, el gate pasaba en verde sin
+          # haber comparado nada.
           grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | sed 's/[[:space:]]*$//' | sort -u > /tmp/allow.txt
           comm -23 /tmp/lived.txt /tmp/allow.txt > /tmp/new_lived.txt
           new=$(wc -l < /tmp/new_lived.txt)
