@@ -194,17 +194,39 @@ Lo que **sí** queda fuera del objetivo, y no por inalcanzable:
 
 ---
 
-## El gate (último paso, no antes)
+## El gate — HECHO
 
-Falta escribirlo en `.github/workflows/ci.yml`. Solo tiene sentido cuando lo de
-arriba esté hecho o excluido, porque si no falla en todos los PRs desde el
-primer día.
+Dos capas, porque cubrenbergerentes cosas distintas y una sin la otra deja un
+agujero. Verde y verificado con 6 casos.
 
-- [ ] Objetivo del gate: ¿100% literal, o 100% con lista de exclusión visible?
-- [ ] La lista de exclusión vive en el repo (un fichero, junto al allowlist de
-      mutación), no en el workflow: si es una excepción tiene nombre y motivo.
-- [ ] El gate **no baja**: si la cobertura sube, se sube el número del gate en el
-      mismo commit. Un gate que solo sube es un gate que alguien puede relajar
-      sin querer.
-- [ ] El step resume la cobertura por paquete en el summary, como ya hace el de
-      tests.
+- [x] `scripts/diff-coverage.sh` — el diff de este cambio al 100% (quien toca el
+      codigo lo testea; lo viejo no bloquea un PR)
+- [x] `scripts/coverage-floor` — el suelo del total, commiteado, solo sube
+- [x] `make coverage` / `make coverage-check` — `-coverpkg ./...` + el perfil del
+      subproceso de `main()`
+- [x] step de CI, con `fetch-depth: 0` (sin historial el diff es no-op y el
+      gate aprueba en silencio)
+
+Estado: **diff 100% (368/368) · total 98.17% · suelo 98.17%**
+
+Fallos que tenia y como se detectaron, porque todos eran **aprobados
+silenciosos**:
+
+| | |
+|---|---|
+| prefijo del módulo mal (`gitdash//`) | ninguna ruta casaba → "sin líneas tocadas" → aprobado |
+| comentarios contados como statements | el diff salía 55% en vez de 99% |
+| perfil extra inexistente se ignoraba | el gate pasaba sin el perfil de `main()` |
+| CI sin historial | `git diff main...HEAD` vacío → aprobado |
+| suelo comparado en float crudo | fallaba por 0.001 |
+
+Los dos primeros lo cazó mirar la salida; los otros tres, probando que el gate
+**falla** cuando debe (con `--min 101`, con suelo a 99.99, sin perfil, y
+añadiendo una función sin tests).
+
+### Lo que queda de este documento
+
+Sigue habiendo cobertura por subir (el pump de eventos de `app.go` sobre todo),
+pero **no bloquea el gate**: nada de eso está en el diff de ningún PR. El 100%
+del diff es por construcción alcanzable, porque solo mira lo que se toca.
+

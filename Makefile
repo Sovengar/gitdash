@@ -15,7 +15,7 @@ GOLANGCI_LINT_VERSION := v2.13.2
 MUTATE_BASE ?= main
 
 .DEFAULT_GOAL := help
-.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff mutate-local mutate-local-diff _mutate_check _mutate_total _mutate_total_diff
+.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff mutate-local mutate-local-diff coverage coverage-check _mutate_check _mutate_total _mutate_total_diff
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -48,6 +48,26 @@ test: ## Ejecuta la suite de tests con -race (misma clase que CI)
 	go test -race -count=1 ./...
 
 test-race: test ## Alias de test: la suite ya corre con -race
+
+# La cobertura se mide sobre el perfil deduplicado que produce
+# `go test -coverprofile` (un bloque por test binary), mas el perfil del
+# subproceso que ejecuta func main(), que ese test no recoge.
+COVER_PROFILE ?= coverage.out
+COVER_MAIN ?= .covmain/main.txt
+
+coverage: ## Perfil de cobertura deduplicado + el del subproceso de main()
+	@go test -count=1 -coverpkg ./... -coverprofile=$(COVER_PROFILE) ./... > /dev/null
+	@mkdir -p .covmain
+	@mkdir -p .covmain
+	@go build -cover -o .covmain/gitdash $(PKG)
+	@XDG_CONFIG_HOME="$$(mktemp -d)" GOCOVERDIR="$$PWD/.covmain" \
+		./.covmain/gitdash --print >/dev/null 2>&1 || true
+	@go tool covdata textfmt -i=.covmain -o=$(COVER_MAIN)
+	@echo "perfiles: $(COVER_PROFILE) $(COVER_MAIN)"
+
+coverage-check: coverage ## Gate: el DIFF de este cambio al 100%, y el total con suelo
+	@extra=""; [ -f "$(COVER_MAIN)" ] && extra="-a $$PWD/$(COVER_MAIN)"; \
+		scripts/diff-coverage.sh "$(COVER_PROFILE)" "$(MUTATE_BASE)" $$extra
 
 check: build lint test ## build + lint + test (equivalente al gate de CI)
 	@echo "check OK"

@@ -890,8 +890,16 @@ func TestHandoffsConGuardaDeOcupado(t *testing.T) {
 		spy := &handoffSpy{t: t, done: func(error) tea.Msg { return nil }}
 		m.handoff = spy.exec
 
-		if cmd := m.startVisualCmd("/tmp/repo", "origin/main", "rebase"); cmd == nil {
+		cmd := m.startVisualCmd("/tmp/repo", "origin/main", "rebase")
+		if cmd == nil {
 			t.Fatal("startVisualCmd devolvio nil")
+		}
+		// El handoff se arma AL INVOCAR el cmd, no al construirlo: el tea.Cmd
+		// es el que llama a m.handoff. Sin invocarlo, spy se queda vacio y las
+		// aserciones siguientes comparan vacio con vacio y pasan por accident.
+		cmd()
+		if spy.vals != 1 {
+			t.Fatalf("el handoff se lanzo %d veces, want 1", spy.vals)
 		}
 		if spy.dir != "/tmp/repo" {
 			t.Errorf("Dir = %q, want /tmp/repo", spy.dir)
@@ -914,11 +922,23 @@ func TestHandoffsConGuardaDeOcupado(t *testing.T) {
 		// El `pull` de git-sim NO lleva ref: no lo exige y pasarselo haria que
 		// git-sim comprobara otra cosa.
 		spy.vals = 0
-		if cmd := m.startVisualCmd("/tmp/repo2", "origin/main", "pull"); cmd == nil {
+		cmd2 := m.startVisualCmd("/tmp/repo2", "origin/main", "pull")
+		if cmd2 == nil {
 			t.Fatal("startVisualCmd(pull) devolvio nil")
 		}
+		cmd2() // mismo motivo: el handoff se arma al invocar
 		if strings.Contains(strings.Join(spy.argv, " "), "origin/main") {
 			t.Errorf("argv = %q, want sin ref: el pull de git-sim no lleva argumento", spy.argv)
+		}
+		// Y al salir, el mensaje dice visual con el argv real: es lo que el
+		// panel del log ensea, donde el usuario ve que se ejecuto git-sim y con
+		// que ref.
+		msg, ok := spy.salir(nil).(execDoneMsg)
+		if !ok || msg.action != "visual" {
+			t.Fatalf("el mensaje de salida = %#v, want un execDoneMsg de visual", msg)
+		}
+		if msg.path != "/tmp/repo2" || len(msg.argv) == 0 {
+			t.Errorf("execDoneMsg = %+v, want el repo y el argv del handoff", msg)
 		}
 	})
 }
@@ -1015,5 +1035,72 @@ func TestComandoCapturadoConRepoOcupadoAvisa(t *testing.T) {
 	// Y no se ha lanzado nada: el flag sigue siendo el del pull.
 	if got := m.running["/tmp/api"]; got != "pull" {
 		t.Errorf("running = %q, want pull (el guard devuelve antes de escribir)", got)
+	}
+}
+
+// El camino feliz de `p a`: el handoff AI se arma con el argv resuelto y corre en
+// el repo. Es el camino que los tres guards de startPullAICmd evitan, y sin el
+// el openPullAICmd de abajo queda sin ejecutar.
+//
+// El limite de confianza se comprueba de paso: el prompt viene del marcador
+// commiteado (input no confiable) y tiene que viajar como UN elemento de argv,
+// nunca dentro de un sh -c. Un prompt con punto y coma y una sustitucion de
+// shell llega al proceso como un solo argumento, sin interpretar.
+func TestPullAIHappyPathArmaElHandoff(t *testing.T) {
+	dir := t.TempDir()
+	nasty := `arregla el rebase; rm -rf / $(whoami) | tee /etc/passwd`
+	// Literal TOML con comillas simples: un prompt con comillas dobles romperia
+	// el TOML, no por el prompt sino por como se escribe en el fichero. Lo que
+	// se prueba aqui es el argv, no el TOML.
+	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"),
+		[]byte("[ai.pull]\nprompt = '"+nasty+"'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// El ejecutable sale de la config GLOBAL y tiene que existir en el PATH.
+	bin := filepath.Join(t.TempDir(), "ai-pull")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
+
+	mm := newTestModel(t, nil, nil)
+	m := &mm
+	m.cfg.AICommands = map[string]string{"pull": "ai-pull {prompt}"}
+	spy := &handoffSpy{t: t, done: func(error) tea.Msg { return nil }}
+	m.handoff = spy.exec
+
+	cmd := m.startPullAICmd(dir)
+	if cmd == nil {
+		t.Fatal("startPullAICmd devolvio nil, want un handoff")
+	}
+	// El handoff se arma AL INVOCAR el cmd, no al construirlo: el tea.Cmd es el
+	// que llama a m.handoff. Contar antes de invocarlo daria cero siempre.
+	cmd()
+	if spy.vals != 1 {
+		t.Fatalf("el handoff se lanzo %d veces, want 1", spy.vals)
+	}
+	if spy.dir != dir {
+		t.Errorf("Dir = %q, want el repo del marcador", spy.dir)
+	}
+	if len(spy.argv) < 2 || spy.argv[0] != "ai-pull" {
+		t.Fatalf("argv = %q, want el ejecutable de la config y al menos un argumento", spy.argv)
+	}
+	// El prompt entero es UN elemento de argv. Si se partiera en varios, o se
+	// metiera en un sh -c, los metacaracteres los ejecutaria la shell.
+	var promptArg string
+	for _, a := range spy.argv[1:] {
+		if a == nasty {
+			promptArg = a
+		}
+	}
+	if promptArg != nasty {
+		t.Errorf("ningun elemento de argv es el prompt entero; se ha partido o interpolado: %q", spy.argv)
+	}
+	// Y al salir se identifica como pull_ai, que es lo que va al log.
+	if msg, ok := spy.salir(nil).(execDoneMsg); !ok || msg.action != "pull_ai" {
+		t.Errorf("el mensaje de salida = %#v, want un execDoneMsg de pull_ai", msg)
+	}
+	if m.running[dir] != "pull_ai" {
+		t.Errorf("running = %v, want el repo marcado como pull_ai en curso", m.running)
 	}
 }

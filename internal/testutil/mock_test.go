@@ -192,3 +192,24 @@ func TestHelpersQueEscribenFallan(t *testing.T) {
 		}
 	})
 }
+
+// TempDir sin Temp es el unico camino de MockTB que los helpers de este paquete
+// no recorren: todos los que llaman a TempDir lo hacen sobre un doble con Temp
+// puesto. Se prueba aparte porque es el contrato del doble, no del helper: un
+// MockTB construido a pelo (sin test al que delegar) tiene que devolver "" y no
+// reventar, que es lo que haria si TempDir desreferenciara un nil.
+func TestMockTBTempDirSinTest(t *testing.T) {
+	vacio := &MockTB{}
+	if got := vacio.TempDir(); got != "" {
+		t.Errorf("TempDir sin Temp = %q, want cadena vacia", got)
+	}
+	// Y con Temp, delega de verdad en el test.
+	conTest := &MockTB{Temp: tptr(t)}
+	got := conTest.TempDir()
+	if got == "" {
+		t.Error("TempDir con Temp = vacio, want un directorio temporal real")
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("el directorio delegado no existe: %v", err)
+	}
+}

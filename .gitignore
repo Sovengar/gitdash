@@ -18,6 +18,11 @@ testdata/playground/
 # relativo, asi que caen dentro del repo en .worktrees/.
 .worktrees/
 
+# Cobertura: el perfil combinado, los contadores en binario del subproceso de
+# main() y el binario instrumentado que los produce. Los tres son artefactos de
+# `make coverage`; el suelo vive en scripts/coverage-floor y SI se commitea.
+.covmain/
+
 # Mutation testing (gremlins)
 report.json
 .gremlins*
