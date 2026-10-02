@@ -37,7 +37,6 @@ jobs:
     # calibracion se comprueba en un step de aqui, y si falta, este job falla
     # diciendo como calibrarlo.
     runs-on: ubuntu-24.04
-    runs-on: ubuntu-24.04
     # Hard cap. gremlins is never signalled: on SIGTERM it panics
     # ("send on closed channel") and writes no report.json, so a timeout can only
     # mean "no result", never a wrong one.
