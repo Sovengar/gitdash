@@ -77,12 +77,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withPump(nil)
 
 	case fetchDoneMsg:
-		switch {
-		case msg.failed > 0:
+		if msg.failed > 0 {
 			m.toasts.showWarning(fmt.Sprintf("fetch: %d ok, %d failed", msg.ok, msg.failed))
-		case msg.ok == 1:
+		} else if msg.ok == 1 {
 			m.toasts.showSuccess("fetch ok")
-		default:
+		} else {
 			m.toasts.showSuccess(fmt.Sprintf("fetch ok (%d repos)", msg.ok))
 		}
 		return m.withPump(nil)

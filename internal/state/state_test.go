@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,4 +243,85 @@ func TestNewStoreUsaLaMismaBase(t *testing.T) {
 	if want := filepath.Join(xdg, DirName); store.Base() != want {
 		t.Errorf("Base = %q, want %q", store.Base(), want)
 	}
+}
+
+// SaveCollapsed es atomico (escribe en .tmp y renombra) y best-effort. Los
+// errores que se comprueban aqui son los que puede devolver de verdad:
+//
+//   - el directorio base es un FICHERO, así que MkdirAll falla. Es el caso de un
+//     ~/.config/gitdash que alguien sustituyó por un fichero.
+//   - el destino es un DIRECTORIO, así que el Rename final no puede reemplazar
+//     nada.
+//
+// Los dos tienen que devolver un error que nombre el fichero, no un nil
+// silencioso: SaveCollapsed se llama en cada tecla de plegado, y un nil con el
+// estado sin guardar es peor que un error visible.
+func TestSaveCollapsedPropagaErrores(t *testing.T) {
+	t.Run("base es un fichero", func(t *testing.T) {
+		base := filepath.Join(t.TempDir(), "estado")
+		if err := os.WriteFile(base, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := NewStoreAt(base).SaveCollapsed(map[string]bool{"a": true})
+		if err == nil {
+			t.Fatal("SaveCollapsed = nil, want error: el base es un fichero")
+		}
+		if !strings.Contains(err.Error(), "collapsed.json") && !strings.Contains(err.Error(), "state directory") {
+			t.Errorf("el error no nombra el fallo: %v", err)
+		}
+	})
+
+	t.Run("destino es un directorio", func(t *testing.T) {
+		base := t.TempDir()
+		// collapsed.json es un directorio: el .tmp se puede escribir pero el
+		// Rename no puede reemplazar un directorio no vacío con un fichero.
+		if err := os.MkdirAll(filepath.Join(base, FileName, "bloque"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := NewStoreAt(base).SaveCollapsed(map[string]bool{"a": true})
+		if err == nil {
+			t.Fatal("SaveCollapsed = nil, want error: el destino es un directorio")
+		}
+		if !strings.Contains(err.Error(), "collapsed.json") {
+			t.Errorf("el error no nombra el fichero: %v", err)
+		}
+	})
+}
+
+// El guardado tiene que ser ATOMICO de verdad: si el proceso muere entre
+// escribir el .tmp y renombrar, el collapsed.json de antes sigue intacto y el
+// usuario no pierde el plegado. Este test mira justo el estado intermedio: el
+// .tmp se puede haber escrito, pero collapsed.json tiene que seguir con el
+// contenido viejo y completo.
+func TestSaveCollapsedNoRompeElAnterior(t *testing.T) {
+	base := t.TempDir()
+	store := NewStoreAt(base)
+	if err := store.SaveCollapsed(map[string]bool{"viejo": true}); err != nil {
+		t.Fatal(err)
+	}
+	antes, err := os.ReadFile(store.CollapsedFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Un segundo guardado con otro contenido: el archivo tiene que quedar
+	// entero, no a medias, y el .tmp no puede quedarse como collapsed.json.
+	if err := store.SaveCollapsed(map[string]bool{"nuevo": true}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(store.CollapsedFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]bool
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("collapsed.json quedo corrupto: %v\n%s", err, raw)
+	}
+	if !got["nuevo"] || got["viejo"] {
+		t.Errorf("collapsed.json = %v, want solo el nuevo estado", got)
+	}
+	if _, err := os.Stat(store.CollapsedFile() + ".tmp"); err == nil {
+		t.Error("el .tmp se quedo en disco: el Rename no ocurrio")
+	}
+	_ = antes
 }

@@ -15,7 +15,7 @@ func TestToastShowYExpira(t *testing.T) {
 		t.Fatalf("toasts = %d, want 1", len(tm.toasts))
 	}
 	// tras superar la duración, update lo descarta
-	tm.toasts[0].created = time.Now().Add(-toastDuration - time.Second)
+	tm.toasts[0].created = time.Now().Add(-toastDuration() - time.Second)
 	tm.update()
 	if len(tm.toasts) != 0 {
 		t.Errorf("el toast no expiró: %d vivos", len(tm.toasts))
@@ -475,5 +475,57 @@ func TestOverlayNoop(t *testing.T) {
 	}
 	if got := overlayToasts("x", [][]string{{"t"}}, 0, 5, 0); got != "x" {
 		t.Errorf("sin ancho = %q, want x", got)
+	}
+}
+
+// Un toast con texto VACIO no se encola: un aviso sin texto pinta una caja con
+// un icono suelto y nada dentro, que es peor que no avisar. Los "\r" si se
+// descartan y los "\n" no, porque un toast de varias lineas es legitimo.
+func TestToastVacioNoSeEncola(t *testing.T) {
+	var tm toastManager
+	tm.show("", toastInfo)
+	if len(tm.toasts) != 0 {
+		t.Fatalf("toasts = %d, want 0 (un aviso sin texto no se pinta)", len(tm.toasts))
+		// Un texto que solo lleva \r SÍ se encola, y queda vacio. No es un descuido:
+		// la guarda mira el texto ANTES de limpiar los \r, y ese orden es el que hace
+		// que show sea barato (una comprobacion en vez de limpiar y luego mirar). Se
+		// fija el comportamiento en vez de corregirlo aqui: cambiar el orden haria que
+		// show limpiase el texto dos veces.
+		tm.show("\r", toastInfo)
+		if len(tm.toasts) != 1 {
+			t.Errorf("toasts = %d tras un texto de solo \r, want 1 (la guarda mira antes de limpiar)", len(tm.toasts))
+		}
+		// Se descarta para que el "uno de verdad" de abajo parta de cero.
+		tm.toasts = nil
+	}
+	// Y uno de verdad se encola, para que el test no pase por un show() roto.
+	tm.show("hola", toastInfo)
+	if len(tm.toasts) != 1 {
+		t.Errorf("toasts = %d, want 1", len(tm.toasts))
+	}
+}
+
+// wrapText parte por párrafos y un párrafo VACIO es una línea vacía en el
+// resultado, no un hueco: un aviso de tres líneas con una en blanco debe ocupar
+// tres, porque si se perdiera la caja mediría una línea de menos.
+func TestWrapTextConservaParrafosVacios(t *testing.T) {
+	got := wrapText("uno\n\ntres", 40)
+	want := []string{"uno", "", "tres"}
+	if len(got) != len(want) {
+		t.Fatalf("wrapText = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("línea %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Un texto que es solo espacios se envuelve en UNA línea vacía, no en cero: lo
+// que se pinta necesita por lo menos una fila, y un bloque de altura 0 en el
+// apilado se salta.
+func TestWrapTextVacioDevuelveUnaLinea(t *testing.T) {
+	if got := wrapText("   ", 40); len(got) != 1 {
+		t.Errorf("wrapText(%q) = %q, want una linea", "   ", got)
 	}
 }

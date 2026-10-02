@@ -220,3 +220,21 @@ func TestPrefixFromAPIBase(t *testing.T) {
 		})
 	}
 }
+
+// Un remote de GitHub SIN path (`https://github.com/`) es un host conocido con
+// cero segmentos. ParseRemoteURL no puede devolver un RepoRef: no hay Owner ni
+// Name que deducir. El caso importa porque el filtro de segmentos vacios es lo
+// que evita que un Owner o un Name vacíos se cuelen en un PR creado contra el
+// repositorio equivocado.
+func TestParseRemoteSinPathNoEsRepo(t *testing.T) {
+	hosts := map[string]string{"github.com": ForgeGitHub}
+	for _, raw := range []string{
+		"https://github.com/",
+		"https://github.com",
+		"git@github.com:",
+	} {
+		if ref, ok := ParseRemoteURL(raw, hosts, nil); ok {
+			t.Errorf("ParseRemoteURL(%q) = %+v, want no parseable (no hay Owner ni Name)", raw, ref)
+		}
+	}
+}

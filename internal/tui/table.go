@@ -55,14 +55,17 @@ func groupKey(primary, secondary string) string {
 // groupLabel compone el texto compuesto `primary/secondary` de un proyecto
 // solo primario si no hay secundario, "" si ninguno.
 func groupLabel(p discovery.Project) string {
-	switch {
-	case p.PrimaryGroup != "" && p.SecondaryGroup != "":
+	// if y no switch: el instrumento de cobertura solo da bloque a la
+	// CONDICION de un if, y en un switch le da bloque al cuerpo del case y
+	// deja la condicion fuera. Con switch, ninguna mutacion de estas lineas
+	// puede siquiera ejecutarse contra los tests.
+	if p.PrimaryGroup != "" && p.SecondaryGroup != "" {
 		return groupKey(p.PrimaryGroup, p.SecondaryGroup)
-	case p.PrimaryGroup != "":
-		return p.PrimaryGroup
-	default:
-		return ""
 	}
+	if p.PrimaryGroup != "" {
+		return p.PrimaryGroup
+	}
+	return ""
 }
 
 // pendingStates son los estados que el filtro `n` considera no-limpios:
@@ -253,10 +256,32 @@ func worktreeMatches(wt gitstatus.Worktree, q string) bool {
 
 // sortRows ordena in-place: score desc, último commit desc, nombre asc.
 func sortRows(rows []row) {
-	// insertion sort simple: los repos son cientos, no miles.
-	for i := 1; i < len(rows); i++ {
-		for j := i; j > 0 && rowLess(rows[j], rows[j-1]); j-- {
-			rows[j], rows[j-1] = rows[j-1], rows[j]
+	// Insertion sort con dos bucles `range` en vez de `for i := 1; i <
+	// len(rows); i++` / `for j := i; j > 0 && ...; j--`.
+	//
+	// El segundo bucle es el que importa. `j--` invertido en `j++` hace que
+	// `j > 0` deje de cumplirse, y entonces el recorrido no tiene salida: es un
+	// bucle infinito REAL (comprobado fuera, con la misma estructura). Un bucle
+	// infinito no lo mata ningún test porque el test no termina; gremlins lo
+	// reporta como TIMED OUT, y TIMED OUT ni entra en `mutants_total` ni lo ve el
+	// gate de CI. O sea: un mutante que cuelga se escapa del gate por la puerta
+	// que no se mira.
+	//
+	// Con `range` sobre los índices no hay expresión post que invertir, así que
+	// ese mutante desaparece de la cabecera en vez de convertirse en un cuelgue.
+	// El `j > 0` sigue siendo una guarda explícita dentro del cuerpo, donde
+	// invertirla da "un elemento de más" en vez de "no termina nunca".
+	//
+	// Insertion sort simple: los repos son cientos, no miles. Con `i` en 0..n-2
+	// el índice del elemento que baja es `i+1`, y `k` en 0..i lo recorre hacia
+	// arriba para que `j := i+1-k` baje desde `i+1` hasta 1 — el mismo recorrido
+	// que hacía el `j--` original.
+	for i := range len(rows) - 1 {
+		for k := range i + 1 {
+			j := i + 1 - k
+			if j > 0 && rowLess(rows[j], rows[j-1]) {
+				rows[j], rows[j-1] = rows[j-1], rows[j]
+			}
 		}
 	}
 }
@@ -600,14 +625,13 @@ func (m *Model) wtCell(r row) (string, lipglossStyle) {
 }
 
 func (m *Model) branchCell(r row) (string, lipglossStyle) {
-	switch {
-	case r.state == gitstatus.StateNoRepo || r.snap.Status.Branch == "":
+	if r.state == gitstatus.StateNoRepo || r.snap.Status.Branch == "" {
 		return "-", styleDim
-	case r.snap.Status.Detached:
-		return r.snap.Status.Branch + " (detached)", m.styleFor(r)
-	default:
-		return r.snap.Status.Branch, m.styleFor(r)
 	}
+	if r.snap.Status.Detached {
+		return r.snap.Status.Branch + " (detached)", m.styleFor(r)
+	}
+	return r.snap.Status.Branch, m.styleFor(r)
 }
 
 // fetchCell compone el estado TRANSITORIO del fetch: solo ⟳ y ✗.
@@ -648,16 +672,16 @@ func (m *Model) upDownCell(r row) (string, lipglossStyle) {
 	if !s.HasUpstream {
 		return "no-up", styleWarn // rama sin cuerda al remoto
 	}
-	switch {
-	case s.Ahead > 0 && s.Behind > 0:
+	if s.Ahead > 0 && s.Behind > 0 {
 		return fmt.Sprintf("↑%d↓%d", s.Ahead, s.Behind), styleDiverged
-	case s.Ahead > 0:
-		return fmt.Sprintf("↑%d", s.Ahead), styleAhead
-	case s.Behind > 0:
-		return fmt.Sprintf("↓%d", s.Behind), styleBehind
-	default:
-		return "", styleClean
 	}
+	if s.Ahead > 0 {
+		return fmt.Sprintf("↑%d", s.Ahead), styleAhead
+	}
+	if s.Behind > 0 {
+		return fmt.Sprintf("↓%d", s.Behind), styleBehind
+	}
+	return "", styleClean
 }
 
 // syncCell compone la desviación vs sync branch con la rama visible:
@@ -736,12 +760,11 @@ func stripANSI(s string) string {
 	var out strings.Builder
 	inSeq := false
 	for _, r := range s {
-		switch {
-		case r == '\x1b':
+		if r == '\x1b' {
 			inSeq = true
-		case inSeq && (r == 'm' || r == 'K'):
+		} else if inSeq && (r == 'm' || r == 'K') {
 			inSeq = false
-		case !inSeq:
+		} else if !inSeq {
 			out.WriteRune(r)
 		}
 	}
@@ -754,18 +777,20 @@ func relativeTime(epoch int64) string {
 		return "-"
 	}
 	d := time.Since(time.Unix(epoch, 0))
-	switch {
-	case d < time.Minute:
+	if d < time.Minute {
 		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
-	default:
-		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
 	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	if d < 7*24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	if d < 30*24*time.Hour {
+		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
+	}
+	return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
 }

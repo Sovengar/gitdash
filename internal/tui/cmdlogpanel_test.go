@@ -3,6 +3,8 @@
 package tui
 
 import (
+	"fmt"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,6 +205,35 @@ func TestPanelScrollNoMueveElCursor(t *testing.T) {
 	m, _ = press(m, "j")
 	if m.logOffset != 0 {
 		t.Errorf("logOffset = %d tras volver abajo, want 0", m.logOffset)
+	}
+}
+
+// El mínimo de UNA línea visible es lo que hace que el panel siga mostrando algo
+// con una terminal de 1 o 2 líneas, donde bodyLines-1 da 0 o negativo. Con el
+// mínimo a 0 la caja se pintaría VACÍA (después de recortar, el bucle de entradas
+// no it'd nothing que pintar) y el usuario se quedaría sin log en un panel
+// estrecho, sin ningún error: por eso esta aserción mira el contenido y no solo
+// el alto.
+func TestPanelMuestraAlMenosUnaLinea(t *testing.T) {
+	for _, alto := range []int{1, 2, 3} {
+		t.Run(fmt.Sprintf("terminal de %d lineas", alto), func(t *testing.T) {
+			m, rec := logModel(t)
+			for i := range 5 {
+				sembrar(rec, execEntry(fmt.Sprintf("repo-%d", i), "pull", "git pull", "up-to-date", 0))
+			}
+			m, _ = press(m, "l")
+			m.height = alto
+			m.width = 60
+
+			// logSection gasta una línea en la cabecera, así que se le pasa el
+			// presupuesto entero del cuerpo y el propio `visible := max(1, n-1)`
+			// hace la resta: lo que se quiere decidir es que de 1 o 2 líneas
+			// visibles quede alguna entrada pintada.
+			out := stripANSI(m.logSection(alto))
+			if !strings.Contains(out, "git pull") {
+				t.Errorf("con %d lineas de cuerpo el panel no pintó ninguna entrada:\n%q", alto, out)
+			}
+		})
 	}
 }
 
@@ -688,6 +719,36 @@ func TestPanelOffsetEnLosExtremos(t *testing.T) {
 	})
 }
 
+// El saneo también tiene que dejar pasar el texto UTF-8 válido, no solo atacar
+// lo que parece una secuencia. Los tests anteriores usaban payload de un byte
+// (RuneError), que es el caso fácil; un emoji o un acento fuera de BMP no puede
+// perderse, porque el argv del prompt del marcador es texto que el usuario
+// escribió y perderlo sería un bug de verdad.
+//
+// El `\u2028` de "linea\u2028separador" ya lo cubre otra suite; aquí lo que se
+// ata es que un rune de 4 bytes sobrevive entero y que un RuneError DE TAMAÑO
+// MAYOR que 1 (byte suelto dentro de una secuencia multibyte) no se descarta por
+// error: la guarda es `size <= 1`, no "es RuneError".
+func TestSanitizeLogTextConservaUTF8Valido(t *testing.T) {
+	for _, tc := range []struct {
+		nombre, in, want string
+	}{
+		{"emoji de 4 bytes", "a👍b", "a👍b"},
+		{"acentos", "acción ñandú", "acción ñandú"},
+		{"emoji al inicio", "🚀 go", "🚀 go"},
+		{"emoji al final", "go 🚀", "go 🚀"},
+		{"dos emojis", "🚀🎯 fin", "🚀🎯 fin"},
+		{"emoji con control alrededor", "a\x1b[31m👍\x1b[0mb", "a👍b"},
+		{"multibyte y RuneError juntos", "👍\xffn", "👍n"},
+	} {
+		t.Run(tc.nombre, func(t *testing.T) {
+			if got := sanitizeLogText(tc.in); got != tc.want {
+				t.Errorf("sanitizeLogText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // Una secuencia OSC sin cerrar que acaba en ESC no puede reventar: el salto de
 // índices al mirar el terminador ST tiene que comprobar el límite antes de
 // indexar, no después.
@@ -936,6 +997,51 @@ func TestSanitizeLogTextQuitaFormatoYZeroWidth(t *testing.T) {
 	}
 }
 
+// skipEscape devuelve el índice TRAS la secuencia de escape. Esa palabra es el
+// contrato entero de la función, y cada +1/+2 de sus returns es un mutante de
+// ARITHMETIC_BASE que se lleva un byte del texto legítimo.
+//
+// Los casos eligen entradas donde el byte de más o de menos NO es un control que
+// el saneo iba a descartar igual, porque si lo fuera el mutante sería equivalente
+// y ningún test podría distinguirlo. Con un carácter IMPRIMIBLE justo detrás del
+// terminador, saltarse un byte de más deja texto de más y saltarse uno de menos
+// deja el terminador pintado.
+func TestSkipEscapeConsumeLaSecuenciaYNadaMas(t *testing.T) {
+	casos := []struct {
+		nombre  string
+		in      string
+		want    string
+		wantIdx int
+	}{
+		// wantIdx es el índice del PRIMER carácter que ya no es de la secuencia,
+		// con BEL en el byte 5 (ESC=0, ]=1, 0=2, ;=3, t=4): "cola" empieza en el
+		// 6. Con `return j-1` en vez de `j+1` el índice sería el 5 —el BEL— y el
+		// texto saldría cortado. Los casos que ya existían usaban un BEL seguido
+		// de texto donde el byte de más se perdía igual, así que no lo veían.
+		{"BEL seguido de letra", "\x1b]0;t\x07cola", "cola", 6},
+		{"ST seguido de letra", "\x1b]0;t\x1b\\cola", "cola", 7},
+		{"CSI cerrado en letra", "\x1b[31mX", "X", 5},
+		// El ESC suelto se come a sí mismo y al SIGUIENTE ("ESC c" deja "ola",
+		// ver TestSanitizeLogTextNoReventaConSecuenciasSinCerrar), así que aquí el
+		// índice es lo único que se afirma: el texto de este caso no es el
+		// contrato de skipEscape.
+		{"ESC suelto", "\x1bcola", "ola", 2},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			// El índice devuelto es lo que se compara: si se salta un byte de más,
+			// el texto siguiente sale truncado; si se salta uno de menos, el
+			// terminador se cuela en la salida.
+			if got := skipEscape(c.in, 0); got != c.wantIdx {
+				t.Errorf("skipEscape(%q, 0) = %d, want %d", c.in, got, c.wantIdx)
+			}
+			if got := sanitizeLogText(c.in); got != c.want {
+				t.Errorf("sanitizeLogText(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 // Una entrada siempre ocupa UNA línea y no deja pasar el payload inyectado: el
 // prompt no confiable no puede añadir líneas al panel ni emitir escapes.
 func TestPanelSaneaElArgvDeUnaEntrada(t *testing.T) {
@@ -966,5 +1072,77 @@ func TestPanelSaneaElArgvDeUnaEntrada(t *testing.T) {
 		if log := sectionContent(t, plano, "log"); !strings.Contains(log, "jcode") {
 			t.Errorf("prompt %q: el argv saneado no se pintó:\n%s", prompt, log)
 		}
+	}
+}
+
+// El argv del panel es texto no confiable (lleva el prompt del marcador), así
+// que puede traer bytes que no son UTF-8 válido: al pintarlos, el terminal
+// decide qué hacer con ellos. El saneador los descarta, y esa rama no estaba
+// ejercitada por ningún test: `size <= 1` es exactamente la condición que
+// distingue un rune mal decodificado de un RuneError legítimo (un U+FFFD
+// escrito de verdad viene con size == 3 y TIENE que sobrevivir).
+func TestSanitizeLogTextDescartaBytesQueNoSonUTF8(t *testing.T) {
+	casos := []struct {
+		nombre, in, want string
+	}{
+		{"byte suelto", "go\xfftest", "gotest"},
+		{"byte suelto entre letras", "a\xffb", "ab"},
+		{"secuencia truncada", "\xe4\xb8", ""},
+		{"byte valido conako", "ca\xfe", "ca"},
+		// U+FFFD de verdad (3 bytes) no es un error de decodificacion: es
+		// texto, y elTerminal lo pinta. Descartarlo seria perder informacion.
+		{"U+FFFD legitimo", "a\uFFFDb", "a\uFFFDb"},
+		// El invalido se va y el U+FFFD de verdad se queda: son cosas distintas
+		// aunque los dos se pinten como el mismo signo.
+		{"mixto", "x\xffy\uFFFDz", "xy\uFFFDz"},
+	}
+	for _, c := range casos {
+		if got := sanitizeLogText(c.in); got != c.want {
+			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.nombre, c.in, got, c.want)
+		}
+	}
+}
+
+// execExit con un error REAL de proceso es el caso que se ve en el panel: un
+// git que sale con codigo 1 tiene que aparecer como "exit 1", no como el -1 que
+// significa "no se ni siemple arranco". La diferencia es la que permite
+// distinguir un conflicto de un repo de unarotta.
+//
+// El error sale de ejecutar un comando de verdad, porque un *exec.ExitError no
+// se puede fabricar a mano (su ExitCode lee del proceso).
+func TestExecExitConErrorReal(t *testing.T) {
+	cmd := osexec.Command("sh", "-c", "exit 3")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("el comando de prueba no fallo")
+	}
+	if got := execExit(err); got != 3 {
+		t.Errorf("execExit(exit 3) = %d, want 3", got)
+	}
+}
+
+// logIntent sin recorder global no hace nada, y es lo correcto: el command log
+// es opt-in (--print no lo instala, y los tests pueden no hacerlo). Sin ese
+// return, una TUI sin log reventaria al pulsar cualquier tecla, que es
+// exactamente lo que pasaria en --print si compartiera modelo.
+func TestLogIntentSinRecorderNoRevienta(t *testing.T) {
+	// El recorder se desactiva DESPUES de construir el modelo: New lo instala
+	// siempre, y lo que se prueba es que a partir de ahi no registrar nada no
+	// revienta. Si se apagara antes, newTestModel volvería a instalarlo.
+	m := newTestModel(t, nil, nil)
+	prev := cmdlog.Active()
+	cmdlog.SetRecorder(nil)
+	t.Cleanup(func() { cmdlog.SetRecorder(prev) })
+
+	if cmdlog.Active() != nil {
+		t.Fatal("no se pudo desactivar el recorder")
+	}
+	// Con el recorder apagado, ni una intencion ni un exec deben romper nada.
+	m.logIntent("p", "pull")
+	// Y la via global de exec, que es la que usan los handoffs y el `!`.
+	cmdlog.RecordExec(cmdlog.Entry{Class: cmdlog.ClassAction, Key: "p", Action: "pull"})
+	// Con el log apagado no hay ni una entrada que consultar.
+	if got := cmdlog.Entries(); len(got) != 0 {
+		t.Errorf("cmdlog.Entries() = %d con el log apagado, want 0", len(got))
 	}
 }

@@ -413,3 +413,26 @@ func TestPromptEnv(t *testing.T) {
 		})
 	}
 }
+
+// glab con el proyecto VACIO tiene que llevar -y igualmente, pero sin -R. La
+// rama importa: un `-R ""` no significaría nada para la CLI y un -y suelto es una
+// invocación que ya no se puede atribuir a nada. El caso no sale de
+// ParseRemoteURL (allí un path vacío no parsea), sino de un RepoRef construido a
+// mano, que es lo que hace la TUI cuando el remoto no se pudo leer.
+func TestBuildCreateArgvGlabSinProyectoLevaYSolo(t *testing.T) {
+	// A mano y no con refGL: ese helper parte el proyecto en segmentos y con ""
+	// haria parts[-2], que ya es un panico del test y no del codigo.
+	vacio := RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com"}
+	argv := BuildCreateArgv(vacio, Params{Title: "T", Body: "C", Base: "main"})
+	if !slices.Contains(argv, "-y") {
+		t.Errorf("argv %q no lleva -y: glab pediría confirmación de envío", argv)
+	}
+	for i, a := range argv {
+		if a == "-R" {
+			t.Errorf("argv %q lleva -R con el proyecto vacío: -R \"\" no significa nada", argv)
+		}
+		if a == "" {
+			t.Errorf("argv %q tiene un argumento vacío en la posición %d: %q", argv, i, argv)
+		}
+	}
+}

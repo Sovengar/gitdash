@@ -330,3 +330,42 @@ pr = "W"
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 }
+
+// Un proveedor con nombre VACIO se ignora, en vez de entrar en el mapa con la
+// clave "": un host "" no puede atribuirse a nadie y `ForgeForHost("")` devolveria
+// ese proveedor fantasma. El caso sale de una tabla [forge.""] en el TOML, que
+// es raro pero se puede escribir.
+func TestForgeConNombreVacioSeIgnora(t *testing.T) {
+	cfg := Defaults()
+	cfg.addForge("   ", forgeConfig{})
+	for name := range cfg.Forges {
+		if name == "" {
+			t.Errorf("Forges = %v, want sin entrada de nombre vacio", cfg.Forges)
+		}
+	}
+	if got := len(cfg.Forges); got != len(Defaults().Forges) {
+		t.Errorf("Forges tiene %d entradas, want %d (las de por defecto)", got, len(Defaults().Forges))
+	}
+}
+
+// Un proveedor habilitado cuyo Host es VACIO no aporta nada, ni al mapa de
+// hosts ni al de prefijos. Es un error de configuracion que se avisa al cargar,
+// pero un host vacio no puede colarse en el mapa: `ForgeForHost("")` tiene que
+// seguir sin respuesta, y un "" en ForgeHosts haria que cualquier remote sin host
+// resolved se atribuyera a este proveedor.
+func TestForgeSinHostNoEntraEnLosMapas(t *testing.T) {
+	cfg := Defaults()
+	enabled := true
+	vacio := "   "
+	cfg.addForge("bitbucket", forgeConfig{Enabled: &enabled, Host: &vacio})
+
+	if got, ok := cfg.ForgeHosts()["bitbucket"]; ok && got != "" {
+		t.Errorf("ForgeHosts()[%s] = %q, want sin entrada (el host es vacio)", "bitbucket", got)
+	}
+	if got, ok := cfg.ForgePrefixes()["bitbucket"]; ok {
+		t.Errorf("ForgePrefixes()[%s] = %q, want sin entrada", "bitbucket", got)
+	}
+	if f, ok := cfg.ForgeHosts()[""]; ok {
+		t.Errorf("ForgeHosts()[\"\"] = %q, want sin entrada (un host vacio no es ningun forge)", f)
+	}
+}

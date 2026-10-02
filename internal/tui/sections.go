@@ -30,7 +30,7 @@ func (m Model) layout() layout {
 	// preview que no se va a dibujar debajo.
 	formMin := 0
 	if m.pr != nil {
-		formMin = prMinBodyLines
+		formMin = prMinBodyLines()
 	}
 	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "", formMin)
 	if m.logOpen || m.pr != nil {
@@ -75,6 +75,8 @@ func (m Model) keybindsLines() int {
 // se solaparan mandan los armados y el formulario sobre la leyenda. Vacío si no
 // hay nada que anunciar.
 func (m Model) promptLine() string {
+	// La precedencia de los estados armados es el requisito (gana el mas
+	// especifico), y asi queda en if en vez de en el orden de los case.
 	switch {
 	case m.armed != nil:
 		return m.removePrompt()
@@ -199,9 +201,9 @@ func (m Model) tableSection(bodyLines int, entries []tableEntry) string {
 			rows = append(rows, m.renderEntry(entries[i], i == m.cursor))
 		}
 	}
-	for len(rows) < bodyLines {
-		rows = append(rows, "")
-	}
+	// rellenaHasta en vez de `for len(rows) < bodyLines`: la caja mide lo que
+	// dice el layout, y comparar-en-el-bucle hace que el mutante sea un cuelgue.
+	rows = rellenaHasta(rows, bodyLines)
 
 	header := "  " + headerColumns(m.width)
 	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"))
@@ -328,11 +330,9 @@ func (m *Model) renderGroupSummary(e tableEntry, rows int) string {
 // sobra y rellena con líneas vacías lo que falta. La caja mide lo que dice el
 // layout, no lo que mida la ficha.
 func fitLines(content string, n int) string {
-	lines := strings.Split(clipTo(content, n), "\n")
-	for len(lines) < n {
-		lines = append(lines, "")
-	}
-	return strings.Join(lines, "\n")
+	// rellenaHasta en vez de un `for len(lines) < n`: ver el comentario de la
+	// función. El efecto es el mismo y el mutante deja de ser un cuelgue.
+	return strings.Join(rellenaHasta(strings.Split(clipTo(content, n), "\n"), n), "\n")
 }
 
 // clipTo recorta el contenido a n líneas sin rellenar. Es lo que se usa cuando
@@ -342,4 +342,27 @@ func clipTo(content string, n int) string {
 	// Recortar al número exacto es identidad, así que el min() sustituye a la
 	// guarda: aquí solo se puede recortar, nunca rellenar.
 	return strings.Join(lines[:max(0, min(n, len(lines)))], "\n")
+}
+
+// rellenaHasta devuelve las líneas que faltan para llegar a n, sin tocar las que
+// ya hay.
+//
+// Existe para que los tres bucles de relleno del TUI (el alto de la caja, el de
+// la sección de repos y el del panel del log) NO comparen `len(...) < n` dentro
+// de la condición. Comparar y appendar en el mismo bucle es un patrón del que
+// la mutación testing se lleva por delante: `<` invertido en `>=` convierte el
+// relleno —que debería terminar tras UNA vuelta— en un bucle infinito, porque la
+// condición se cumple antes y después de appendar. El mutante entonces no es un
+// bug lento que un test pueda cazar: es un cuelgue, y su único final es el
+// timeout por mutante, que lo reporta como TIMED OUT (un estado que ni entra en
+// mutants_total ni lo ve el gate de CI).
+//
+// Separar "cuántas faltan" de "rellenar" hace que la cuenta sea un entero y el
+// bucle sea un for normal: `<` invertido deja de ser un cuelgue y pasa a ser el
+// bug que es —devolver el número de líneas equivocado—, que sí tiene test.
+func rellenaHasta(lines []string, n int) []string {
+	for falta := n - len(lines); falta > 0; falta-- {
+		lines = append(lines, "")
+	}
+	return lines
 }

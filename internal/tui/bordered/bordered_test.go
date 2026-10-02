@@ -205,3 +205,46 @@ func TestRenderWithTitlesSinTituloNoDejaHueco(t *testing.T) {
 		}
 	}
 }
+
+// contentLines recorta el contenido al ancho INTERIOR, lo rellena y le pega los
+// bordes a los lados; asi la linea final mide innerWidth + 2.
+//
+// El carácter de borde vacío se sustituye por un espacio. La razón es el ancho:
+// con el borde en "" la caja dibujaría una línea de una celda menos en ese lado
+// y se veria torcida. El caso se fuerza llamando a la función con los bordes
+// vacíos, que es lo que hace Render cuando el estilo no los trae.
+func TestContentLinesSustituyeBordesVacios(t *testing.T) {
+	got := contentLines(nil, "", "", "hola", 12)
+	if len(got) != 1 {
+		t.Fatalf("contentLines devolvio %d lineas, want 1", len(got))
+	}
+	// Mismo ancho que con bordes de verdad (12 + 2), pero los dos celdas del
+	// borde son espacios en vez de caracteres de marco.
+	if want := " hola         "; got[0] != want {
+		t.Errorf("linea = %q, want %q (los bordes vacios son un espacio cada uno)", got[0], want)
+	}
+	if w := ansi.StringWidth(got[0]); w != 14 {
+		t.Errorf("ancho = %d, want 14 (12 de interior + 2 bordes)", w)
+	}
+	// Con bordes de verdad, los mismos caracteres de marco. Ojo al ancho: la
+	// linea con bordes mide UNA celda MENOS con el mismo innerWidth, porque el
+	// caracter de marco se cuenta una vez y el espacio tambien, pero el recorte
+	// del interior se hizo antes de pegarlos. Lo que importa es que ninguna de
+	// las dos desborda: una caja con una celda de menos en un lado se ve torcida.
+	got = contentLines(nil, "|", "|", "hola", 12)
+	if got[0] != "|hola        |" {
+		t.Errorf("linea con bordes = %q, want los bordes de marco", got[0])
+	}
+}
+
+// Y un contenido más ancho que el interior se recorta, no desborda: es lo que
+// impide que un texto largo rompa la caja y empuje el borde de la derecha.
+func TestContentLinesRecortaLoQueNoCabe(t *testing.T) {
+	got := contentLines(nil, "|", "|", "demasiado largo para 6", 6)
+	if w := ansi.StringWidth(got[0]); w != 8 {
+		t.Errorf("ancho = %d, want 8 (6 de interior + 2 bordes)", w)
+	}
+	if strings.Contains(got[0], "para") {
+		t.Errorf("la linea no se recorto: %q", got[0])
+	}
+}

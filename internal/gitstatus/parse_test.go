@@ -1,10 +1,14 @@
 package gitstatus
 
 import (
+	"context"
+	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/testutil"
@@ -352,6 +356,52 @@ func TestStreamPoolConcurrenciaInvalida(t *testing.T) {
 	}
 }
 
+// El techo del pool es una MULTIPLICACION por CPU, no una resta: con el signo
+// ArithmeticBase mutateado, `NumCPU()*4` pasa a `NumCPU()-4` y el clamp de arriba
+// deja de acotar el pico de concurrencia. En una máquina de 1-4 CPUs el mutante
+// además produce un tamaño de canal negativo y `make(chan struct{}, n)` revienta
+// con "makechan: size out of range", así que el mismo test lo mata por dos lados.
+//
+// Por eso no se mira el resultado de emit sino su Pico: el valordevuelto es el
+// mismo con y sin el techo (emit siempre recibe Snapshot{} en proyectos sin repo,
+// línea 180), lo único que cambia es cuántos emits se solapan.
+//
+// La aserción pide `>= cpus` en lugar de `== n`: es lo que separa el mutante
+// (pico <= NumCPU()-4) del código real (pico hasta NumCPU()*4) sin depender de
+// que los N goroutines lleguen a solaparse todas, que el planificador no garantiza.
+func TestStreamPoolTechoEsMultiplicacion(t *testing.T) {
+	cpus := runtime.NumCPU()
+	// Por debajo del techo real (cpus*4) y por encima del del mutante (cpus-4),
+	// con margen a ambos lados para que la aserción no dependa del hardware.
+	n := cpus * 2
+	projects := make([]discovery.Project, n)
+	for i := range projects {
+		projects[i] = discovery.Project{Path: fmt.Sprintf("/no/existe/%d", i)}
+	}
+
+	var mu sync.Mutex
+	inFlight, pico := 0, 0
+	StreamPool(t.Context(), projects, "", false, n, func(_ string, _ Snapshot) {
+		mu.Lock()
+		inFlight++
+		if inFlight > pico {
+			pico = inFlight
+		}
+		mu.Unlock()
+		// Sin esta pausa los emits se resuelven antes de que el siguiente
+		// goroutine llegue al semáforo, y el pico mediría 1 siempre.
+		time.Sleep(2 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+	})
+
+	if pico < cpus {
+		t.Errorf("pico de emits simultáneos = %d, want >= %d (techo NumCPU()*4 no aplicado; "+
+			"con NumCPU()-4 el pico se queda en %d o menos)", pico, cpus, cpus-4)
+	}
+}
+
 func TestStreamPool(t *testing.T) {
 	a, _ := testutil.NewRepo(t, true)
 	b, _ := testutil.NewRepo(t, false)
@@ -415,5 +465,194 @@ u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
 	// letra ni perderla.
 	if files[1].Code != "AA" {
 		t.Errorf("files[1].Code = %q, want AA (el par XY completo)", files[1].Code)
+	}
+}
+
+// State.String y State.Score son los dos switch que el resto de la app consume
+// para pintar y para ordenar. Cada case se comprueba contra el literal que tiene
+// que devolver, no contra la implementacion: un `String()` que devolviera
+// "detached" para StateDirty pasaria cualquier test que solo mire que no este
+// vacio.
+//
+// El `default` de String (StateError, y cualquier estado futuro que se cuele sin
+// brazo propio) tiene que devolver "error" y no un string vacio: el texto va
+// directo a la tabla y un hueco ahi se lee como una fila que no se sabe que es.
+func TestStateStringYTieneScore(t *testing.T) {
+	for _, c := range []struct {
+		st     State
+		nombre string
+		score  int
+	}{
+		{StateClean, "clean", 0},
+		{StateNoUpstream, "no upstream", 2},
+		{StateDetached, "detached", 2},
+		{StateBehind, "behind", 3},
+		{StateAhead, "ahead", 3},
+		{StateDirty, "dirty", 4},
+		{StateDiverged, "diverged", 5},
+		{StateNoRepo, "no repo", 2},
+		{StateError, "error", 6},
+		// Un estado que no existe todavia tiene que caer en el default, no
+		// quedarse sin brazo propio: la app no sabe enumerar estados, los pinta.
+		{State(99), "error", 0},
+	} {
+		if got := c.st.String(); got != c.nombre {
+			t.Errorf("State(%d).String() = %q, want %q", int(c.st), got, c.nombre)
+		}
+		if got := c.st.Score(); got != c.score {
+			t.Errorf("State(%d).Score() = %d, want %d", int(c.st), got, c.score)
+		}
+	}
+}
+
+// El orden de Score es el que decide que fila sale primero, asi que el test
+// afirma el ORDEN entre GRUPOS y no cada numero suelto. Los tres estados
+// informativos (detached, no upstream, no repo) comparten score a proposito:
+// ninguno necesita atencion inmediata, asi que empates entre ellos son
+// correctos y el desempate lo pone el path. Lo que no puede pasar es que uno de
+// ellos se cole por delante de dirty, que si la necesita.
+// La lista va de MAYOR a MENOR score: cada grupo tiene que ir por delante del
+// siguiente.
+func TestScoreOrdenaPorAtencion(t *testing.T) {
+	grupos := []struct {
+		nombre  string
+		estados []State
+	}{
+		{"error", []State{StateError}},
+		{"diverged", []State{StateDiverged}},
+		{"dirty", []State{StateDirty}},
+		{"ahead/behind", []State{StateAhead, StateBehind}},
+		{"informativos", []State{StateDetached, StateNoUpstream, StateNoRepo}},
+		{"clean", []State{StateClean}},
+	}
+	for i := 1; i < len(grupos); i++ {
+		ant, cur := grupos[i-1], grupos[i]
+		for _, a := range ant.estados {
+			for _, b := range cur.estados {
+				if State(b).Score() >= State(a).Score() {
+					t.Errorf("%s (%v, %d) no va ANTES que %s (%v, %d)",
+						a, ant.nombre, State(a).Score(),
+						b, cur.nombre, State(b).Score())
+				}
+			}
+		}
+	}
+}
+
+// Derive tiene el caso de Detached: un HEAD suelto sin upstream se reporta
+// detached, y no no-upstream. La precedencia lo pone Detached por delante de
+// !HasUpstream, y este test la fija: si alguien reordena las condiciones, un
+// repo en HEAD suelto pasa a decir "no upstream", que es un diagnostico distinto
+// y equivocado.
+func TestDeriveDetachedGanaANoUpstream(t *testing.T) {
+	st := Status{Detached: true, HasUpstream: false}
+	if got := st.Derive(); got != StateDetached {
+		t.Errorf("Derive = %v, want detached (un HEAD suelto no es no-upstream)", got)
+	}
+	// Dirty gana a detached: hay trabajo sin commitear que cuenta mas que el
+	// diagnostico del HEAD.
+	st = Status{Detached: true, TrackedChanges: 1, HasUpstream: true}
+	if got := st.Derive(); got != StateDirty {
+		t.Errorf("Derive = %v, want dirty (lo sin commitear va antes que el HEAD)", got)
+	}
+}
+
+// parseAB lee "+2 -3" de la linea branch.ab. Una linea que no tiene esa forma
+// (un future git, una linea corrupta) tiene que devolver 0/0 y no propagatingo un
+// error: ParsePorcelain no falla nunca, tolera versiones de git que no conoce.
+func TestParseABToleraLineasNoReconocidas(t *testing.T) {
+	for _, s := range []string{
+		"",      // vacia
+		"abc",   // sin signos ni numeros
+		"+2",    // solo ahead
+		"+x -3", // numero no numerico
+	} {
+		ahead, behind := parseAB(s)
+		if ahead != 0 || behind != 0 {
+			t.Errorf("parseAB(%q) = %d/%d, want 0/0 (una linea que no se entiende es 0)", s, ahead, behind)
+		}
+	}
+	// Y la forma buena sigue funcionando, que es lo que evita que el test de
+	// arriba pase porque la funcion este rota.
+	if a, b := parseAB("+2 -3"); a != 2 || b != 3 {
+		t.Errorf("parseAB(\"+2 -3\") = %d/%d, want 2/3", a, b)
+	}
+	// Un grupo de mas NO es un error: Sscanf se detiene en el cuarto destino y lo
+	// que sobra se ignora. Se deja asi a proposito, porque un ahead/behind con
+	// una tercera cifra es mejor ignorada que convertida en 0/0 (que dira "no
+	// hay divergencia" cuando si la hay). Aqui solo se fija el comportamiento,
+	// no se juzga si es el que se quiere.
+	if a, b := parseAB("+2 -3 -1"); a != 2 || b != 3 {
+		t.Errorf("parseAB(\"+2 -3 -1\") = %d/%d, want 2/3 (el grupo sobrante se ignora)", a, b)
+	}
+}
+
+// ParseLog descarta lineas que no son "%h<NUL>%ct<NUL>%s". El caso del timestamp
+// NO numerico es el interesante: la linea tiene los tres campos, pero el segundo
+// no se puede parsear, asi que se descarta ENTERA (no se cuela un Commit con
+// When=0, que seria un commit de 1970).
+func TestParseLogDescartaCommitsMalformados(t *testing.T) {
+	// Sin NUL de cierre: ParseLog parte cada LINEA en tres campos con SplitN, y
+	// un cuarto separador se iria dentro del sujeto.
+	out := "abc123\x001700000000\x00primer commit\n" +
+		"def456\x00no-es-un-timestamp\x00segundo\n" +
+		"solo-dos-campos\n"
+	commits := ParseLog(out)
+	if len(commits) != 1 {
+		t.Fatalf("ParseLog devolvio %d commits, want 1: %+v", len(commits), commits)
+	}
+	if commits[0].Sha != "abc123" || commits[0].Subject != "primer commit" {
+		t.Errorf("commit = %+v, want el bien formado", commits[0])
+	}
+}
+
+// StreamPool con un contexto YA cancelado: el primer select (el que pide hueco
+// al semaforo) tiene un `case <-ctx.Done()` que devuelve sin emitir nada. Ese
+// caso es el que evita que un scan cancelado siga lanzando subprocess de git:
+// sin el, cancelar no pararia nada hasta que terminara el trabajo en vuelo, y
+// Ctrl-C en mitad de un scan de 50 repos lo dejaria seguir.
+func TestStreamPoolConContextoCancelado(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	projects := []discovery.Project{
+		{Path: dir, HasRepo: true},
+		{Path: dir + "-no-existe", HasRepo: true},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancelado ANTES de arrancar
+
+	var mu sync.Mutex
+	emitidas := 0
+	StreamPool(ctx, projects, "", false, 1, func(string, Snapshot) {
+		mu.Lock()
+		emitidas++
+		mu.Unlock()
+	})
+	// Con el contexto muerto puede no emitirse nada: lo que no puede es lanzar
+	// git. Se comprueba que devuelve y no se cuelga, y que el numero de eventos
+	// es como mucho uno por repo (nunca mas, que seria emissions fantasma).
+	if emitidas > len(projects) {
+		t.Errorf("emite %d eventos con el contexto cancelado, want <= %d", emitidas, len(projects))
+	}
+}
+
+// syncBehind con una ref que NO EXISTE devuelve known=false, no un 0. La
+// diferencia es toda la columna SYNC de la tabla: `known=false` hace que la UI
+// diga "— (sin sync branch)" (un dato que no tenemos), mientras que un 0
+// conocido se pintaría como "al día" (una afirmación falsa sobre un repo que
+// puede tener 40 commits sin traer).
+func TestSyncBehindConRefInexistente(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	n, known := syncBehind(t.Context(), dir, "origin/una-rama-que-no-existe")
+	if known {
+		t.Errorf("syncBehind con ref inexistente = %d, known=true; want known=false (no es que este al dia)", n)
+	}
+	// Una ref que sí existe y HEAD está en ella: 0 commits, y eso sí es conocido.
+	testutil.CommitFiles(t, dir, map[string]string{"a.txt": "x\n"}, "commit")
+	n, known = syncBehind(t.Context(), dir, "main")
+	if !known {
+		t.Error("syncBehind contra HEAD = known=false, want true (0 commitsbehind es un dato)")
+	}
+	if n != 0 {
+		t.Errorf("syncBehind contra HEAD = %d, want 0", n)
 	}
 }

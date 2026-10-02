@@ -827,8 +827,8 @@ func TestPROverlayPromptEnKeybinds(t *testing.T) {
 // ciegas.
 func TestPROverlayNoAbreEnTerminalPequeña(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
-	m.height = 12 // por debajo de prMinBodyLines el cuerpo no llega
-	if m.layout().bodyLines >= prMinBodyLines {
+	m.height = 12 // por debajo de prMinBodyLines() el cuerpo no llega
+	if m.layout().bodyLines >= prMinBodyLines() {
 		t.Skipf("precondición: a %d líneas el cuerpo sí llega (%d)", m.height, m.layout().bodyLines)
 	}
 
@@ -853,15 +853,15 @@ func TestPROverlayNoAbreEnTerminalPequeña(t *testing.T) {
 func TestPROverlayNoAbreEnTerminalAngosta(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
 	// Alto de sobra a propósito: el único motivo del rechazo es el ancho.
-	m.width, m.height = prMinWidth-1, 40
-	if m.layout().bodyLines < prMinBodyLines {
+	m.width, m.height = prMinWidth()-1, 40
+	if m.layout().bodyLines < prMinBodyLines() {
 		t.Skipf("precondición: a %d líneas el alto no llega (%d)", m.height, m.layout().bodyLines)
 	}
 
 	_, cmd := press(m, "O")
 
 	if m.pr != nil {
-		t.Errorf("se abrió un overlay de ancho %d con un mínimo de %d", m.width, prMinWidth)
+		t.Errorf("se abrió un overlay de ancho %d con un mínimo de %d", m.width, prMinWidth())
 	}
 	if cmd == nil {
 		t.Fatal("no hubo aviso de que no cabe")
@@ -878,12 +878,12 @@ func TestPROverlayNoAbreEnTerminalAngosta(t *testing.T) {
 // queda con la columna de valor mínima (ni una celda menos, ni el clamp a 1 de
 // una resta que salió negativa).
 func TestPROverlayAbreEnElAnchoMinimo(t *testing.T) {
-	m := resize(newPROverlayModel(t, "/tmp/dirty-api"), prMinWidth, 40)
+	m := resize(newPROverlayModel(t, "/tmp/dirty-api"), prMinWidth(), 40)
 
 	m, _ = press(m, "O")
 
 	if m.pr == nil {
-		t.Fatalf("no abrió en el ancho mínimo (%d)", prMinWidth)
+		t.Fatalf("no abrió en el ancho mínimo (%d)", prMinWidth())
 	}
 	if got := m.pr.title.Width(); got != prMinValueWidth {
 		t.Errorf("ancho del input = %d, want %d (la columna de valor mínima)", got, prMinValueWidth)
@@ -926,15 +926,15 @@ func TestPROverlayAbreJustoEnElAltoMinimo(t *testing.T) {
 	if enBorde.pr == nil {
 		t.Fatalf("no abrió a %d líneas", abre)
 	}
-	if got := enBorde.layout().bodyLines; got != prMinBodyLines {
-		t.Errorf("abre a %d líneas con un cuerpo de %d, want el mínimo exacto %d", abre, got, prMinBodyLines)
+	if got := enBorde.layout().bodyLines; got != prMinBodyLines() {
+		t.Errorf("abre a %d líneas con un cuerpo de %d, want el mínimo exacto %d", abre, got, prMinBodyLines())
 	}
 
 	menor := m
 	menor.height = abre - 1
 	menor, _ = press(menor, "O")
 	if menor.pr != nil {
-		t.Errorf("abrió a %d líneas, una por debajo del mínimo (%d)", abre-1, prMinBodyLines)
+		t.Errorf("abrió a %d líneas, una por debajo del mínimo (%d)", abre-1, prMinBodyLines())
 	}
 }
 
@@ -945,17 +945,17 @@ func TestPROverlayAbreJustoEnElAltoMinimo(t *testing.T) {
 func TestPROverlayPrSectionSoloDesdeElAltoMinimo(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 
-	if got := m.prSection(prMinBodyLines - 1); got != "" {
+	if got := m.prSection(prMinBodyLines() - 1); got != "" {
 		t.Errorf("con una línea menos pintó %d líneas, want la sección vacía:\n%s",
 			len(strings.Split(got, "\n")), got)
 	}
-	got := m.prSection(prMinBodyLines)
+	got := m.prSection(prMinBodyLines())
 	if got == "" {
 		t.Fatalf("con el alto mínimo no pintó nada:\n%s", stripANSI(m.View().Content))
 	}
 	// La caja entera: los dos bordes más el hueco exacto que se le pidió.
-	if n := len(strings.Split(got, "\n")); n != prMinBodyLines+2 {
-		t.Errorf("alto de la caja = %d, want %d (2 bordes + %d)", n, prMinBodyLines+2, prMinBodyLines)
+	if n := len(strings.Split(got, "\n")); n != prMinBodyLines()+2 {
+		t.Errorf("alto de la caja = %d, want %d (2 bordes + %d)", n, prMinBodyLines()+2, prMinBodyLines())
 	}
 	if !strings.Contains(stripANSI(got), "dirty-api") {
 		t.Errorf("la sección del alto mínimo no dice sobre qué repo es:\n%s", stripANSI(got))
@@ -1081,10 +1081,10 @@ func TestPROverlaySoloAbreEnElBordeExacto(t *testing.T) {
 		m := newPROverlayModel(t, "/tmp/dirty-api")
 		m.height = 60
 
-		m.width = prMinWidth - 1
+		m.width = prMinWidth() - 1
 		m2, cmd := press(m, "O")
 		if m2.pr != nil {
-			t.Errorf("ancho %d (< mínimo %d): el overlay se abrió", prMinWidth-1, prMinWidth)
+			t.Errorf("ancho %d (< mínimo %d): el overlay se abrió", prMinWidth()-1, prMinWidth())
 		}
 		if cmd == nil {
 			t.Error("un overlay que no cabe no avisa de por qué: el usuario pulsa y no pasa nada")
@@ -1093,10 +1093,10 @@ func TestPROverlaySoloAbreEnElBordeExacto(t *testing.T) {
 			t.Error("un overlay que no cabe publicó un envío")
 		}
 
-		m.width = prMinWidth
+		m.width = prMinWidth()
 		m3, _ := press(m, "O")
 		if m3.pr == nil {
-			t.Errorf("ancho %d (el mínimo exacto): el overlay no se abrió", prMinWidth)
+			t.Errorf("ancho %d (el mínimo exacto): el overlay no se abrió", prMinWidth())
 		}
 	})
 
@@ -1131,9 +1131,9 @@ func TestPROverlaySoloAbreEnElBordeExacto(t *testing.T) {
 		if abierto.pr == nil {
 			t.Fatalf("altura %d: el overlay no se abrió", primero)
 		}
-		if got := abierto.layout().bodyLines; got != prMinBodyLines {
+		if got := abierto.layout().bodyLines; got != prMinBodyLines() {
 			t.Errorf("altura %d: bodyLines = %d, want el mínimo exacto %d",
-				primero, got, prMinBodyLines)
+				primero, got, prMinBodyLines())
 		}
 	})
 }
@@ -1181,9 +1181,9 @@ func TestPROverlayElPresupuestoEsElQueDiceElComentario(t *testing.T) {
 		t.Errorf("prFixedLines = %d, want %d (4 campos + aviso + rótulo del cuerpo)",
 			prFixedLines, camposYRótulos)
 	}
-	if prMinBodyLines != prFixedLines+2 {
-		t.Errorf("prMinBodyLines = %d, want %d (las %d fijas + 2 de cuerpo)",
-			prMinBodyLines, prFixedLines+2, prFixedLines)
+	if prMinBodyLines() != prFixedLines+2 {
+		t.Errorf("prMinBodyLines() = %d, want %d (las %d fijas + 2 de cuerpo)",
+			prMinBodyLines(), prFixedLines+2, prFixedLines)
 	}
 	// La columna de valor mínima es la de rótulos: por debajo, el rótulo y el
 	// valor dejan de distinguirse de un vistazo.
@@ -1195,18 +1195,80 @@ func TestPROverlayElPresupuestoEsElQueDiceElComentario(t *testing.T) {
 	// columna de rótulos, la celda de margen del input y el valor mínimo. Si se
 	// escribiera un número redondo, el input podría ser un clamp a 1 de una resta
 	// negativa en vez de un ancho.
-	if want := 2 + prLabelWidth + prValueSlack + prMinValueWidth; prMinWidth != want {
-		t.Errorf("prMinWidth = %d, want %d (2 bordes + rótulos + margen + valor mínimo)",
-			prMinWidth, want)
+	if want := 2 + prLabelWidth + prValueSlack + prMinValueWidth; prMinWidth() != want {
+		t.Errorf("prMinWidth() = %d, want %d (2 bordes + rótulos + margen + valor mínimo)",
+			prMinWidth(), want)
 	}
 	// El valor tiene que caber en el interior con su margen, que es lo que
 	// impide el recorte del último carácter por el borde de la caja.
 	m := newPROverlayModel(t, "/tmp/dirty-api")
-	m.width = prMinWidth
-	if got, want := m.prValueWidth(), prMinWidth-2-prLabelWidth-prValueSlack; got != want {
+	m.width = prMinWidth()
+	if got, want := m.prValueWidth(), prMinWidth()-2-prLabelWidth-prValueSlack; got != want {
 		t.Errorf("prValueWidth en el ancho mínimo = %d, want %d", got, want)
 	}
 	if got := m.prValueWidth(); got < 1 {
 		t.Errorf("prValueWidth = %d: un input de 0 o menos de ancho no es un input", got)
+	}
+}
+
+// El overlay y el panel del log son dos vistas del mismo cuerpo, no dos
+// overlays: con el log abierto, la tecla de PR no puede abrir el formulario. La
+// guarda de la tecla esta en el enrutado, pero la segunda red esta aqui, en el
+// switch de acciones, y sin ella un `O` con el log abierto dejaria los dos
+// overlays encima uno de otro.
+func TestPROverlayNoAbreConElLogAbierto(t *testing.T) {
+	// Sin overlay abierto todavia: lo que se prueba es que la llamada a openPR
+	// con el log abierto NO lo abre.
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	if m.pr != nil {
+		t.Fatal("el modelo de test ya tiene el overlay abierto")
+	}
+	m.logOpen = true
+	// Con el log abierto la tecla esta frenada antes, en el enrutado, asi que
+	// se llama a la accion directamente: esta es la segunda red.
+	// Con el log abierto NO se cierra el log ni se abre nada: la vista se queda
+	// como estaba.
+	mm, cmd := m.openPR()
+	if mm.(Model).logOpen != true {
+		t.Error("openPR con el log abierto cerro el log")
+	}
+	if mm.(Model).pr != nil {
+		t.Error("openPR abrio el overlay con el panel del log abierto")
+	}
+	if cmd != nil {
+		t.Errorf("la accion devolvió %#v con el log abierto, want nil", cmd)
+	}
+}
+
+// draftLabel nombra el estado del toggle con una palabra. El caso de draft a true
+// es el que estaba sin cubrir, y es el que se lee en la pantalla: si devolviera
+// la palabra del otro estado, el usuario creeria que va a abrir un PR normal
+// cuando va en borrador (o al reves).
+func TestDraftLabelDistingueOnYOff(t *testing.T) {
+	on := &prDraft{draft: true}
+	if got := on.draftLabel(); got != "on" {
+		t.Errorf("draftLabel con draft = %q, want on", got)
+	}
+	off := &prDraft{}
+	if got := off.draftLabel(); got != "off" {
+		t.Errorf("draftLabel sin draft = %q, want off", got)
+	}
+}
+
+// prParams y prPrompt se consultan cuando el overlay puede no estar abierto
+// (el aviso se pinta en una vista compartida, y los params se Armed antes de que
+// el overlay exista). Con m.pr == nil tienen que devolver el valor cero, no
+// panicar ni devolver un aviso de un repo que no es.
+func TestOverlaySinAbrirDevuelveValoresVacios(t *testing.T) {
+	m := newPROverlayModel(t, "")
+	if m.pr != nil {
+		t.Fatalf("el modelo de test tiene el overlay abierto: %+v", m.pr)
+	}
+	if got := m.prPrompt(); got != "" {
+		t.Errorf("prPrompt sin overlay = %q, want vacio", got)
+	}
+	params := m.prParams()
+	if params.Title != "" || params.Body != "" || params.Base != "" {
+		t.Errorf("prParams sin overlay = %+v, want el cero de forge.Params", params)
 	}
 }

@@ -1,0 +1,22 @@
+# Suelo de la cobertura TOTAL del proyecto. Lo lee scripts/diff-coverage.sh.
+#
+# Solo puede SUBIR: si el total baja de este numero, el gate falla. Si el total
+# esta por encima, el script avisa para que se suba aqui en el mismo commit.
+#
+# No es el objetivo, es el minimo. El objetivo es el 100% del DIFF, que es lo
+# que obliga a testear lo que se toca; este suelo existe para que el conjunto no
+# se degrade entre PRs que el diff no mira.
+#
+# Y es un numero, no una lista de ficheros excluidos: el unico statement que no
+# llega al perfil combinado es func main(), que se ejecuta de verdad en un
+# subproceso y cuyo test verifica el perfil que produce. Eso esta explicado en
+# cmd/gitdash/main_test.go y en el propio script. Un suelo mas bajo para
+# "quedarse tranquilo" seria mentira.
+#
+# 97.97 es lo que CI ALCANZA, no lo que se alcanza en local (98.17). La
+# diferencia son 4 statements de internal/discovery: dos tests usan permisos
+# 0o000 para provocar un error de lectura, y root PUEDE leer un 0o000, asi que en
+# el runner (que corre como root) se saltan. Fijar el suelo con el numero de
+# local haria que CI fallara siempre, que es un gate peor que no tener gate.
+# Cuando esos tests dejen depender de los permisos, el suelo sube solo.
+97.97

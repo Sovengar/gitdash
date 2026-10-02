@@ -22,6 +22,46 @@ type printRow struct {
 	score, lastCommit                                            int
 }
 
+// printRowOf compone la fila de un proyecto a partir de su snapshot.
+//
+// Vive aparte del bucle de runPrint porque el mapeo es donde se toman las
+// decisiones que se ven en la tabla (el sufijo [wt], el "(detached)", el "-" de
+// la rama vacía, el contador de worktrees) y porque armado sobre filas
+// fabricadas se puede comprobar cada una: sobre repos reales dependen de que
+// el repo esté en detached, que no se puede provocar a voluntad.
+func printRowOf(p discovery.Project, snap gitstatus.Snapshot) printRow {
+	st := snap.State(p.HasRepo)
+	name := p.Name
+	if p.IsWorktree {
+		// restos visibles solo si su repo principal no está descubierto
+		name += " [wt]"
+	}
+	branch := snap.Status.Branch
+	if snap.Status.Detached {
+		branch += " (detached)"
+	}
+	if branch == "" {
+		branch = "-"
+	}
+	wt := ""
+	if n := len(snap.Worktrees); n > 0 {
+		wt = fmt.Sprintf("%d", n)
+	}
+	return printRow{
+		name:       name,
+		group:      orDashPrint(groupLabelPrint(p)),
+		branch:     branch,
+		state:      printState(st, snap),
+		upDown:     printUpDown(st, snap),
+		sync:       printSync(snap),
+		activity:   relativeTimePrint(snap.LastCommit),
+		path:       p.Path,
+		wt:         wt,
+		score:      st.Score(),
+		lastCommit: int(snap.LastCommit),
+	}
+}
+
 // runPrint ejecuta discovery + recolección (sin fetch) e imprime la tabla.
 // Sin repos imprime un mensaje y sale 0.
 func runPrint(cfg config.Config) {
@@ -51,37 +91,7 @@ func runPrint(cfg config.Config) {
 		if p.IsWorktree && p.MainRepo != "" && hasProject(projects, p.MainRepo) {
 			continue
 		}
-		snap := states[p.Path]
-		st := snap.State(p.HasRepo)
-		name := p.Name
-		if p.IsWorktree {
-			// restos visibles solo si su repo principal no está descubierto
-			name += " [wt]"
-		}
-		branch := snap.Status.Branch
-		if snap.Status.Detached {
-			branch += " (detached)"
-		}
-		if branch == "" {
-			branch = "-"
-		}
-		wt := ""
-		if n := len(snap.Worktrees); n > 0 {
-			wt = fmt.Sprintf("%d", n)
-		}
-		rows = append(rows, printRow{
-			name:       name,
-			group:      orDashPrint(groupLabelPrint(p)),
-			branch:     branch,
-			state:      printState(st, snap),
-			upDown:     printUpDown(st, snap),
-			sync:       printSync(snap),
-			activity:   relativeTimePrint(snap.LastCommit),
-			path:       p.Path,
-			wt:         wt,
-			score:      st.Score(),
-			lastCommit: int(snap.LastCommit),
-		})
+		rows = append(rows, printRowOf(p, states[p.Path]))
 	}
 
 	// mismo orden que la TUI: atención-primero, actividad, nombre

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"gitdash/internal/cache"
@@ -675,4 +676,382 @@ func TestNewAguantaQueNoHayDondeGuardarElPlegado(t *testing.T) {
 			t.Errorf("el worktree expandido persistido no se cargó: %v", m.expanded)
 		}
 	})
+}
+
+// --- avisos y resultados obsoletos ---
+
+// El `fetch ok` a secas solo es para UN repo: con varios se cuenta, porque
+// "fetch ok" a secas no dice si se sincronizaron 3 repos o 1. Y con alguno
+// fallido el aviso es otro entero: el número de fallos es lo que el usuario
+// necesita ver primero. Los tres arms se prueban porque el del medio (ok == 1)
+// era el único sin sujetar.
+func TestElFinDelFetchDistingueCuantosReposSincroniza(t *testing.T) {
+	casos := []struct {
+		nombre       string
+		ok, failed   int
+		wantContiene string
+	}{
+		{"uno solo", 1, 0, "fetch ok"},
+		{"varios", 3, 0, "fetch ok (3 repos)"},
+		{"ninguno y todos fallan", 0, 2, "2 failed"},
+		{"mezcla", 2, 1, "2 ok, 1 failed"},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)}, nil)
+
+			// Update devuelve el modelo nuevo: hay que leer ESE, no el de antes.
+			// Los mapas se comparten entre copias, así que un test que se queda
+			// con el viejo pasa en verde sin haber comprobado nada.
+			mm, _ := m.Update(fetchDoneMsg{ok: c.ok, failed: c.failed})
+			m = mm.(Model)
+
+			got := lastToast(m)
+			if !strings.Contains(got, c.wantContiene) {
+				t.Errorf("fetch %d ok / %d failed: el aviso dice %q, want contiene %q",
+					c.ok, c.failed, got, c.wantContiene)
+			}
+		})
+	}
+}
+
+// Un `worktreeRemovedMsg` cuyo token no es el vigente es de un intento que se
+// sustituyó (el usuario relanzó el borrado, o un scan liberó el running por
+// su cuenta). Si se aceptara, borraría el token del intento vigente y le
+// enseñaría al usuario un éxito por un worktree que quizá sigue ahí. La rama
+// existe justo para esto y no estaba probada.
+func TestElBorradoDeWorktreeObsoletoNoTocaElIntentoVigente(t *testing.T) {
+	const parent = "/tmp/api"
+	m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+	m.removeTokens = map[string]int{parent: 7}
+	m.running[parent] = "worktree_remove"
+
+	mm, _ := m.Update(worktreeRemovedMsg{
+		parent: parent, wtPath: "/tmp/wt-a", name: "wt-a",
+		gen: 3, // intento antiguo: el vigente es el 7
+	})
+	m = mm.(Model)
+
+	if got := m.removeTokens[parent]; got != 7 {
+		t.Errorf("el resultado obsoleto consumió el token del intento vigente: %d, want 7", got)
+	}
+	if _, sigue := m.removeTokens[parent]; !sigue {
+		t.Error("el token vigente desapareció: el relanzamiento se queda sin poder comprobar su resultado")
+	}
+	if m.running[parent] != "worktree_remove" {
+		t.Errorf("un resultado obsoleto liberó el running de otro intento: %q", m.running[parent])
+	}
+	if txt := lastToast(m); strings.Contains(txt, "wt-a") {
+		t.Errorf("un resultado obsoleto pintó un aviso: %q", txt)
+	}
+}
+
+// Esc es la vía de salida de la confirmación de borrado, y su valor está en
+// que SE CONSUME: la confirmación tiene prioridad sobre el resto del teclado
+// (también sobre el esc que cierra la búsqueda). Si esc no se consumiera,
+// desarmaría el borrado y además cerraría la búsqueda: dos efectos de una
+// tecla, que es justo lo que el bloque commentado prohíbe. Por eso el testigo
+// es la búsqueda, no el propio desarme (que ocurre igual en los dos caminos).
+func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
+	const parent = "/tmp/api"
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc, Text: "esc"}
+
+	t.Run("con confirmación armada", func(t *testing.T) {
+		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+		m.armed = &armedRemoval{wtPath: "/tmp/wt-a", parent: parent, name: "wt-a"}
+		m.searchActive = true
+		m.search = "api"
+
+		mm, _ := m.Update(esc)
+		m = mm.(Model)
+
+		if m.armed != nil {
+			t.Error("esc no desarmó la confirmación: la app queda esperando otra tecla")
+		}
+		if len(m.removeTokens) != 0 {
+			t.Errorf("esc registró un intento de borrado: %v", m.removeTokens)
+		}
+		if m.running[parent] != "" {
+			t.Errorf("esc dejó el repo en running: %q", m.running[parent])
+		}
+		// La parte que distingue este camino del default: la tecla se paró aquí.
+		if !m.searchActive || m.search != "api" {
+			t.Errorf("esc siguió su curso y tocó la búsqueda: searchActive=%v search=%q; "+
+				"la confirmación tiene que consumirla", m.searchActive, m.search)
+		}
+	})
+
+	// El control: sin nada armado, esc sí cierra la búsqueda. Si este caso
+	// pasara también con la confirmación, el anterior no distinguiría nada.
+	t.Run("sin nada armado", func(t *testing.T) {
+		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
+		m.searchActive = true
+		m.search = "api"
+
+		mm, _ := m.Update(esc)
+		m = mm.(Model)
+
+		if m.searchActive {
+			t.Error("sin nada armado, esc tiene que cerrar la búsqueda")
+		}
+		if m.search != "" {
+			t.Errorf("esc en la búsqueda no limpió el filtro: %q", m.search)
+		}
+	})
+}
+
+// Update devuelve `m, nil` para un mensaje que no sabe tratar, y eso no es un
+// error: es lo que evita que un msg desconocido (el de otro modulo, o uno futuro)
+// pare la TUI. El mensaje tiene que pasar por el switch entero y salir por el
+// return de abajo.
+func TestUpdateIgnoraMensajesDesconocidos(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	out, cmd := m.Update(struct{ tea.Msg }{})
+	if out == nil {
+		t.Fatal("Update devolvio nil en vez del modelo")
+	}
+	if cmd != nil {
+		t.Error("Update devolvio un comando para un mensaje desconocido, want nil")
+	}
+}
+
+// El TickMsg del spinner llega solo (lo emite el propio spinner mientras corre),
+// asi que ningun test lo produce: hay que mandarlo a mano. Lo que se comprueba es
+// que el spinner AVANZA y que su Update devuelve el siguiente tick, que es lo
+// que lo mantiene girando; si el case se perdiera, el spinner se congelaria en
+// el primer frame y nadie se enteraria salvo mirando.
+func TestSpinnerAvanzaConSuTick(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	antes := m.spinner.View()
+	out, cmd := m.Update(spinner.TickMsg{})
+	if cmd == nil {
+		t.Error("el TickMsg del spinner no devolvio comando, want el siguiente tick")
+	}
+	despues := out.(Model).spinner.View()
+	if despues == antes && len(antes) > 0 {
+		t.Errorf("el spinner no se movio: %q -> %q", antes, despues)
+	}
+}
+
+// `enter` sobre el input del comando `!` con el cursor en una fila SIN repo no
+// puede lanzar nada, y lo dice. El caso importa porque el camino de abajo abre una
+// shell: sin el aviso, `!` + enter sobre una carpeta sin repo abriria una terminal
+// en un sitio donde no hay nada que hacer.
+func TestComandoSinRepoAvisa(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m = cursorOn(t, m, "/tmp/no-repo-docs")
+	m.cmdOpen = true
+	m.cmdInput.SetValue("ls")
+
+	out, cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("enter sin repo no devolvio comando, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("el comando devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "no git repo") {
+		t.Errorf("aviso = %q, want que diga que no hay repo", msg.text)
+	}
+	// Y el input se cierra igualmente: la accion termino.
+	if out.cmdOpen {
+		t.Error("el input del comando sigue abierto tras el aviso")
+	}
+}
+
+// `enter` sin fila bajo el cursor: no hay repo, asi que tampoco hay aviso que
+// dar. Devuelve nil y cierra el input, que es lo unico que se puede hacer.
+func TestComandoSinFilaNoAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.cmdOpen = true
+	m.cmdInput.SetValue("ls")
+	out, cmd := press(m, "enter")
+	if cmd != nil {
+		t.Errorf("enter sin fila devolvió %#v, want nil", cmd())
+	}
+	if out.cmdOpen {
+		t.Error("el input sigue abierto sin fila bajo el cursor")
+	}
+}
+
+// `fetch_all` sin ningun repo con upstream tiene que decirlo, no lanzar un batch
+// vacio: un fetch de nada es un comando que no falla y no hace nada, y el usuario
+// no ve por que no paso nada.
+func TestFetchAllSinUpstreamAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	_, cmd := press(m, "F")
+	if cmd == nil {
+		t.Fatal("fetch_all sin repos devolvio nil, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "no repositories") {
+		t.Errorf("aviso = %q, want que diga que no hay nada que traer", msg.text)
+	}
+}
+
+// `r` (rescan) con un scan ya en marcha no arranca un segundo: el aviso es
+// "scan already running". El caso es el que evita el doble workerPool, que
+// fightaria por el canal de eventos.
+func TestRescanConScanEnMarchaAvisa(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.scanning = true
+	_, cmd := press(m, "r")
+	if cmd == nil {
+		t.Fatal("rescan con scan en marcha devolvio nil, want un aviso")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok {
+		t.Fatalf("devolvió %T, want un aviso", cmd())
+	}
+	if !strings.Contains(msg.text, "already running") {
+		t.Errorf("aviso = %q, want 'scan already running'", msg.text)
+	}
+}
+
+// busyActionCmd es la guarda que comparten las acciones que lanzan un comando en
+// un repo: si ya hay algo en marcha en ESE repo, avisa en vez de lanzar. Sus tres
+// salidas son distintas y las tres se usan: el aviso, el nil (nada en marcha, la
+// accion puede seguir), y... solo dos, en realidad. El test las fija las dos y
+// comprueba que el aviso nombra la accion que esta corriendo.
+func TestBusyActionCmd(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.running = map[string]string{"/tmp/api": "pull"}
+
+	if cmd := m.busyActionCmd("/tmp/api"); cmd == nil {
+		t.Fatal("busyActionCmd sobre un repo ocupado devolvio nil, want un aviso")
+	} else if msg, ok := cmd().(notifyMsg); !ok {
+		t.Errorf("devolvió %T, want un aviso", cmd())
+	} else if !strings.Contains(msg.text, "pull") {
+		t.Errorf("aviso = %q, want que nombre la accion en marcha", msg.text)
+	}
+
+	// Otro repo no se ve afectado: el bloqueo es por path, no global.
+	if cmd := m.busyActionCmd("/tmp/otro"); cmd != nil {
+		t.Errorf("busyActionCmd sobre un repo libre devolvió %#v, want nil", cmd())
+	}
+}
+
+// Los dos avisos armados se callan cuando no hay nada armado. No es un detalle:
+// promptLine() es el UNICO punto por el que keybinds pinta un aviso, y sin este
+// caso un prompt de un selector que ya se canceló se quedaría pintado encima de
+// las hints, ocupando la línea que las hints necesitan.
+func TestPromptsArmadosSeCallanSinArmar(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if got := m.visualPrompt(); got != "" {
+		t.Errorf("visualPrompt sin armar = %q, want vacio", got)
+	}
+	if got := m.removePrompt(); got != "" {
+		t.Errorf("removePrompt sin armar = %q, want vacio", got)
+	}
+	// Y promptLine, que es lo UNICO que keybinds consulta para pintar un aviso:
+	// sin ningun estado armado devuelve la cadena vacia, no un aviso residual de
+	// un selector que ya se cancelo.
+	if got := m.promptLine(); got != "" {
+		t.Errorf("promptLine sin armar = %q, want vacio", got)
+	}
+}
+
+// toggleFold sin nada bajo el cursor es un no-op: no hay header que plegar ni
+// worktree que ocultar, y sin guarda el cursor se moveria a un indice que no
+// existe.
+func TestToggleFoldSinFilaNoSeMueve(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	if len(m.entries()) != 0 {
+		t.Fatalf("el modelo sin proyectos tiene %d entradas", len(m.entries()))
+	}
+	out, cmd := m.toggleFold()
+	if cmd != nil {
+		t.Errorf("toggleFold sin fila devolvió %#v, want nil", cmd())
+	}
+	if got := out.(Model).cursor; got != 0 {
+		t.Errorf("cursor = %d tras plegar sin fila, want 0", got)
+	}
+}
+
+// NotifyConfig es lo que main llama con el aviso de config, y lo que hace que el
+// usuario lo vea: stderr se queda detrás del alt screen, así que si el aviso no
+// llegara al modelo se perdería sin más. Se comprueba que encola un toast con el
+// texto, no que "no reviente".
+func TestNotifyConfigEncolaElAviso(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.NotifyConfig("config: no se pudo leer el fichero")
+	if len(m.toasts.toasts) != 1 {
+		t.Fatalf("toasts = %d, want 1 (el aviso tiene que verse, no ir a stderr)", len(m.toasts.toasts))
+	}
+	got := m.toasts.toasts[0]
+	if got.level != toastWarning {
+		t.Errorf("nivel = %v, want warning (un aviso de config no es un exito)", got.level)
+	}
+	if !strings.Contains(got.text, "no se pudo leer") {
+		t.Errorf("texto = %q, want el aviso entero", got.text)
+	}
+	// Y sale en lo que se pinta de verdad, que es donde el usuario lo lee: los
+	// bloques del overlay. Con un bloque vacio el aviso no existiria en pantalla.
+	bloques := m.toasts.blocks()
+	if len(bloques) != 1 {
+		t.Fatalf("bloques = %d, want 1", len(bloques))
+	}
+	pintado := stripANSI(strings.Join(bloques[0], " "))
+	if !strings.Contains(pintado, "no se pudo leer") {
+		t.Errorf("el bloque pintado = %q, want el texto del aviso", pintado)
+	}
+}
+
+// saveCollapsed con store nil no hace nada. Es el caso de un modelo construido
+// sin store (por ejemplo un test, o el modo --print si compartiera modelo), y la
+// guarda evita un nil-pointer en CADA tecla de plegado.
+func TestSaveCollapsedSinStoreNoRevienta(t *testing.T) {
+	m := newTestModel(t, nil, nil)
+	m.store = nil
+	m.collapsed = map[string]bool{"backend": true}
+	m.saveCollapsed() // no debe hacer nada, y sobre todo no reventar
+	if !m.collapsed["backend"] {
+		t.Error("el estado en memoria cambio: saveCollapsed no debe tocarlo")
+	}
+}
+
+// visualOptionForKey con una tecla que no es ninguna variante devuelve false, y
+// el selector visual usa ese false para no hacer nada. Sin ese caso, una tecla
+// desconocida se traduciria a una variante de git-sim inventada.
+func TestVisualOptionParaTeclaDesconocida(t *testing.T) {
+	for _, tecla := range []string{"", "x", "enter", "ESC", "mm"} {
+		if o, ok := visualOptionForKey(tecla); ok {
+			t.Errorf("visualOptionForKey(%q) = %+v, want no (no es ninguna variante)", tecla, o)
+		}
+	}
+	// Y las que sí son, con su subcomando, para que el fallback no se confunda
+	// con un caso vacío.
+	for _, o := range visualOptions {
+		got, ok := visualOptionForKey(o.key)
+		if !ok {
+			t.Errorf("visualOptionForKey(%q) = no, want %+v", o.key, o)
+		}
+		if got.sub != o.sub {
+			t.Errorf("visualOptionForKey(%q).sub = %q, want %q", o.key, got.sub, o.sub)
+		}
+	}
+}
+
+// tickCmd devuelve un tea.Tick de un segundo, y el closure que emite tickMsg solo
+// se ejecuta cuando esa tea.Cmd se invoca. El caso importa porque tickMsg es lo
+// que expira los toasts: si el tick dejara de emitirse, un aviso se quedaría
+// pintado para siempre y la tabla parecería congelada.
+//
+// Cuesta un segundo porque el timer es real: no hay reloj inyectable en
+// bubbletea, y falsearlo exigiria el seam entero de tea.Tick por un segundo de
+// suite. Un segundo en la suite entera es un precio aceptable.
+func TestTickCmdEmiteElTick(t *testing.T) {
+	start := time.Now()
+	msg := tickCmd()()
+	if _, ok := msg.(tickMsg); !ok {
+		t.Fatalf("tickCmd()() = %#v, want un tickMsg", msg)
+	}
+	if d := time.Since(start); d < 900*time.Millisecond {
+		t.Errorf("el tick volvio en %v, want ~1s (un tick que no espera no expira nada)", d)
+	}
 }
