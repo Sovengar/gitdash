@@ -310,3 +310,59 @@ func captureStdout(t *testing.T, fn func()) string {
 	os.Stdout = old
 	return <-done
 }
+
+// Un worktree cuyo repo principal esta DESCUBIERTO en la misma corrida no es una
+// fila: sale plegado debajo de su repo, y en print (tabla plana, sin cabeceras
+// de grupo) eso significa no imprimirla. Sin esto el worktree aparece como un
+// repo mas y el recuento de repos de la tabla no cuadra con el de la TUI.
+//
+// El worktree lleva marcador propio a proposito (es lo que hace que lo
+// descubra el walk) y sin `.git` no seria worktree: lo que activa el plegado es
+// que `.git` sea un FICHERO `gitdir:`.
+func TestPrintPlegaElWorktreeBajoSuRepoPrincipal(t *testing.T) {
+	root := t.TempDir()
+	principal := filepath.Join(root, "principal")
+	testutil.Init(t, principal)
+	testutil.Marker(t, principal, "principal", "", "", false)
+	testutil.CommitFiles(t, principal, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
+
+	wt := filepath.Join(root, "feature")
+	testutil.MakeWorktree(t, principal, wt, "feature")
+	// El marcador del worktree se commitea CON su contenido: el worktree nace de
+	// HEAD, que ya trae el `.gitdash.toml` del principal, y reescribirlo sin
+	// commitear lo dejaria modificado para siempre.
+	testutil.CommitFiles(t, wt, map[string]string{".gitdash.toml": "name = \"feature\"\n"}, "marcador del worktree")
+
+	out := captureStdout(t, func() { runPrint(printConfig(root)) })
+	plano := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(plano, "principal") {
+		t.Fatalf("el repo principal no sale:\n%s", out)
+	}
+	if strings.Contains(plano, "feature") {
+		t.Errorf("el worktree se imprimio como si fuera un repo mas:\n%s", out)
+	}
+}
+
+// El caso limite del plegado: un worktree cuyo repo principal NO esta
+// descubierto (esta fuera de los roots) SI se imprime. Si no, un worktree de un
+// repo que no se escanea desapareceria de la tabla sin dejar rastro, que es peor
+// que mostrarlo de mas.
+func TestPrintNoPlegaElWorktreeSinPrincipalDescubierto(t *testing.T) {
+	root := t.TempDir()
+	// El repo principal vive FUERA del root que se escanea.
+	fuera := t.TempDir()
+	principal := filepath.Join(fuera, "oculto")
+	testutil.Init(t, principal)
+	testutil.Marker(t, principal, "oculto", "", "", false)
+	testutil.CommitFiles(t, principal, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
+
+	wt := filepath.Join(root, "suelto")
+	testutil.MakeWorktree(t, principal, wt, "suelto")
+	testutil.CommitFiles(t, wt, map[string]string{".gitdash.toml": "name = \"suelto\"\n"}, "marcador del worktree")
+
+	out := captureStdout(t, func() { runPrint(printConfig(root)) })
+	plano := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(plano, "suelto") {
+		t.Errorf("el worktree sin principal descubierto no sale:\n%s", out)
+	}
+}

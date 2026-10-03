@@ -102,9 +102,9 @@ func Save(path string, projects []discovery.Project) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
-	}
+	// Sin rama de error en el Marshal: `File` son un int y una slice de structs
+	// de string/bool, y `encoding/json` no puede fallar con esos tipos. La
+	// rama era inalcanzable y mutation la contaba como cobertura muerta.
+	raw, _ := json.MarshalIndent(f, "", "  ")
 	return os.WriteFile(path, raw, 0o644)
 }

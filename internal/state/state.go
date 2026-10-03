@@ -66,10 +66,9 @@ func (s *Store) CollapsedFile() string {
 // Las claves son el nombre del primario o "primario/secundario".
 // Best-effort: los errores no son fatales (no bloquear la UI).
 func (s *Store) SaveCollapsed(groups map[string]bool) error {
-	data, err := json.MarshalIndent(groups, "", "  ")
-	if err != nil {
-		return fmt.Errorf("could not marshal collapsed.json: %w", err)
-	}
+	// Sin rama de error en el Marshal: un map[string]bool siempre serializa, así
+	// que la rama era inalcanzable y mutation la contaba como cobertura muerta.
+	data, _ := json.MarshalIndent(groups, "", "  ")
 	if err := os.MkdirAll(s.base, 0o755); err != nil {
 		return fmt.Errorf("could not create state directory %s: %w", s.base, err)
 	}

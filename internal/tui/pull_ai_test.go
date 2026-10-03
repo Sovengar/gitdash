@@ -352,3 +352,33 @@ func TestExecDoneRegistraPullAI(t *testing.T) {
 		t.Errorf("clase/dir = %v/%q", got.Class, got.Dir)
 	}
 }
+
+// Un marcador que NO se puede leer no es "no hay prompt": es un
+// `.gitdash.toml` roto que el usuario tiene que arreglar. Si caerá en el aviso
+// de prompt vacío, el usuario creería que solo le falta escribir el prompt y
+// no iría a mirar el fichero.
+func TestPullAIAvisaDeMarcadorRoto(t *testing.T) {
+	dir := t.TempDir()
+	// Un DIRECTORIO con el nombre del marcador: se lee igual de mal que un
+	// 0o000, pero sin depender de quien ejecuta el test (root lee un 0o000).
+	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapClean()})
+	m.cfg.AICommands = map[string]string{"pull": "/bin/echo {prompt}"}
+	m = cursorOn(t, m, dir)
+
+	m, _ = press(m, "p")
+	m, cmd := press(m, "a")
+
+	if _, busy := m.running[dir]; busy {
+		t.Errorf("a lanzó el handoff con el marcador roto: running = %q", m.running[dir])
+	}
+	if cmd == nil {
+		t.Fatal("un marcador roto debería notificar")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "marker error") {
+		t.Errorf("notificación = %v, want el aviso de marcador roto", cmd())
+	}
+}

@@ -55,19 +55,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case collectDoneMsg:
 		m.scanning = false
-		cmds := []tea.Cmd{}
 		// cache best-effort al final de cada rescan
 		if path, err := cache.Path(); err == nil {
 			projects := m.projects
 			go func() { _ = cache.Save(path, projects) }()
 		}
-		// fetch automático en batches
+		// fetch automático en batches. `fetchBatchCmd` publica por el canal y
+		// devuelve SIEMPRE nil, así que no hay nada que acumular aquí: lo que
+		// se rearma es solo la bomba de eventos.
 		if m.cfg.FetchAuto {
-			if c := m.fetchBatchCmd(m.fetchTargets(), cmdlog.ClassAuto); c != nil {
-				cmds = append(cmds, c)
-			}
+			m.fetchBatchCmd(m.fetchTargets(), cmdlog.ClassAuto)
 		}
-		return m.withPump(tea.Batch(cmds...))
+		return m.withPump(nil)
 
 	case fetchStateMsg:
 		m.fetchStates[msg.path] = msg.state

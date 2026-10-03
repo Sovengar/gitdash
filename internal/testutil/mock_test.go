@@ -49,13 +49,27 @@ func TestInitFallaConDirectorioIlegible(t *testing.T) {
 func TestCommitFilesFallaConRutaImposible(t *testing.T) {
 	dir := t.TempDir()
 
-	// Un fichero anidado cuyo directorio padre es un fichero.
+	// Un fichero anidado cuyo directorio padre es un FICHERO: sin el bloque,
+	// `MkdirAll` lo crearía y el helper pasaría el mkdir para fallar mucho más
+	// tarde, en el `git commit` de un directorio que no es repo. El fallo
+	// seguiría siendo "un fallo", pero no el de esta línea, y el test
+	// aceptaría un helper que ni siquiera comprobara el mkdir.
+	bloque := filepath.Join(dir, "bloque")
+	if err := os.WriteFile(bloque, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	tb2 := &MockTB{Temp: tptr(t)}
 	CommitFiles(tb2, dir, map[string]string{
 		filepath.Join("bloque", "hijo.txt"): "x",
 	}, "no deberia llegar aqui")
 	if !tb2.Failed() {
 		t.Error("CommitFiles = sin fallo, want el error de MkdirAll del padre")
+	} else if !strings.Contains(tb2.Failures[0], "mkdir ") || !strings.Contains(tb2.Failures[0], "not a directory") {
+		// El PRIMER fallo tiene que ser el del mkdir con ENOTDIR. MockTB no
+		// detiene el helper (para eso está: registra en vez de matar), así que
+		// después también falla el WriteFile y el git; lo que se comprueba es que
+		// el mkdir falló DE VERDAD y no que fuera el primero que se registró.
+		t.Errorf("primer fallo = %q, want el ENOTDIR del MkdirAll", tb2.Failures[0])
 	}
 
 	// Y con un directorio ya existente pero sin permiso de escritura en el

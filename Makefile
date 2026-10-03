@@ -15,7 +15,7 @@ GOLANGCI_LINT_VERSION := v2.13.2
 MUTATE_BASE ?= main
 
 .DEFAULT_GOAL := help
-.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff mutate-local mutate-local-diff coverage coverage-check _mutate_check _mutate_total _mutate_total_diff
+.PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff mutate-all mutate-all-diff coverage coverage-check _mutate_check _mutate_total _mutate_total_diff
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -55,9 +55,15 @@ test-race: test ## Alias de test: la suite ya corre con -race
 COVER_PROFILE ?= coverage.out
 COVER_MAIN ?= .covmain/main.txt
 
+# .covmain se BORRA, no se reutiliza: guarda los contadores del binario
+# instrumentado, y los de una build anterior tienen rangos que el codigo de hoy
+# ya no tiene. Fusionarlos suma bloques que ya no existen al perfil y el total
+# baja solo (medido: 80.24% con 7 ficheros viejos, 99.74% limpio). El `rm` va en
+# la recipe, y este comentario FUERA: dentro se lo pasa al shell, que lo ejecuta
+# como un comando mas y rompe el target.
 coverage: ## Perfil de cobertura deduplicado + el del subproceso de main()
 	@go test -count=1 -coverpkg ./... -coverprofile=$(COVER_PROFILE) ./... > /dev/null
-	@mkdir -p .covmain
+	@rm -rf .covmain
 	@mkdir -p .covmain
 	@go build -cover -o .covmain/gitdash $(PKG)
 	@XDG_CONFIG_HOME="$$(mktemp -d)" GOCOVERDIR="$$PWD/.covmain" \
@@ -142,7 +148,7 @@ MUTATE_COVERPKG ?= ./...
 # producen un run con "100% de eficacia".
 #
 # Estos defaults son los de CI (2 workers, coef 2, runner de 2-4 nucleos). Para
-# local NO son los buenos: usa `make mutate-local`, que mide la cobertura de la
+# local NO son los buenos: usa `make mutate-all`, que mide la cobertura de la
 # maquina y elige el coeficiente que corresponde. O overridea:
 #   make mutate MUTATE_WORKERS=16 MUTATE_TIMEOUT_COEFFICIENT=30
 MUTATE_WORKERS ?= 2
@@ -220,12 +226,12 @@ MUTATE_FORBIDDEN = -S --output-statuses -s --silent
 # por eso en una maquina con nucleos tarda ~25min y con workers altos produce
 # TIMED OUT sin querer. Este target es el que hay que usar aqui: mide la
 # cobertura de la maquina, elige el coeficiente que corresponde y va a 16 workers.
-# Ver scripts/mutate-local.sh y el comentario de MUTATE_TIMEOUT_COEFFICIENT.
-mutate-local: ## Mutation testing en local, con workers y timeout ajustados a esta maquina (~10min)
-	@scripts/mutate-local.sh
+# Ver scripts/mutate-all.sh y el comentario de MUTATE_TIMEOUT_COEFFICIENT.
+mutate-all: ## Mutation testing en local, con workers y timeout ajustados a esta maquina (~10min)
+	@scripts/mutate-all.sh
 
-mutate-local-diff: ## Como mutate-local pero solo el diff vs main (bucle diario, <1min)
-	@scripts/mutate-local.sh --diff
+mutate-all-diff: ## Como mutate-all pero solo el diff vs main (bucle diario, <1min)
+	@scripts/mutate-all.sh --diff
 
 mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
 	@$(MAKE) --no-print-directory _mutate_check

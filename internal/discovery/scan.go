@@ -53,12 +53,7 @@ func Scan(cfg config.Config) ([]Project, error) {
 			errs = append(errs, fmt.Sprintf("root ilegible: %s", root))
 			continue
 		}
-		ps, err := scanRoot(abs, cfg)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", root, err))
-			continue
-		}
-		projects = append(projects, ps...)
+		projects = append(projects, scanRoot(abs, cfg)...)
 	}
 
 	// slices.SortFunc en vez de sort.Slice: el comparador de tres vías es el
@@ -74,14 +69,19 @@ func Scan(cfg config.Config) ([]Project, error) {
 }
 
 // scanRoot hace el walk de un root con podas.
-func scanRoot(root string, cfg config.Config) ([]Project, error) {
+//
+// NO devuelve error, y no por descuido: `filepath.WalkDir` solo propaga lo que
+// le devuelve su callback, y este se traga todo (los errores de lectura caen en
+// `return nil`). Devolver un `error` aquí era una rama que ningún test podía
+// matar y que mutation reportaba como cobertura muerta.
+func scanRoot(root string, cfg config.Config) []Project {
 	exclude := make(map[string]bool, len(cfg.Exclude))
 	for _, name := range cfg.Exclude {
 		exclude[name] = true
 	}
 
 	var projects []Project
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // ilegible: se salta sin abortar
 		}
@@ -97,10 +97,7 @@ func scanRoot(root string, cfg config.Config) ([]Project, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return projects, nil
+	return projects
 }
 
 // inspect clasifica un directorio con marcador.

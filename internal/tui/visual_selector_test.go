@@ -514,3 +514,28 @@ func TestVisualNoBloqueaPorRebaseEnCurso(t *testing.T) {
 		t.Errorf("el rebase en curso bloqueó el preview: running=%v cmd=%v", m.running, cmd != nil)
 	}
 }
+
+// Un subcomando que no es de la tabla no puede tractarse como variante con ref:
+// `visualArgv` lo deja sin argumento posicional en vez de inventarle uno. El
+// camino no se alcanza desde la UI (la segunda tecla solo puede ser una
+// variante), asi que se fija aqui para que la tabla y el argv no se
+// desincronicen en silencio.
+func TestVisualArgvSubDesconocidoNoInventaRef(t *testing.T) {
+	dir := "/cache/gitdash/git-sim"
+	got := visualArgv("squash", "origin/main", dir)
+	want := []string{"git-sim", "--media-dir", dir, "squash"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("visualArgv(%q) = %#v, want %#v", "squash", got, want)
+	}
+}
+
+// Sin un directorio de cache no hay media-dir, y sin media-dir git-sim escribe
+// `git-sim_media/` DENTRO del repo (y lo dejaria dirty). El fallo se propaga
+// para que quien llama avise y no lance.
+func TestVisualMediaDirSinCacheDirDaError(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "")
+	if dir, err := visualMediaDir(); err == nil {
+		t.Errorf("visualMediaDir = %q, want error sin directorio de cache", dir)
+	}
+}

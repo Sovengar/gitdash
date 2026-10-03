@@ -1166,3 +1166,35 @@ func TestPlazosEnUnidades(t *testing.T) {
 		t.Errorf("toastDuration() = %v, want 3s (un %v se leeria demasiado rapido)", d, d)
 	}
 }
+
+// El filtro "solo dirty" se dice en el banner de stats, no solo en la tabla: es
+// el estado del filtro activo y sin el aviso parece que no hay filtro puesto.
+func TestStatsAnunciaElFiltroSoloDirty(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	m.onlyDirty = true
+
+	if sec := m.statsSection(); !strings.Contains(sec, "[dirty]") {
+		t.Errorf("stats con onlyDirty = %q, want que lo anuncie", sec)
+	}
+}
+
+// El título del borde de la ficha marca el worktree. Es la misma marca que usa
+// la tabla, y sin ella una sub-fila de worktree se lee como un repo mas.
+func TestDetailTitleMarcaElWorktree(t *testing.T) {
+	r := row{project: discovery.Project{Name: "feature", IsWorktree: true}}
+	if got := detailTitle(r); !strings.Contains(got, "feature") || !strings.Contains(got, "[worktree]") {
+		t.Errorf("detailTitle = %q, want el nombre y la marca de worktree", got)
+	}
+}
+
+// Y el grupo también compone el titulo, para que worktree + grupo no se pisen.
+func TestDetailTitleJuntaGrupoYWorktree(t *testing.T) {
+	r := row{project: discovery.Project{Name: "feature", PrimaryGroup: "vroom", IsWorktree: true}}
+	got := detailTitle(r)
+	for _, want := range []string{"feature", "vroom", "[worktree]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("detailTitle = %q, want que contenga %q", got, want)
+		}
+	}
+}

@@ -178,11 +178,14 @@ func wrapText(text string, maxWidth int) []string {
 		}
 		cur := ""
 		for _, w := range words {
+			// El bucle inner CEDE PROGRESO por construcción, no por una
+			// salvaguarda: `splitWidth` devuelve siempre un `head` no vacío y
+			// estrictamente más corto que `w` cuando `w` no cabe, así que
+			// `w = tail` no puede quedarse igual. Ese es el contrato que
+			// garantiza el contrato de splitWidth, y por eso aquí no hace
+			// falta un `if head == "" { break }` que ningún test podía matar.
 			for ansi.StringWidth(w) > maxWidth {
 				head, tail := splitWidth(w, maxWidth)
-				if head == "" { // salvaguarda: nunca ceder sin progreso
-					break
-				}
 				if cur != "" {
 					lines = append(lines, cur)
 					cur = ""
@@ -203,15 +206,21 @@ func wrapText(text string, maxWidth int) []string {
 			lines = append(lines, cur)
 		}
 	}
-	if len(lines) == 0 {
-		lines = append(lines, "")
-	}
+	// Nunca se devuelve vacío: `strings.Split` da al menos un párrafo y cada
+	// párrafo deja al menos una línea (los vacíos, explícitamente). Los
+	// callers dependen de eso —`renderToast` dimensiona con len(wrapped) y
+	// `blockWidth` con la primera línea—, y la guarda que lo defendía
+	// (`if len(lines) == 0`) era inalcanzable por esta misma razón.
 	return lines
 }
 
 // splitWidth corta s en el mayor prefijo que cabe en maxWidth celdas. Si la
 // primera runa ya es más ancha que maxWidth se corta igualmente (una runa),
 // para garantizar progreso y no entrar en bucle.
+//
+// CONTRATO: si `maxWidth >= 1` y `s` no está vacía, devuelve un `head` NO vacío
+// y estrictamente más corto que `s`. Es lo que permite al bucle de wrapText
+// cortar sin guarda de progreso, y hay un test que lo reconstruye entero.
 func splitWidth(s string, maxWidth int) (string, string) {
 	width := 0
 	for i, r := range s {

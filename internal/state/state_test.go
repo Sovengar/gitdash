@@ -325,3 +325,25 @@ func TestSaveCollapsedNoRompeElAnterior(t *testing.T) {
 	}
 	_ = antes
 }
+
+// El tercer punto de fallo del guardado atomico, distinto de los dos de arriba:
+// el WriteFile del `.tmp` falla. se provoca con un DIRECTORIO llamado
+// `collapsed.json.tmp`: MkdirAll(base) va bien, el temporal no se puede escribir
+// porque hay un directorio en su sitio, y el Rename nunca llega. Sin este caso
+// el "no Rompe el anterior" solo cubre el paso del Rename.
+//
+// No se usan permisos: un 0o000 lo lee root y el test diria una cosa en local y
+// otra en CI.
+func TestSaveCollapsedFallaAlEscribirElTemporal(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, FileName+".tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := NewStoreAt(base).SaveCollapsed(map[string]bool{"a": true})
+	if err == nil {
+		t.Fatal("SaveCollapsed = nil, want error: el temporal es un directorio")
+	}
+	if !strings.Contains(err.Error(), "could not write collapsed.json") {
+		t.Errorf("error = %q, want que nombre el fallo de escritura del temporal", err)
+	}
+}

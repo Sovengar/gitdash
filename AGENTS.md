@@ -29,6 +29,8 @@ go mod tidy                                        # tras añadir deps
 ```
 
 ```bash
+make coverage-check                                # perfil de cobertura + gate (diff al 100%, total con suelo)
+make mutate-all                                    # mutation testing del modulo entero, ajustado a esta maquina
 ./scripts/gen-fixtures.sh                          # regenera testdata/playground
 bin/gitdash --print                                # modo tabla one-shot
 # smoke test de la TUI (ver Gotcha 3):
@@ -64,7 +66,7 @@ siempre y bloquea todos los PRs que no toquen las rutas filtradas.
      paquetes cruzados y los helpers usados desde otros (`internal/testutil`)
      salen sin cubrir. Medido: 97.30% sin él, 98.17% con él.
   3. `Coverage gate` → `scripts/diff-coverage.sh`: el **diff del PR al 100%** y
-     el **total con suelo** (`scripts/coverage-floor`, 97.97%, commiteado y solo
+     el **total con suelo** (`scripts/coverage-floor`, commiteado y solo
      sube). La base del diff es el **merge-base explícito**, no el nombre de la
      rama: en el runner `git diff main...HEAD` sale vacío y el gate aprobaría en
      silencio. Por eso el checkout va con `fetch-depth: 0`.
@@ -103,6 +105,12 @@ Reglas de la rama `main` (ruleset **`protect-main`**, reproducible con
 - **Un gate nuevo no está probado hasta que ha pasado de verdad.** El de
   cobertura falló dos veces en el PR #19, y las dos por el workflow, no por el
   código: faltaba `-coverpkg` y la base del diff era una ref no comparable.
+- **Esperar a un run con `gh run watch`, nunca con `sleep N; gh pr checks`.** No
+  hay websocket ni SSE para el estado de jobs: `gh run watch <id> --interval 5
+  --exit-status` es el canal de facto (bloquea con polling interno y sale con el
+  código del run). El polling a mano cuesta minutos por run y además se queda en
+  runs *stale*: tras un force-push hay que volver a pedir el id, porque el anterior
+  ya no describe el commit. Con `watch` se pide el id una vez y se bloquea.
 
 Ante un merge: verificar que el workflow `push` de `main` quedó verde y que el
 badge del README reporta `passing` (el badge cachea unos segundos).
@@ -171,25 +179,37 @@ config → discovery (walk por marcador) → gitstatus (subprocess por repo, poo
    detached. La ruta es TODO lo restante (puede contener espacios).
 5. **Fixtures**: el marcador debe commitearse en el commit base, si no
    aparece como untracked y ensucia el estado dirty de todos los repos.
-6. **textinput v2 con teclas sintéticas**: `tea.KeyPressMsg` necesita
+6. **La cobertura NO puede depender de la máquina**: dos trampas que ya se
+   pagaron, y las dos hacen que local y CI midan distinto.
+   - **Permisos**: un test con `0o000` mide una cosa en local y otra en CI,
+     porque root lee un `0o000` (y root corre en algunos runners, no en otros).
+     Para "este fichero no se puede leer" usa **EISDIR**: un *directorio* con el
+     nombre del marcador. Falla igual y falla siempre.
+   - **Herramientas instaladas**: un `t.Skip("lazygit no instalado")` salta el
+     camino entero y sus statements no llegan al perfil. Para una herramienta
+     externa usa un **stub en el PATH** (como `forgeStub` con las CLI de forge),
+     no un skip.
+   Por eso el suelo de `scripts/coverage-floor` es 100.00% y da igual en los dos:
+   está medido con un PATH sin lazygit, no supuesto.
+7. **textinput v2 con teclas sintéticas**: `tea.KeyPressMsg` necesita
    `Code` Y `Text` — solo `Code` no inserta runas en el input.
-7. **La política de pull es del usuario, no nuestra**: `commands.pull` va
+8. **La política de pull es del usuario, no nuestra**: `commands.pull` va
    **sin flags** a propósito. Los flags en la línea de comandos pisan el
    gitconfig, así que un `--ff-only` hardcodeado anulaba un `pull.rebase=true`
    del usuario (comprobado: el mismo repo divergente rebasea con `git pull` pelado
    y no con `git pull --ff-only`). Las variantes con flags existen solo para el
    selector de `p`, que ofrece la política explícita. **No reintroduzcas flags en
    el default.**
-8. **Un pull --rebase que choca no es un fallo limpio**: deja el rebase a medias
+9. **Un pull --rebase que choca no es un fallo limpio**: deja el rebase a medias
    (`rebase-merge`/`rebase-apply` en el dir del worktree). Por eso
    `gitstatus.RebaseInProgress` existe y el aviso tiene prioridad sobre los
    hints de divergencia/upstream: decir "falló" invita a reintentar sobre un
    rebase sin resolver. Se resuelve con `git rev-parse --git-path`, no mirando
    `.git/rebase-*` a pelo, porque en un worktree `.git` es un fichero.
-9. **El argv resuelto viaja en `actionMsg`/`actionResult`**: con la política
+10. **El argv resuelto viaja en `actionMsg`/`actionResult`**: con la política
    delegada en el gitconfig, el kind ya no implica los flags. El detalle lo
    muestra; sin eso la UI miente sobre lo que reconcilió.
-10. **Las filas se ordenan attention-first**: la posición del cursor NO es la del
+11. **Las filas se ordenan attention-first**: la posición del cursor NO es la del
    fixture de test. Los tests que necesitan una fila concreta la localizan por
    path (`cursorOn`), no por índice.
 

@@ -891,3 +891,30 @@ func TestRemoveWorktreeSubstitutedTokenIgnored(t *testing.T) {
 		})
 	}
 }
+
+// El segundo nivel del borrado con el mapa de tokens sin inicializar. El mapa
+// se crea aquí, no antes: un `nil` al indexar asignaría a una nil map y
+// reventaría, y el camino se llega nada más arrancar (el store puede no existir
+// sin HOME).
+func TestRemoveTokensSeInicializaEnElSegundoNivel(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "repo")
+	wt := filepath.Join(filepath.Dir(parent), "wt")
+	p, st := repoWithWorktrees("repo", parent, gitstatus.Worktree{Path: wt, Branch: "feature"})
+	m := newTestModel(t, []discovery.Project{p}, st)
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	e, ok := m.selectedEntry()
+	if !ok || e.kind != kindWorktree {
+		t.Fatalf("el cursor no quedó sobre una sub-fila: %+v", e)
+	}
+	m = armedOver(t, m, e, false)
+	m.removeTokens = nil
+
+	m, _ = press(m, "D")
+	if m.removeTokens == nil {
+		t.Fatal("removeTokens sigue nil tras confirmar el borrado")
+	}
+	if m.removeTokens[parent] == 0 {
+		t.Errorf("no se registró el intento de borrado: removeTokens = %v", m.removeTokens)
+	}
+}

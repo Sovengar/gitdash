@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mutate-local.sh — la corrida de mutation testing como se debe hacer en local.
+# mutate-all.sh — la corrida de mutation testing como se debe hacer en local.
 #
 # Por que existe y por que no es solo un `make mutate` con otros numeros:
 #
@@ -28,12 +28,12 @@
 # mutante realmente colgado tardaria 11 minutos en caer en vez de 46s.
 #
 # Uso:
-#   scripts/mutate-local.sh             # modulo completo
-#   scripts/mutate-local.sh --diff      # solo el diff vs main (bucle diario)
-#   scripts/mutate-local.sh --diff-dry  # el denominador del diff, sin mutar
-#   scripts/mutate-local.sh --dry       # el denominador del modulo, sin mutar
+#   scripts/mutate-all.sh             # modulo completo
+#   scripts/mutate-all.sh --diff      # solo el diff vs main (bucle diario)
+#   scripts/mutate-all.sh --diff-dry  # el denominador del diff, sin mutar
+#   scripts/mutate-all.sh --dry       # el denominador del modulo, sin mutar
 #
-# Override: WORKERS=8 COEF=10 scripts/mutate-local.sh
+# Override: WORKERS=8 COEF=10 scripts/mutate-all.sh
 
 set -uo pipefail
 
@@ -53,7 +53,7 @@ MAX=${MAX:-60m}
 PROGRESS_RE='at [^[:space:]]+:[[:digit:]]+:[[:digit:]]+[^[:space:]]*$'
 
 [[ -x $WD ]] || {
-	echo "mutate-local: falta el supervisor en $WD" >&2
+	echo "mutate-all: falta el supervisor en $WD" >&2
 	echo "  chezmoi source: ~/.local/share/chezmoi/home/dot_local/lib/swe/lib/executable_watchdog.sh" >&2
 	echo "  aplica con: chezmoi apply ~/.local/lib/swe/lib/watchdog.sh" >&2
 	exit 2
@@ -81,7 +81,7 @@ esac
 
 # La pre-pasada de dry-run es la que mide la cobertura, y su DURACION es lo que
 # decide el coeficiente. Sale de aqui el número, no de una constante inventada.
-echo "mutate-local: midiendo la cobertura para elegir el timeout por mutante…" >&2
+echo "mutate-all: midiendo la cobertura para elegir el timeout por mutante…" >&2
 # El formato real es "done in 8.858216525s" (log.Infof("done in %s\n"), con
 # %s sobre un time.Duration). El `sed` saca los NUMEROS y descarta la 's' que
 # dura el valor; un `s|.*done in (.*)|\1|` se comia el resto de la linea, que en
@@ -120,7 +120,7 @@ timeout_secs=$(awk -v c="$cov_secs" -v k="$COEF" 'BEGIN{printf "%d", c*k+2}')
 # Medido: con la cache a medio calentar la cobertura salia en 12s y coef 30 daba
 # 363s por mutante.
 if [[ $timeout_secs -gt 120 ]]; then
-	echo "mutate-local: AVISO — el techo por mutante sale en ${timeout_secs}s." >&2
+	echo "mutate-all: AVISO — el techo por mutante sale en ${timeout_secs}s." >&2
 	echo "  Un mutante colgado pasaria ${timeout_secs}s sin que nadie lo mate." >&2
 	echo "  Si la cache se esta calentando, espera a que lo este y repite; o forzalo:" >&2
 	echo "    COEF=2 $0 ${1:+--diff}" >&2
@@ -151,11 +151,11 @@ TOTAL=$(go tool gremlins unleash "${SCOPE[@]}" --dry-run \
 	--exclude-files "$MUTATE_EXCLUDE" --coverpkg "$MUTATE_COVERPKG" 2>/dev/null |
 	grep -cE "$PROGRESS_RE")
 
-echo "mutate-local: cobertura ${cov_secs}s -> coef $COEF, techo por mutante ${timeout_secs}s" >&2
-echo "mutate-local: ${WORKERS} workers, ${TOTAL} mutantes esperados" >&2
+echo "mutate-all: cobertura ${cov_secs}s -> coef $COEF, techo por mutante ${timeout_secs}s" >&2
+echo "mutate-all: ${WORKERS} workers, ${TOTAL} mutantes esperados" >&2
 
 if [[ ${1:-} == --dry || $SOLO_DRY -eq 1 ]]; then
-	echo "mutate-local: solo el denominador; nada que mutar"
+	echo "mutate-all: solo el denominador; nada que mutar"
 	exit 0
 fi
 

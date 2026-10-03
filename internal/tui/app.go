@@ -503,6 +503,10 @@ func (m *Model) fetchTargets() []string {
 // con timeout por fetch; tras cada fetch re-colecciona el estado. class
 // distingue el fetch que pidió una tecla del automático del scan: el argv es el
 // mismo en ambos y solo el origen los separa en el command log.
+//
+// Devuelve SIEMPRE nil: publica por el canal de eventos, así que el que
+// devuelve el Cmd no tiene nada que devolver. Los callers NO deben acumular su
+// resultado (una rama `if c != nil` sobre esto era código muerto).
 func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 	if len(paths) == 0 {
 		return nil
@@ -525,12 +529,10 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 			go func(p string) {
 				defer wg.Done()
 				sendEvent(ctx, events, fetchStateMsg{path: p, state: "fetching"})
-				select {
-				case sem <- struct{}{}:
-					defer func() { <-sem }()
-				case <-ctx.Done():
+				if !adquirirSlot(ctx, sem) {
 					return
 				}
+				defer func() { <-sem }()
 				fctx, fcancel := context.WithTimeout(ctx, timeout)
 				defer fcancel()
 				if err := gitstatus.Fetch(fctx, p, class, args...); err != nil {
@@ -552,6 +554,28 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 		sendEvent(ctx, events, fetchDoneMsg{ok: ok, failed: failed})
 	}()
 	return nil
+}
+
+// adquirirSlot toma un hueco del semáforo de fetch, o devuelve false si el
+// contexto se cancela antes de conseguirlo.
+//
+// Existe separada del `select` inline por una razón concreto: la rama
+// "cancelado esperando hueco" solo es alcanzable cuando hay MÁS repos que
+// huecos, y para provocarla desde un test había que Petersonellar una carrera
+// (cancelar mientras N goroutines esperan). Con la función suelta, el test
+// llena el semáforo, cancela y la decisión es determinista — y el contrato
+// ("un fetch cancelado ANTES de empezar no cuenta como fallo") queda escrito
+// donde se puede comprobar.
+//
+// El que ya tiene hueco no se queda sin hacer nada: eso es del context de la
+// llamada, que cancela el proceso de git en vuelo.
+func adquirirSlot(ctx context.Context, sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // startActionCmd lanza pull/push capturado sobre un repo. Devuelve

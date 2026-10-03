@@ -828,3 +828,44 @@ func TestPRURLYNotaDelDesenlace(t *testing.T) {
 		t.Errorf("un error suelto no llega al aviso: %q", msg)
 	}
 }
+
+// Sin un envío en curso, `prCreateCmd` no tiene nada que hacer. El caso sale de
+// la propia forma del seam: el overlay publica el envío y el Cmd se ejecuta un
+// tick después, así que entre uno y otro puede llegar el rescan que reponte la
+// cola. Sin esta guarda, ese tick ejecutaría el último envío otra vez.
+func TestPRCreateCmdSinEnvioNoHaceNada(t *testing.T) {
+	m, _ := prModel(t, prRepo(t, "git@github.com:acme/widget.git"))
+	m.prPending = nil
+	if cmd := m.prCreateCmd(); cmd != nil {
+		t.Errorf("prCreateCmd sin envío = %v, want nil", cmd)
+	}
+}
+
+// Un proveedor DECLARADO en la config pero no soportado no es el mismo caso que
+// un host desconocido: aquí el remote sí resuelve (el host está en el mapa), pero
+// no hay puerta — ni binario ni argv. Es alcanzable por la API: `Config.Forges`
+// es un campo exportado, así que un consumidor puede dejar un proveedor que el
+// loader de TOML habría descartado (config.LoadFrom avisa y lo ignora). Por eso
+// el guard de prCreateCmd no es código muerto, y por eso tiene test: sin él, un
+// argv vacío llegaría al Runner.
+func TestPRForgeEnElMapaSinPuertaNoEjecutaNada(t *testing.T) {
+	dir := prRepo(t, "git@bit.example.com:acme/widget.git")
+	argvFile := forgeStub(t, "gh", "echo https://bit.example.com/acme/widget/pull/1")
+	m, rec := prModel(t, dir)
+	m.cfg.Forges = map[string]config.ForgeConfig{
+		"bitbucket": {Enabled: true, Host: "bit.example.com"},
+	}
+
+	m, _ = prEnvíaPR(t, m, "un título")
+	res := awaitPR(t, &m)
+
+	if !strings.Contains(res.reject, "has no PR support in gitdash") {
+		t.Errorf("aviso = %q, want que nombre que no hay soporte de PR", res.reject)
+	}
+	if prExec(rec) != nil {
+		t.Error("se registró un exec para un forge sin puerta")
+	}
+	if _, err := os.Stat(argvFile); err == nil {
+		t.Error("la CLI se ejecutó para un forge sin puerta")
+	}
+}

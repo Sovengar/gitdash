@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -883,5 +884,32 @@ func TestWorktreeDeOtraRaizMuestraRutaAbsoluta(t *testing.T) {
 	out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
 	if !strings.Contains(out, "/mnt/wt-otro") {
 		t.Errorf("la ficha = %q, want la ruta absoluta del worktree de otra raiz", out)
+	}
+}
+
+// La ruta de un worktree se pinta RELATIVA al repo cuando se puede, y absoluta
+// cuando no. `filepath.Rel` solo falla cuando no puede hacer comparables las
+// dos rutas, y como el path del repo y el del worktree llegan de fuentes
+// distintas eso es alcanzable (un path de proyecto relativa, que el cache
+// antiguo o un repositorio movido dejan). Sin el `rel = wt.Path`, un fallo de
+// Rel dejaría la línea vacía y el worktree desaparecería de la ficha.
+func TestFichaWorktreeConPathNoComparableCaenALaAbsoluta(t *testing.T) {
+	// El path del repo es RELATIVO y el del worktree ABSOLUTO: Rel no puede
+	// deducir una ruta relativa entre las dos.
+	rel := "api"
+	abs := filepath.Join(t.TempDir(), "feature")
+	m, r := detailRowWith(t, rel, func() gitstatus.Snapshot {
+		s := snapClean()
+		s.Worktrees = []gitstatus.Worktree{{Path: abs, Branch: "feature", Head: "abc1234"}}
+		return s
+	}())
+	m.width = 120
+
+	out := stripANSI(m.renderDetail(r, 40))
+	if !strings.Contains(out, "feature") {
+		t.Fatalf("el worktree no sale en la ficha:\n%s", out)
+	}
+	if !strings.Contains(out, abs) {
+		t.Errorf("con Rel imposible la ruta deberia caer a la absoluta %q:\n%s", abs, out)
 	}
 }

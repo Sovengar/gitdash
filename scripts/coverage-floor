@@ -5,7 +5,7 @@
 #
 # No es el objetivo, es el minimo. El objetivo es el 100% del DIFF, que es lo
 # que obliga a testear lo que se toca; este suelo existe para que el conjunto no
-# se degrade entre PRs que el diff no mira.
+# se degrade entre PRs que no tocan codigo.
 #
 # Y es un numero, no una lista de ficheros excluidos: el unico statement que no
 # llega al perfil combinado es func main(), que se ejecuta de verdad en un
@@ -13,15 +13,23 @@
 # cmd/gitdash/main_test.go y en el propio script. Un suelo mas bajo para
 # "quedarse tranquilo" seria mentira.
 #
-# ESTE NUMERO ES EL DE CI, NO EL DE LOCAL, y por eso no es 98.17.
+# 100.00% MEDIDO EN LOCAL Y EN CI. No hace falta margen: los dos dan
+# 1951/1951 statements.
 #
-# En local da 98.17 y en CI 97.91. La diferencia son 4 statements de
-# internal/discovery: dos tests provocan un error de lectura con permisos 0o000,
-# y root PUEDE leer un 0o000, asi que en el runner (que corre como root) se
-# saltan. Lo que SI se ejecuta en CI pero no en local es main(), y por eso el
-# numero de local no baja de 98.
+# QUE HIZO QUE COINCIDAN. Este numero solia ser mas bajo en CI que en local, y la
+# diferencia (4 statements) NO era por root, como decia la version anterior de
+# este fichero: el runner de GitHub no corre como root (verificado contra el log
+# del job Test), asi que los tests de permisos 0o000 SI se ejecutan ahi. Era por
+# lazygit: dos tests llevaban `t.Skip("lazygit no instalado")`, asi que en un
+# runner sin lazygit el camino entero se saltaba y sus statements no llegaban al
+# perfil. Ahora usan un lazygit de mentira en el PATH (conLazygitFalso), el mismo
+# truco que las CLI de forge, y se midio el perfil con un PATH sin lazygit: 100.00%
 #
-# Fijar el suelo con el de local haria que CI fallara SIEMPRE, que es un gate
-# peor que no tener gate: entrena a ignorarlo. Cuando esos tests dejen depender
-# de los permisos, el suelo sube solo, y ese dia este numero es el que sobra.
-97.91
+# OTRA TRAMPA QUE ESTO EVITA: los casos de "fichero ilegible" (marcador o .git
+# que no se pueden leer) usan EISDIR —un DIRECTORIO con el nombre del marcador—
+# y NO 0o000. root lee un 0o000, asi que un test de permisos mide una cosa en
+# local y otra en CI: el suelo habriadependido de quien ejecuta.
+#
+# MEDIDO, NO ADIVINADO: el perfil de CI se reprodujo con un PATH sin lazygit,
+# que es justo lo que ve el runner.
+100.00

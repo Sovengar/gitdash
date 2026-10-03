@@ -395,6 +395,22 @@ var hintLabels = map[string]string{
 	"pr": "open PR",
 }
 
+// hintActions es el ORDEN en que la barra de hints compone sus filas: cada
+// hint sale de aquí y de `hintLabels`. Vive fuera de HintBarLines para que un
+// test pueda exigir que toda acción tenga etiqueta: el `hintLabels[action]` de
+// abajo indexa a pelo, y sin ese test una acción nueva sin etiqueta pintaría un
+// hint con la tecla y nada más ("p "), que es indistinguible de un bug de
+// render.
+//
+// Las acciones sin etiqueta (navegación, hardcodeadas en la UI) NO entran aquí:
+// la barra las escribe a mano.
+var hintActions = []string{
+	"dirty", "search", "fetch", "fetch_all", "pull",
+	"push", "lazygit", "editor", "rescan", "recollect",
+	"fold", "command", "log", "quit", "worktree_remove", "visual",
+	"pr",
+}
+
 // HintBarLines devuelve las líneas de hints agrupadas por categoría,
 // derivada de los keybindings configurados. Cada línea es un string
 // con los hints separados por " · ".
@@ -403,21 +419,12 @@ func (c Config) HintBarLines() []string {
 	row2 := []string{}           // acciones git
 	row3 := []string{}           // tools
 
-	for _, action := range []string{
-		"dirty", "search", "fetch", "fetch_all", "pull",
-		"push", "lazygit", "editor", "rescan", "recollect",
-		"fold", "command", "log", "quit", "worktree_remove", "visual",
-		"pr",
-	} {
+	for _, action := range hintActions {
 		key, ok := c.Keybindings[action]
 		if !ok {
 			continue
 		}
-		label, ok := hintLabels[action]
-		if !ok {
-			label = key
-		}
-		hint := key + " " + label
+		hint := key + " " + hintLabels[action]
 
 		switch action {
 		case "dirty", "search", "fold", "command":

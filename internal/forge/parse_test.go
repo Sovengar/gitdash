@@ -238,3 +238,22 @@ func TestParseRemoteSinPathNoEsRepo(t *testing.T) {
 		}
 	}
 }
+
+// Una barra DOBLE dentro de la ruta no es un segmento vacío que "se pueda
+// normalizar": si se aceptara, Owner y Name dirían una cosa y el argv de
+// `gh pr create` iría a otra, así que el remote se rechaza entero en vez de
+// dejar un RepoRef a medias. Es distinto del caso sin ruta (este sí tiene
+// segmentos, pero uno está vacío), y por eso tiene su propio test: el filtro de
+// `len(parts) < 2` NO lo cazaría.
+func TestParseRemoteConSegmentoVacioNoEsRepo(t *testing.T) {
+	hosts := testHosts()
+	for _, raw := range []string{
+		"git@github.com:acme//widget.git",
+		"https://github.com/acme//widget.git",
+		"https://gitlab.example.com//widget.git",
+	} {
+		if ref, ok := ParseRemoteURL(raw, hosts, nil); ok {
+			t.Errorf("ParseRemoteURL(%q) = %+v, want no parseable (segmento vacío)", raw, ref)
+		}
+	}
+}

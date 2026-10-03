@@ -3,9 +3,11 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"gitdash/internal/cache"
+	"gitdash/internal/cmdlog"
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
@@ -1053,5 +1056,302 @@ func TestTickCmdEmiteElTick(t *testing.T) {
 	}
 	if d := time.Since(start); d < 900*time.Millisecond {
 		t.Errorf("el tick volvio en %v, want ~1s (un tick que no espera no expira nada)", d)
+	}
+}
+
+// --- pump de eventos ---
+
+// Init tiene que arrancar las tres cosas de las que depende el arranque: el
+// scan, la bomba de eventos y el tick. No se comprueba que hagan su trabajo (eso
+// lo cubren los tests de pipeline), sino que el Cmd existe: un `Init` que
+// devolviera nil arrancaría una app sana que nunca vuelve a pintar.
+func TestInitArrancaElPipeline(t *testing.T) {
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
+	if cmd := m.Init(); cmd == nil {
+		t.Error("Init = nil, want un Cmd: sin scan, sin pump y sin tick la app no arranca")
+	}
+}
+
+// La bomba lee UN evento por Cmd (el patrón de tea) y se rearma tras cada uno.
+// Con el canal cerrado tiene que devolver nil, no un evento vacío: un `nil` es
+// lo que la app distingue de "hay trabajo", y un valor no-nil con el canal
+// cerrado la dejaría repintando para siempre.
+func TestWaitForEvent(t *testing.T) {
+	t.Run("entrega el evento y se rearma", func(t *testing.T) {
+		ch := make(chan event, 1)
+		ch <- tickMsg{}
+		if ev := waitForEvent(ch)(); ev == nil {
+			t.Fatal("waitForEvent no devolvio el evento pendiente")
+		}
+		ch <- tickMsg{}
+		if ev := waitForEvent(ch)(); ev == nil {
+			t.Error("la bomba no se rearma: el segundo evento nunca llega")
+		}
+	})
+
+	t.Run("canal cerrado devuelve nil", func(t *testing.T) {
+		ch := make(chan event)
+		close(ch)
+		if ev := waitForEvent(ch)(); ev != nil {
+			t.Errorf("waitForEvent con el canal cerrado = %#v, want nil", ev)
+		}
+	})
+}
+
+// El PRODUCTOR de `collectDoneMsg`: el scan tiene que emitirlo cuando la
+// recolección se acaba. Los demás tests lo inyectan a mano, así que sin este la
+// línea que lo emite —y con ella el cierre real del scan— no la ejercita
+// nadie: el cierre se vería bien en los tests y no llegaría nunca en la app.
+func TestElScanEmiteCollectDoneAlTerminar(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "api")
+	testutil.Init(t, repo)
+	testutil.Marker(t, repo, "api", "", "", false)
+	testutil.CommitFiles(t, repo, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
+
+	cfg := config.Defaults()
+	cfg.Roots = []string{root}
+	m := New(cfg)
+	t.Cleanup(m.cancel)
+
+	m.startScanCmd()
+	if !esperaEvento(t, m, 20*time.Second, func(ev event) bool {
+		_, ok := ev.(collectDoneMsg)
+		return ok
+	}) {
+		t.Fatal("el scan no emitió collectDoneMsg: el pipeline nunca cierra")
+	}
+}
+
+// --- a quién se le hace fetch automático ---
+
+// `fetchTargets` decide a qué repos se les hace fetch tras un scan. Los tres
+// filtros son la razón de que el fetch automático no golpee repos sin
+// upstream, sin repo, ni uno que ya está en curso: los tres son ruido en
+// el log de git y, en el caso del que ya está en curso, dos `git fetch` en
+// paralelo sobre el mismo repo.
+func TestFetchTargetsSoloLosReposQueProcede(t *testing.T) {
+	conRepo := "/tmp/con-repo"
+	sinRepo := "/tmp/sin-repo"
+	enCurso := "/tmp/en-curso"
+	m := newTestModel(t, []discovery.Project{
+		proj("con-repo", conRepo, true),
+		proj("sin-repo", sinRepo, false),
+		proj("en-curso", enCurso, true),
+	}, map[string]gitstatus.Snapshot{
+		conRepo: snapClean(),
+		sinRepo: snapClean(),
+		enCurso: snapClean(),
+	})
+	m.fetchStates[enCurso] = "fetching"
+
+	got := m.fetchTargets()
+	if len(got) != 1 || got[0] != conRepo {
+		t.Errorf("fetchTargets = %v, want solo [%s]", got, conRepo)
+	}
+}
+
+// Un snapshot con error (por ejemplo el repo roto) tampoco se fetchea: no hay
+// nada que traer de un repo que ni siquiera abre.
+func TestFetchTargetsSaltaElRepoConError(t *testing.T) {
+	roto := "/tmp/roto"
+	bueno := "/tmp/bueno"
+	m := newTestModel(t, []discovery.Project{
+		proj("roto", roto, true), proj("bueno", bueno, true),
+	}, map[string]gitstatus.Snapshot{
+		roto:  {Err: "no such repository"},
+		bueno: snapClean(),
+	})
+	got := m.fetchTargets()
+	if len(got) != 1 || got[0] != bueno {
+		t.Errorf("fetchTargets = %v, want solo [%s]", got, bueno)
+	}
+}
+
+// `rescan` arranca un pipeline nuevo. No se mira el Cmd que devuelve
+// (startScanCmd devuelve nil siempre: publica por el canal), sino el estado que
+// deja: sin `scanning` la app se creería que no hay nada en curso y el segundo
+// rescan se colaría sin avisar.
+func TestRescanCuandoNoHayScanEnCurso(t *testing.T) {
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
+	m.scanning = false
+	m, _ = press(m, "r")
+	if !m.scanning {
+		t.Error("rescan no marco el scan como en curso")
+	}
+}
+
+// El límite de concurrencia del fetch es un semáforo, y su rama de "cancelado
+// esperando hueco" no es decorativa: un repo que no llega a ejecutarse no debe
+// contarse ni como ok ni como fallo (si no, `fetch all` sobre 20 repos
+// cerraría con "1 ok, 19 failed" tras un simple Ctrl-C).
+//
+// Inline en el `select` de la goroutine, esta rama no se podía probar sin una
+// carrera (cancelar mientras N goroutines esperan turno). Con `adquirirSlot`
+// suelta, llenar el semáforo y cancelar es determinista.
+func TestAdquirirSlot(t *testing.T) {
+	t.Run("con hueco lo toma", func(t *testing.T) {
+		sem := make(chan struct{}, 2)
+		if !adquirirSlot(context.Background(), sem) {
+			t.Error("adquirirSlot = false con un hueco libre, want true")
+		}
+		if len(sem) != 1 {
+			t.Errorf("el hueco no se ocupo: len(sem) = %d, want 1", len(sem))
+		}
+	})
+
+	t.Run("cancelado sin hueco no lo toma", func(t *testing.T) {
+		sem := make(chan struct{}, 1)
+		sem <- struct{}{} // ocupado: el siguiente tiene que esperar
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if adquirirSlot(ctx, sem) {
+			t.Error("adquirirSlot = true con el semáforo lleno y el contexto cancelado, want false")
+		}
+		if len(sem) != 1 {
+			t.Errorf("ocupó un hueco que no era suyo: len(sem) = %d, want 1", len(sem))
+		}
+	})
+
+	// Y el caso que de verdad importa en la app: sin cancelar, esperar un hueco
+	// que se libera tiene que concederse. Un `select` mal escrito (priorizando
+	// ctx.Done) passesía por aquí y devolvería false sin motivo.
+	t.Run("espera a que se libere", func(t *testing.T) {
+		sem := make(chan struct{}, 1)
+		sem <- struct{}{}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			<-sem // libera como lo haría el fetch anterior
+		}()
+		if !adquirirSlot(ctx, sem) {
+			t.Error("adquirirSlot = false esperando un hueco que se liberaba, want true")
+		}
+	})
+}
+
+// gitLentoEspera devuelve un shim de `git` que se cuela en el PATH, anota cada
+// invocación en el fichero `log` y se queda esperando 30s en cada `fetch`,
+// antes de delegar el resto de verbos en el git de verdad.
+//
+// Es lo que hace reproducible la cola del fetch sin red: un origin inalcanzable
+// también tardaría, pero su timeout depende de la red del runner, y un test que
+// depende de la red es un test que falla en CI sin decir por qué. Aquí el retraso
+// es exacto y local.
+//
+// `exec`, no `sleep & wait`: con un nieto, el SIGKILL de CommandContext mata al
+// shim pero el nieto se queda con el pipe de stdout y Output() no vuelve nunca
+// (medido). Con exec hay un solo proceso y se mata entero.
+func gitLentoEspera(t *testing.T, log string) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git no disponible")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + log + "\n" +
+		"if [ \"$1\" = \"fetch\" ]; then exec sleep 30; fi\n" +
+		"exec " + real + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// esperaLineasDeEspera espera a que el fichero del shim tenga al menos n líneas.
+func esperaLineasDeEspera(t *testing.T, ruta string, n int, plazo time.Duration, que string) {
+	t.Helper()
+	deadline := time.Now().Add(plazo)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(ruta); err == nil &&
+			len(strings.Split(strings.TrimSpace(string(raw)), "\n")) >= n {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("%s: %s no llegó a %d invocaciones en %s", que, ruta, n, plazo)
+}
+
+// cuántos repos se hacen fetch a la vez en ESTE test.
+//
+// No es un número arbitrario: `sendEvent` con el contexto ya cancelado entrega el
+// mensaje solo la mitad de las veces (medido: 981/2000, el `select` entre un
+// canal con espacio y un ctx.Done() cerrado elige al azar). Por eso la prueba de
+// abajo mira cuántos `failed` se acumulan y necesita volumen para que la
+// detección del fallo sea fiable: con 12 repos en cola, la probabilidad de que
+// pasara inadvertido si el guard no existiera es de 2^-12 (un 0.02%).
+const fetchEnCola = 12
+
+// El guard de `adquirirSlot` DENTRO del batch: un repo que se cancela mientras
+// ESPERA TURNO no se ejecuta, no falla y no se cuenta.
+//
+// El shim de git es lo que hace la situación reproducible sin red: con
+// concurrency=1 el primer fetch ocupa el único hueco durante 30s, así que los
+// demás están de verdad en la cola cuando se cancela.
+//
+// Lo que se mide NO es si `git` llegó a ejecutarse: con el contexto ya
+// cancelado, `exec.CommandContext` ni siquiera lanza el binario (medido), así que
+// el shim no es un discriminante. Lo que el guard cambia es la CONTABILIZACIÓN:
+// sin él, cada repo de la cola sale por `gitstatus.Fetch` → error → `failed++` →
+// `fetchStateMsg{failed}`. Por eso el shim solo sirve para RETENER el hueco, y la
+// aserción va sobre los contadores del lote.
+func TestFetchBatchLosCanceladosEnEsperaNoSeCuentan(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "argv")
+	gitLentoEspera(t, log)
+
+	paths := make([]string, fetchEnCola)
+	projects := make([]discovery.Project, fetchEnCola)
+	states := make(map[string]gitstatus.Snapshot, fetchEnCola)
+	for i := range paths {
+		// Los dirs tienen que EXISTIR: con `cmd.Dir` inexistente, Start falla
+		// antes de ejecutar el shim y el test esperaría un log que no llega.
+		paths[i] = t.TempDir()
+		projects[i] = proj(fmt.Sprintf("repo-%02d", i), paths[i], true)
+		states[paths[i]] = snapClean()
+	}
+	m := newTestModel(t, projects, states)
+	m.cfg.FetchConcurrency = 1 // un solo hueco: el resto TIENE que esperar
+
+	m.fetchBatchCmd(paths, cmdlog.ClassAction)
+
+	// El primero ya está dentro del shim (todos emiten su "fetching" antes de
+	// pedir turno, así que los otros ya están en la cola). Con el hueco ocupado,
+	// el guard tiene algo que decidir.
+	esperaLineasDeEspera(t, log, 1, 10*time.Second, "el primer fetch no llegó a ejecutarse")
+
+	m.cancel()
+
+	// Recogemos lo que el lote produzca. Con el ctx cancelado, `fetchDoneMsg` puede
+	// perderse, así que no se espera: lo que se cuenta son los `failed` de la COLA
+	// que lleguen, y se da margen para que lleguen todos.
+	//
+	// El primero SÍ cuenta como fallo y no es un bug: estaba dentro de `git` cuando
+	// se canceló, su proceso muere y eso es un fallo real (el repo no quedó
+	// actualizado). Lo que no puede pasar es que los que NUNCA llegaron a
+	// ejecutarse se cuenten igual.
+	enCola := make(map[string]bool, fetchEnCola-1)
+	for _, p := range paths[1:] {
+		enCola[p] = true
+	}
+	var contados []string
+	plazo := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case ev := <-m.events:
+			fs, ok := ev.(fetchStateMsg)
+			if ok && fs.state == "failed" && enCola[fs.path] {
+				contados = append(contados, fs.path)
+			}
+		case <-plazo:
+			break drain
+		}
+	}
+	for _, p := range contados {
+		t.Errorf("el repo %s se canceló esperando turno y aun así se contó como fallo: %d de %d en cola",
+			filepath.Base(p), len(contados), fetchEnCola-1)
 	}
 }

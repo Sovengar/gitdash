@@ -1146,3 +1146,16 @@ func TestLogIntentSinRecorderNoRevienta(t *testing.T) {
 		t.Errorf("cmdlog.Entries() = %d con el log apagado, want 0", len(got))
 	}
 }
+
+// Una ejecución sin argv (y sin acción) se pinta como un guion, no como una
+// columna en blanco: una columna vacía se lee como "el comando se perdió" y el
+// guion como "no hay comando que enseñar". Las intenciones nunca pasan por
+// aquí (tienen siempre Key y Action), así que el caso es del exec.
+func TestLogLineSinArgvPoneGuion(t *testing.T) {
+	m, _ := logModel(t)
+	cols := logColumns{kind: logColKind, repo: logColRepo, outcome: logColOutcome, verdict: logColVerdict, argv: 24}
+	line := stripANSI(m.logLine(cmdlog.Entry{Class: cmdlog.ClassAction, Repo: "api"}, cols))
+	if !strings.Contains(line, "-") {
+		t.Errorf("linea sin argv = %q, want el guion en la columna del comando", line)
+	}
+}

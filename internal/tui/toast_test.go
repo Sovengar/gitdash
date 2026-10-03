@@ -529,3 +529,18 @@ func TestWrapTextVacioDevuelveUnaLinea(t *testing.T) {
 		t.Errorf("wrapText(%q) = %q, want una linea", "   ", got)
 	}
 }
+
+// Un bloque que se recorta a cero líneas no se dibuja, pero tampoco debe
+// abortar el apilado: los toasts que sí caben se pintan igual. Sin el `continue`
+// un bloque vacío (un mensaje que se queda sin ancho con el terminal en 1
+// celda) se comería la fila del último y el mensaje se perdería.
+func TestOverlayBloqueVacioNoSeComeLaFila(t *testing.T) {
+	base := strings.Join([]string{"una", "dos", "tres"}, "\n")
+	got := overlayToasts(base, [][]string{{}, {"mas"}, {}}, 40, 3, 0)
+	if !strings.Contains(got, "mas") {
+		t.Errorf("el bloque vacio se comio la fila del que si cabia:\n%s", got)
+	}
+	if strings.Count(got, "\n")+1 != 3 {
+		t.Errorf("la base cambio de alto:\n%q", got)
+	}
+}

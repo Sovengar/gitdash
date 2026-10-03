@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -466,5 +467,87 @@ func TestClassifyGitConFicheroIlegible(t *testing.T) {
 
 	if k, main := classifyGit(git); k != gitNone || main != "" {
 		t.Errorf("classifyGit(ilegible) = %v/%q, want gitNone/%q", k, main, "")
+	}
+}
+
+// Un marcador que NO es un fichero (es un directorio) es un error de lectura, no
+// una ausencia: por eso no cae en el caso de "sin marcador, sin prompt". El
+// aviso importa porque hay algo que arreglar y no es "no hay prompt".
+//
+// Se dispara con un directorio en vez de con permisos a proposito: un 0o000 lo
+// lee root, asi que un test de permisos diria una cosa en local y otra en CI,
+// y este no depende de quien corre.
+func TestMarkerPromptConMarcadorNoLegibleEsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
+	if err == nil {
+		t.Fatal("MarkerPrompt con un marcador que es un directorio = nil, want error")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error = %v, want EISDIR y no ENOENT: un directorio NO es un marcador ausente", err)
+	}
+	if p != "" {
+		t.Errorf("prompt = %q con error, want vacio", p)
+	}
+}
+
+// Un root RELATIVO solo se puede resolver si el proceso tiene cwd, y `Abs`
+// falla sin él. No es teórico: `filepath.Abs` llama a `os.Getwd`, que da ENOENT
+// cuando el directorio de trabajo ya no existe (un repo movido o un `cd` a un
+// tmpdir borrado por otro proceso).
+//
+// El aviso importa: sin él, un root relativo con el cwd roto devuelve cero
+// proyectos y SIN error, que se lee como "no tengo repos" en vez de como "no
+// puedo ni mirar dónde estoy".
+func TestScanConCwdBorradoReportaElRoot(t *testing.T) {
+	roto := t.TempDir()
+	t.Chdir(roto)
+	if err := os.RemoveAll(roto); err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := Scan(cfgRoots("."))
+	if err == nil {
+		t.Fatalf("Scan con el cwd borrado = nil, want error (0 proyectos y sin aviso parece un root vacío): %+v", projects)
+	}
+	if len(projects) != 0 {
+		t.Errorf("projects = %+v, want ninguno", projects)
+	}
+	if !strings.Contains(err.Error(), ".") {
+		t.Errorf("error = %q, want que nombre el root que no pudo resolver", err)
+	}
+}
+
+// `parseMarker` con un marcador que NO se puede leer. No hace falta un 0o000
+// (que root lee): un DIRECTORIO con el nombre del marcador da EISDIR, y el
+// error tiene que PROPAGARSE.
+//
+// `Scan` nunca llama aquí con algo ilegible —`hasMarker` exige que sea un
+// fichero— así que esta es la única forma de que el error llegue al modelo: por
+// eso se prueba la unidad, no el scan. El contrato que importa es que
+// `inspect` lo mete en `MarkerErr`, que es lo que la TUI enseña.
+func TestParseMarkerIlegiblePropagaElError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseMarker(filepath.Join(dir, ".gitdash.toml"))
+	if err == nil {
+		t.Fatal("parseMarker = nil, want el error de lectura")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error = %v, want EISDIR y no ENOENT", err)
+	}
+	// Y el modelo lo muestra en vez de tragárselo: un marcador ilegible es algo
+	// que el usuario tiene que arreglar, no un proyecto sin metadatos.
+	p := inspect(dir, ".gitdash.toml")
+	if p.MarkerErr == "" {
+		t.Errorf("MarkerErr vacio, want el error de lectura: %+v", p)
+	}
+	if p.Name != filepath.Base(dir) {
+		t.Errorf("Name = %q, want el nombre del directorio (el marcador no dio ninguno)", p.Name)
 	}
 }

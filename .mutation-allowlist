@@ -13,8 +13,21 @@
 #
 # ---------------------------------------------------------------------------
 # ESTADO
-# De 172 mutantes vivos a 25 allowlistados. Las dos clases con las que hay que
-# decidir, que se repitieron en todo el repo:
+# Medido con `make mutate-all` (gremlins sobre el modulo entero):
+#
+#   mutants_total 1004 · killed 987 · LIVED 17 · not_covered 83 · timed_out 8
+#   eficacia de test 98.31% · cobertura de mutadores 92.36%
+#
+# Los 17 vivos están allowlistados y son los mismos de antes: ninguna entrada
+# nueva (las que hay son los mismos mutantes con la línea movida, y el texto lo
+# dice donde aplica). Los 12 que se quitaron ya no se generan, porque el sitio
+# mutado se borró al quitar código muerto.
+#
+# OJO con `TIMED OUT`: no va a `mutants_total` y el gate solo mira `LIVED`, así
+# que un run con mutantes sin testear puede reportar 100% de eficacia. Ver el
+# MUTATE_TIMEOUT_COEFFICIENT del Makefile.
+#
+# Las dos clases con las que hay que decidir, que se repitieron en todo el repo:
 #
 #   1. Hueco real de test -> se tapa con un test. Ejemplos: el valor exacto de
 #      un borde, el ancho que compone una celda, el reparto de un presupuesto.
@@ -28,7 +41,7 @@
 
 # --- cmd/gitdash/print.go ------------------------------------------------
 # --- internal/tui/app.go -------------------------------------------------
-CONDITIONALS_NEGATION internal/tui/app.go:370
+CONDITIONALS_NEGATION internal/tui/app.go:380
 #   `if path, err := cache.Path(); err == nil { m.projects = cache.Load(...) }`.
 #   Invertida, la carga ocurre con una ruta que no se pudo resolver. cache.Load
 #   valida cada entrada contra la existencia del marcador en disco, así que con
@@ -46,8 +59,6 @@ CONDITIONALS_NEGATION internal/tui/app.go:370
 #   (`if current.Load() != nil`), o sea que la exterior y la interior cubren lo
 #   mismo.
 
-CONDITIONALS_NEGATION internal/tui/app.go:458
-CONDITIONALS_NEGATION internal/tui/app.go:464
 #   Las dos guardas de cancelación de startScanCmd (después de publicar los
 #   proyectos y después del StreamPool). Son EQUIVALENTES POR CONTRATO, y el
 #   contrato es sendEvent: su select tiene `case <-ctx.Done()`, así que con el
@@ -58,7 +69,6 @@ CONDITIONALS_NEGATION internal/tui/app.go:464
 #   cancelara a mitad de scan vería exactamente los mismos eventos.
 
 # --- internal/tui/table.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:295
 CONDITIONALS_BOUNDARY internal/tui/table.go:292
 #   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
 #   negación de la comparación que devuelve, así que dentro de la rama `sa` y
@@ -72,7 +82,7 @@ CONDITIONALS_BOUNDARY internal/tui/table.go:292
 #   línea, porque el allowlist se indexa por línea; la demostración no cambia.
 
 # --- internal/tui/update.go ----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/update.go:308
+CONDITIONALS_BOUNDARY internal/tui/update.go:307
 #   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
 #   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
 #   una operación real sobre tokens en vuelo. Para el resto de teclas no se
@@ -80,7 +90,6 @@ CONDITIONALS_BOUNDARY internal/tui/update.go:308
 #   en los tres casos (con tokens, sin tokens, y tecla distinta de esc).
 
 # --- internal/tui/detail.go ----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/detail.go:31
 #   `if avail < minListBlockLines { return 0, false }` de listBudget. Con
 #   avail == minListBlockLines los DOS caminos devuelven lo mismo: room == 0, y
 #   entonces `n <= room` solo es cierto con n == 0, mientras que `room < 1`
@@ -88,23 +97,21 @@ CONDITIONALS_BOUNDARY internal/tui/detail.go:31
 #   todo avail <= minListBlockLines, así que mover el borde un paso no la cambia.
 
 # --- internal/tui/toast.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/toast.go:175
+CONDITIONALS_BOUNDARY internal/tui/toast.go:263
 #   `for ansi.StringWidth(w) > maxWidth` del word-wrap. Solo difiere con una
 #   palabra de ancho EXACTO maxWidth, y en ese caso el resultado es el mismo: la
 #   palabra ocupaba una línea entera de todos modos. Con la mutación el corte
 #   devuelve (w, "") y la línea se cierra igual. Es la misma clase que truncar a
 #   un ancho >= el suyo.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:231
-CONDITIONALS_BOUNDARY internal/tui/toast.go:235
-CONDITIONALS_NEGATION internal/tui/toast.go:235
+CONDITIONALS_BOUNDARY internal/tui/toast.go:250
+CONDITIONALS_NEGATION internal/tui/toast.go:250
 #   Las dos guardas de entrada de overlayToasts. Con width == 0 (y no < 0) el
 #   splice es una identidad pura: x == 0 y bw == 0, así que
 #   `Truncate(l,0) + bloque + TruncateLeft(l,0)` reconstruye la línea. Con
 #   height == len(lines) las dos ramas asignan el mismo valor (height ya está
 #   acotado). Ni width == 0 ni height == len(lines) cambian nada observable.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:248
 #   `if top < 0` del bloque que no cabe entero. Solo difiere con top == 0, donde
 #   keep == bottom+1 == bh: el recorte `block[bh-keep:]` deja el bloque entero.
 #   Es la guarda de "no cabe" escrita al revés por un paso, y en el borde exacto
@@ -119,18 +126,16 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:248
 # terminar antes del timeout de la máquina. No es un hueco de test: allowlistarlo
 # evita el rojo espurio del gate, y si el test que lo mata desaparece, el
 # NOT COVERED de esa línea lo delata.
-CONDITIONALS_BOUNDARY internal/tui/toast.go:69
+CONDITIONALS_BOUNDARY internal/tui/toast.go:75
 #   La guarda de expiración (`now.Sub(created) < duration`). La mata
 #   TestToastDuracionCeroExpiraYa (un toast con duration 0 está expirado ya).
 #   (Las sumas internas del alto libre del panel, que también entraban aquí por
 #   ruido, ya NO están: las mata TestPreviewConFiltroRespetaElShareDelHueco.)
 
 # --- internal/tui/table.go (relativeTime) ---------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:758
-CONDITIONALS_BOUNDARY internal/tui/table.go:761
-CONDITIONALS_BOUNDARY internal/tui/table.go:764
-CONDITIONALS_BOUNDARY internal/tui/table.go:767
-CONDITIONALS_BOUNDARY internal/tui/table.go:770
+CONDITIONALS_BOUNDARY internal/tui/table.go:783
+CONDITIONALS_BOUNDARY internal/tui/table.go:789
+CONDITIONALS_BOUNDARY internal/tui/table.go:792
 #   Los cinco bordes de los buckets de "ahora": <1m, <1h, <24h, <7d, <30d.
 #   Todos son identidades por la granularidad del dato, no por el reloj: la
 #   funcion recibe un epoch de SEGUNDO ENTERO (LastCommit), asi que
@@ -147,7 +152,6 @@ CONDITIONALS_BOUNDARY internal/tui/table.go:770
 
 # --- internal/tui/cmdlogpanel.go -----------------------------------------
 ARITHMETIC_BASE internal/tui/cmdlogpanel.go:104
-INVERT_NEGATIVES internal/tui/cmdlogpanel.go:104
 #   El segundo clamp del offset: `min(m.logOffset, max(0, len(entries)-visible))`.
 #   logOffset ya está acotado a [0, maxOffset] en logScroll, así que este clamp
 #   es la red de seguridad para cuando cambia `visible` (un resize) y el offset
@@ -184,7 +188,6 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:108
 # sale como vivo: la composición lo ata igual.
 
 # --- internal/tui/prcreate.go --------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/prcreate.go:156
 #   El `>= 0` del `strings.Index(reason, "]: ")` de prGitReason. Es una
 #   IDENTIDAD, y la demostración es la guarda de fuera: ese index solo se mira
 #   dentro de `if strings.HasPrefix(reason, "git ")`, así que el motivo empieza
@@ -194,7 +197,6 @@ CONDITIONALS_BOUNDARY internal/tui/prcreate.go:156
 #   entra en la rama y por eso no se recorta, y eso está sujeto con test.
 
 # --- internal/tui/update.go -------------------------------------------------
-CONDITIONALS_NEGATION internal/tui/update.go:66
 #   El `c != nil` que decide encolar el fetch al terminar el scan.
 #   `fetchBatchCmd` devuelve SIEMPRE nil (app.go:544, sin excepción: con o sin
 #   targets solo lanza la goroutine y publishes por el canal de eventos). La
@@ -219,7 +221,7 @@ ARITHMETIC_BASE internal/config/forge.go:169
 #   contrato del código).
 
 # --- internal/forge/tool/tool.go ----------------------------------------
-ARITHMETIC_BASE internal/forge/tool/tool.go:102
+ARITHMETIC_BASE internal/forge/tool/tool.go:110
 #   Lo mismo, con la firma de make([]T, len, cap): `make([]string, 0,
 #   len(env)+4)`. El 0 es la longitud (se empieza vacío y se rellena con
 #   append) y len(env)+4 es la capacidad reservada. Mutar el signo o el número

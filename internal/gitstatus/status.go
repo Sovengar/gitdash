@@ -136,11 +136,13 @@ func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	// El `known` sale de la conversión, no de una rama: `rev-list --count` o
+	// falla (y entonces err != nil, el caso de arriba) o imprime un entero, así
+	// que un `if err != nil { return 0, false }` aquí era inalcanzable y
+	//mutation lo contaba como cobertura muerta. La protección sigue estando: si
+	// algún día saliera otra cosa, se devuelve known=false en vez de un 0.
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, false
-	}
-	return n, true
+	return n, err == nil
 }
 
 // normalizeBranch completa la rama para detached con el sha corto.
@@ -259,15 +261,19 @@ func RebaseInProgress(ctx context.Context, dir string) bool {
 		if err != nil {
 			continue
 		}
-		p := strings.TrimSpace(string(out))
-		if p == "" {
-			continue
-		}
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(dir, p)
-		}
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-			return true
+		// La guarda de "vacío" va como condición POSITIVA y el trabajo dentro:
+		// `rev-parse --git-path` siempre imprime algo (incluso `.git/`), así que
+		// la forma `if p == "" { continue }` era una rama que ningún test podía
+		// matar. Además no es decorativa: con `p` vacío, `filepath.Join(dir, "")`
+		// es el propio repo, `os.Stat` ve un directorio y la función devolvería
+		// true para TODO repo.
+		if p := strings.TrimSpace(string(out)); p != "" {
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(dir, p)
+			}
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				return true
+			}
 		}
 	}
 	return false

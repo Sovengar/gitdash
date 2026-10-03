@@ -527,10 +527,10 @@ func TestWorktreeHandoffPath(t *testing.T) {
 		t.Errorf("pull armado = %+v, want path del worktree", mp.pullArmed)
 	}
 
-	// lazygit: solo si está instalado (mismo skip que el resto de tests).
-	if !hasLazygit() {
-		return
-	}
+	// lazygit: con un stub en el PATH, para que el LookPath pase tambien en un
+	// runner sin lazygit. Con un skip aqui, la sub-fila de worktree no llegaba a
+	// probar la tecla `g` en CI.
+	conLazygitFalso(t)
 	mg := newTestModel(t, []discovery.Project{p}, st)
 	mg, _ = press(mg, "enter") // despliega los worktrees
 	mg, _ = press(mg, "down")  // cursor en la sub-fila

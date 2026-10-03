@@ -141,15 +141,34 @@ func TestBangSinRepo(t *testing.T) {
 	}
 }
 
+// conLazygitFalso pone un lazygit de mentira lo PRIMERO en el PATH, para que el
+// LookPath de openLazygitCmd pase sin que la maquina tenga lazygit instalado.
+//
+// Es el mismo truco que usan las CLI de forge (forgeStub) y el propio
+// TestLazygitOcupadoDiceLaAccionQueCorre: lo que se prueba es lo que gitdash
+// hace alrededor del handoff, y el stub cierra ese circulo sin depender de que
+// la herramienta este en la maquina.
+//
+// Antes estos tests llevaban `t.Skip("lazygit no instalado")`, y en un runner sin
+// lazygit (que es el caso de CI) el camino ENTERO se saltaba: sus statements no
+// llegaban al perfil y la cobertura dependia de la maquina. Con el stub, local y
+// CI miden lo mismo.
+func conLazygitFalso(t *testing.T) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "lazygit")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // tecla g: marca lazygit como running en el repo; sin repo solo notifica.
 func TestGLazygit(t *testing.T) {
+	conLazygitFalso(t) // el LookPath tiene que pasar en cualquier maquina
 	p := proj("demo", "/tmp/gitdash-test/demo", true)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
-	if !hasLazygit() {
-		t.Skip("lazygit no instalado")
-	}
 	m, cmd := press(m, "g")
 	if m.running[p.Path] != "lazygit" {
 		t.Fatalf("running = %q, quiero \"lazygit\"", m.running[p.Path])
@@ -168,11 +187,6 @@ func TestGLazygit(t *testing.T) {
 	if cmd2 == nil {
 		t.Fatal("sin repo debería notificar")
 	}
-}
-
-func hasLazygit() bool {
-	_, err := exec.LookPath("lazygit")
-	return err == nil
 }
 
 // El cursor del input ! cae sobre el primer rune del placeholder (bubbles

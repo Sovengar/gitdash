@@ -666,3 +666,26 @@ editor = ""
 		t.Errorf("Marker/Editor = %q/%q, want los del fichero", cfg2.Marker, cfg2.Editor)
 	}
 }
+
+// Toda acción de la barra de hints tiene que tener etiqueta. La comprobación
+// es aquí, y no un `if !ok { label = key }` dentro de HintBarLines: ese
+// fallback era una rama que ningún test podía matar (las 17 acciones tienen
+// etiqueta), y en el improbable caso de que faltara pintaba un hint con la
+// tecla y nada más, que se lee como un bug de render.
+//
+// Las etiquetas que sobran (navegación, hardcodeada en la UI) no son un fallo:
+// es al revés, la barra escribe esas a mano.
+func TestHintActionsTodasTienenEtiqueta(t *testing.T) {
+	for _, action := range hintActions {
+		if _, ok := hintLabels[action]; !ok {
+			t.Errorf("la acción %q sale en la barra de hints pero no tiene etiqueta en hintLabels", action)
+		}
+	}
+	// Y el contrato de la barra: sin etiqueta el hint sale como "p " (tecla y
+	// espacio), así que esto también falla si alguien mete una acción vacía.
+	for action, label := range hintLabels {
+		if label == "" {
+			t.Errorf("hintLabels[%q] = %q, want una etiqueta", action, label)
+		}
+	}
+}
