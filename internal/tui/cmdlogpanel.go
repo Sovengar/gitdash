@@ -101,8 +101,11 @@ func (m *Model) logSection(bodyLines int) string {
 	// cabecera), y se recorta para que el desplazamiento nunca deje huecos
 	// al final.
 	visible := max(1, bodyLines-1)
-	offset := min(m.logOffset, max(0, len(entries)-visible))
-	start := max(0, len(entries)-visible-offset)
+	// Sin el clamp del offset aquí: logScroll ya lo deja en [0,
+	// len(entries)-visible] en cada pulsación, y `start` vuelve a acotar por
+	// abajo. Un segundo `min` sobre lo mismo era una aritmética que la mutation
+	// no podía distinguir (mutar el 0 del max no cambia ni una fila).
+	start := max(0, len(entries)-visible-m.logOffset)
 
 	rows := make([]string, 0, visible)
 	for _, e := range entries[start : start+min(visible, len(entries)-start)] {

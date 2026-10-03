@@ -42,7 +42,12 @@ func ParseRemoteURL(raw string, hosts, prefixes map[string]string) (RepoRef, boo
 	} else if at := strings.Index(raw, "@"); at >= 0 {
 		rest := raw[at+1:]
 		colon := strings.Index(rest, ":")
-		if colon < 0 {
+		// `colon < 1`, no `colon < 0`: un `:` en la posición 0 deja el HOST
+		// vacío, y un remote sin host no identifica nada. Aceptarlo produce un
+		// RepoRef con Host "" que resuelve por el mapa y sale como `-R owner/repo`
+		// en el argv de `gh pr create`: un PR contra un repo que no sabe quién
+		// es. El caso es raro pero el daño es un PR en el sitio equivocado.
+		if colon < 1 {
 			return RepoRef{}, false
 		}
 		host, path = rest[:colon], rest[colon+1:]

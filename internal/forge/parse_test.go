@@ -257,3 +257,30 @@ func TestParseRemoteConSegmentoVacioNoEsRepo(t *testing.T) {
 		}
 	}
 }
+
+// La forma SCP con el `:` JUSTO después del `@`: `git@:owner/repo`.
+//
+// La guarda es `if colon < 0` sobre el índice que devuelve strings.Index, y
+// ese índice es 0 (no negativo) cuando el `:` es el primer carácter del resto.
+// Solo ese caso distingue `colon < 0` de `colon <= 0`; con cualquier otro remote
+// el índice es 0 o mayor en los dos casos y el resultado es el mismo.
+//
+// Sin esto, un mutante de borde pasa: `host` vacío + `path` "owner/repo" se
+// normaliza a un host vacío, que no está en el mapa, así que el resultado
+// visible acaba siendo el mismo por otro camino.
+func TestParseRemoteConColonEnLaPosicionCero(t *testing.T) {
+	hosts := testHosts()
+	// Un host vacío NUNCA debe resolver a un repo: aunque el mapa lo contenga
+	// (que es lo que hace el mutante), un remote sin host no identifica nada.
+	conVacio := map[string]string{"": ForgeGitHub, "github.com": ForgeGitHub}
+	if ref, ok := ParseRemoteURL("git@:owner/repo", conVacio, nil); ok {
+		t.Errorf("ParseRemoteURL(host vacio) = %+v, want no parseable: un remote sin host no es un repo", ref)
+	}
+	if ref, ok := ParseRemoteURL("git@:owner/repo", hosts, nil); ok {
+		t.Errorf("ParseRemoteURL(host vacio) = %+v, want no parseable", ref)
+	}
+	// Y el SCP bien formado sigue resolviendo, que es lo que la guarda protege.
+	if ref, ok := ParseRemoteURL("git@github.com:acme/widget.git", hosts, nil); !ok {
+		t.Errorf("ParseRemoteURL(scp bien formado) = %+v, want parseable", ref)
+	}
+}

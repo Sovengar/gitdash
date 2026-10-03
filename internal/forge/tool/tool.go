@@ -107,7 +107,11 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 // lo que las autentica.
 func Env(extra ...string) []string {
 	env := os.Environ()
-	out := make([]string, 0, len(env)+4)
+	// Sin capacidad reservada a mano: `env` ya es el techo (se filtran entradas
+	// y se añaden cuatro), y un número escrito aquí es un sitio que mutar sin
+	// efecto observable. La slice crece con append, que es lo que harla de
+	// todas formas.
+	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		switch {
 		case strings.HasPrefix(kv, "LC_ALL="),

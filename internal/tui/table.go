@@ -776,7 +776,18 @@ func relativeTime(epoch int64) string {
 	if epoch <= 0 {
 		return "-"
 	}
-	d := time.Since(time.Unix(epoch, 0))
+	return relativeAge(time.Since(time.Unix(epoch, 0)))
+}
+
+// relativeAge es `relativeTime` con la edad YA calculada.
+//
+// El corte existe por los bordes: cada guarda es un `<` sobre un umbral, y lo
+// único que distingue `< 1h` de `< 1h+1ns` es una edad que caiga EXACTAMENTE en
+// el umbral. Con el reloj dentro no se puede construir esa edad (siempre pasa un
+// poco de tiempo entre calcularla y mirarla), así que los tests solo alcanzan el
+// centro de cada bucket y los mutantes de borde sobreviven. Con la edad como
+// entrada, el umbral es alcanzable y el test lo puede nombrar.
+func relativeAge(d time.Duration) string {
 	if d < time.Minute {
 		return "now"
 	}

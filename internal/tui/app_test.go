@@ -1232,19 +1232,20 @@ func TestAdquirirSlot(t *testing.T) {
 	})
 }
 
-// gitLentoEspera devuelve un shim de `git` que se cuela en el PATH, anota cada
-// invocación en el fichero `log` y se queda esperando 30s en cada `fetch`,
-// antes de delegar el resto de verbos en el git de verdad.
-//
-// Es lo que hace reproducible la cola del fetch sin red: un origin inalcanzable
-// también tardaría, pero su timeout depende de la red del runner, y un test que
-// depende de la red es un test que falla en CI sin decir por qué. Aquí el retraso
-// es exacto y local.
+// gitLentoEspera devuelve un shim de `git` que se cuela en el PATH y se queda
+// esperando 30s en cada `fetch`, antes de delegar el resto de verbos en el git de
+// verdad. Es lo que hace reproducible la cola del fetch sin red: con concurrency=1
+// el primer fetch retiene el único hueco 30s, así que los demás están de verdad
+// esperando turno cuando se cancela.
 //
 // `exec`, no `sleep & wait`: con un nieto, el SIGKILL de CommandContext mata al
 // shim pero el nieto se queda con el pipe de stdout y Output() no vuelve nunca
 // (medido). Con exec hay un solo proceso y se mata entero.
-func gitLentoEspera(t *testing.T, log string) {
+// `marcar` es el fichero que el shim toca al arrancar un fetch: es la señal de
+// "este repo está DENTRO del subprocess ahora mismo". Sin ella no hay forma de
+// saber cuándo el hueco quedó ocupado, porque recordExec solo corre cuando el
+// subprocess TERMINA (y este se cuelga 30s a propósito).
+func gitLentoEspera(t *testing.T, marcar string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
 	if err != nil {
@@ -1252,8 +1253,7 @@ func gitLentoEspera(t *testing.T, log string) {
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> " + log + "\n" +
-		"if [ \"$1\" = \"fetch\" ]; then exec sleep 30; fi\n" +
+		"if [ \"$1\" = \"fetch\" ]; then touch \"" + marcar + "\"; exec sleep 30; fi\n" +
 		"exec " + real + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -1261,97 +1261,79 @@ func gitLentoEspera(t *testing.T, log string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// esperaLineasDeEspera espera a que el fichero del shim tenga al menos n líneas.
-func esperaLineasDeEspera(t *testing.T, ruta string, n int, plazo time.Duration, que string) {
+// esperaDentroDelShim espera a que algún fetch haya arrancado de verdad.
+func esperaDentroDelShim(t *testing.T, marcar string, plazo time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(plazo)
 	for time.Now().Before(deadline) {
-		if raw, err := os.ReadFile(ruta); err == nil &&
-			len(strings.Split(strings.TrimSpace(string(raw)), "\n")) >= n {
+		if _, err := os.Stat(marcar); err == nil {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("%s: %s no llegó a %d invocaciones en %s", que, ruta, n, plazo)
+	t.Fatalf("ningún fetch llegó a arrancar en %s", plazo)
 }
 
-// cuántos repos se hacen fetch a la vez en ESTE test.
-//
-// No es un número arbitrario: `sendEvent` con el contexto ya cancelado entrega el
-// mensaje solo la mitad de las veces (medido: 981/2000, el `select` entre un
-// canal con espacio y un ctx.Done() cerrado elige al azar). Por eso la prueba de
-// abajo mira cuántos `failed` se acumulan y necesita volumen para que la
-// detección del fallo sea fiable: con 12 repos en cola, la probabilidad de que
-// pasara inadvertido si el guard no existiera es de 2^-12 (un 0.02%).
+// fetchEnCola es cuántos repos esperan turno en ESTE test: uno tiene el hueco y
+// el resto hace cola.
 const fetchEnCola = 12
 
 // El guard de `adquirirSlot` DENTRO del batch: un repo que se cancela mientras
-// ESPERA TURNO no se ejecuta, no falla y no se cuenta.
+// ESPERA TURNO no llega a ejecutar `git fetch`.
 //
-// El shim de git es lo que hace la situación reproducible sin red: con
-// concurrency=1 el primer fetch ocupa el único hueco durante 30s, así que los
-// demás están de verdad en la cola cuando se cancela.
+// El shim retiene el hueco; el command log es lo que se mira. Y hay una razón
+// concreta para NO mirar otra cosa, que se tardó tres intentos en averiguar:
 //
-// Lo que se mide NO es si `git` llegó a ejecutarse: con el contexto ya
-// cancelado, `exec.CommandContext` ni siquiera lanza el binario (medido), así que
-// el shim no es un discriminante. Lo que el guard cambia es la CONTABILIZACIÓN:
-// sin él, cada repo de la cola sale por `gitstatus.Fetch` → error → `failed++` →
-// `fetchStateMsg{failed}`. Por eso el shim solo sirve para RETENER el hueco, y la
-// aserción va sobre los contadores del lote.
-func TestFetchBatchLosCanceladosEnEsperaNoSeCuentan(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "argv")
-	gitLentoEspera(t, log)
+//   - El shim no sirve: con el contexto ya cancelado, `exec.CommandContext` ni
+//     siquiera lanza el binario, así que el shim no escribe tanto si el guard
+//     funciona como si no. Medido.
+//   - `fetchStateMsg`/`fetchDoneMsg` tampoco: `sendEvent` con el ctx cancelado
+//     entrega el mensaje la mitad de las veces (981/2000), así que un test que
+//     mira el canal PASA POR ACCIDENTE la mitad de las veces con el bug dentro.
+//     Falso negativo del 50%, que es peor que no tener test.
+//   - `rec.Entries()` sí: `recordExec` se llama desde `runGit` SIEMPRE, tanto si
+//     el subprocess arrancó como si no. Es el único registro del intento, y por
+//     eso un fetch que pasó el guard deja entrada y uno que no, no.
+func TestFetchBatchLosCanceladosEnEsperaNoEjecutanGit(t *testing.T) {
+	marcar := filepath.Join(t.TempDir(), "dentro")
+	gitLentoEspera(t, marcar)
 
 	paths := make([]string, fetchEnCola)
 	projects := make([]discovery.Project, fetchEnCola)
 	states := make(map[string]gitstatus.Snapshot, fetchEnCola)
 	for i := range paths {
 		// Los dirs tienen que EXISTIR: con `cmd.Dir` inexistente, Start falla
-		// antes de ejecutar el shim y el test esperaría un log que no llega.
+		// antes de ejecutar el shim y el test esperaría una entrada que no llega.
 		paths[i] = t.TempDir()
 		projects[i] = proj(fmt.Sprintf("repo-%02d", i), paths[i], true)
 		states[paths[i]] = snapClean()
 	}
 	m := newTestModel(t, projects, states)
-	m.cfg.FetchConcurrency = 1 // un solo hueco: el resto TIENE que esperar
+	rec := cmdlog.Active()
+	t.Cleanup(func() { cmdlog.SetRecorder(nil) }) // el log del test siguiente
+	m.cfg.FetchConcurrency = 1                    // un solo hueco: el resto TIENE que esperar
 
 	m.fetchBatchCmd(paths, cmdlog.ClassAction)
 
-	// El primero ya está dentro del shim (todos emiten su "fetching" antes de
-	// pedir turno, así que los otros ya están en la cola). Con el hueco ocupado,
-	// el guard tiene algo que decidir.
-	esperaLineasDeEspera(t, log, 1, 10*time.Second, "el primer fetch no llegó a ejecutarse")
+	// El primero retiene el hueco: su fetch ya está DENTRO del subprocess (el
+	// shim lo ha tocado). Los demás ya emitieron su "fetching" y están esperando.
+	esperaDentroDelShim(t, marcar, 10*time.Second)
 
 	m.cancel()
 
-	// Recogemos lo que el lote produzca. Con el ctx cancelado, `fetchDoneMsg` puede
-	// perderse, así que no se espera: lo que se cuenta son los `failed` de la COLA
-	// que lleguen, y se da margen para que lleguen todos.
-	//
-	// El primero SÍ cuenta como fallo y no es un bug: estaba dentro de `git` cuando
-	// se canceló, su proceso muere y eso es un fallo real (el repo no quedó
-	// actualizado). Lo que no puede pasar es que los que NUNCA llegaron a
-	// ejecutarse se cuenten igual.
-	enCola := make(map[string]bool, fetchEnCola-1)
-	for _, p := range paths[1:] {
-		enCola[p] = true
-	}
-	var contados []string
-	plazo := time.After(2 * time.Second)
-drain:
-	for {
-		select {
-		case ev := <-m.events:
-			fs, ok := ev.(fetchStateMsg)
-			if ok && fs.state == "failed" && enCola[fs.path] {
-				contados = append(contados, fs.path)
-			}
-		case <-plazo:
-			break drain
+	// Margen para que un fetch que hubiera pasado el guard llegue a registrar.
+	// Si va a arrancar, arranca enseguida: el shim se cuelga 30s después.
+	time.Sleep(time.Second)
+
+	var ejecutados []string
+	for _, e := range rec.Entries() {
+		if e.Intent || e.Action != "fetch" {
+			continue
 		}
+		ejecutados = append(ejecutados, e.Dir)
 	}
-	for _, p := range contados {
-		t.Errorf("el repo %s se canceló esperando turno y aun así se contó como fallo: %d de %d en cola",
-			filepath.Base(p), len(contados), fetchEnCola-1)
+	if len(ejecutados) > 1 {
+		t.Errorf("fetches que salieron a subprocess = %v, want solo el primero: %d de %d en cola llegaron a ejecutar pese a la cancelación",
+			ejecutados, len(ejecutados)-1, fetchEnCola-1)
 	}
 }

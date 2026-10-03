@@ -146,7 +146,7 @@ func (c *Config) addForge(rawName string, f forgeConfig) {
 // sus remotos vuelven a ser "forge desconocido" en vez de esperar una puerta
 // apagada.
 func (c Config) ForgeHosts() map[string]string {
-	out := make(map[string]string, len(c.Forges)+2)
+	out := make(map[string]string, len(c.Forges))
 	for name, f := range c.Forges {
 		if !f.Enabled {
 			continue
@@ -166,7 +166,7 @@ func (c Config) ForgeHosts() map[string]string {
 // Solo entran los hosts con prefijo no vacío: la raíz del host es la ausencia de
 // prefijo, y una entrada "" solo añadiría ruido al mapa que lee el parser.
 func (c Config) ForgePrefixes() map[string]string {
-	out := make(map[string]string, len(c.Forges)+2)
+	out := make(map[string]string, len(c.Forges))
 	for _, f := range c.Forges {
 		if !f.Enabled {
 			continue

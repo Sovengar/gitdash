@@ -544,3 +544,52 @@ func TestOverlayBloqueVacioNoSeComeLaFila(t *testing.T) {
 		t.Errorf("la base cambio de alto:\n%q", got)
 	}
 }
+
+// El instante EXACTO de expiración. La guarda es `< to.duration`, así que un
+// toast con edad igual a su duración ya está expirado, y uno con 1ns menos sigue
+// vivo. Ningún otro par de valores distingue las dos guardas.
+//
+// Con el reloj dentro de update eso no se podía construir (el tiempo que pasa
+// entre medir y mirar); con updateAt, el umbral es un valor que el test escribe.
+func TestToastExpiraEnElInstanteExacto(t *testing.T) {
+	const d = 3 * time.Second
+	// Un `now` FIJO: si el test usara time.Now() para updateAt, el reloj habría
+	// avanzado desde que se fija `created` y "1ns antes de expirar" ya habría
+	// caducado — el caso que intenta probar desaparecería solo.
+	ahora := time.Now()
+	for _, c := range []struct {
+		nombre string
+		edad   time.Duration
+		vive   bool
+	}{
+		{"1ns antes de expirar", d - time.Nanosecond, true},
+		{"justo al expirar", d, false},
+		{"despues de expirar", d + time.Nanosecond, false},
+	} {
+		var tm toastManager
+		tm.show("hola", toastInfo)
+		tm.toasts[0].duration = d
+		tm.toasts[0].created = ahora.Add(-c.edad)
+
+		tm.updateAt(ahora)
+
+		if got := len(tm.toasts) == 1; got != c.vive {
+			t.Errorf("%s: updateAt deja %d toasts, want vivo=%v", c.nombre, len(tm.toasts), c.vive)
+		}
+	}
+}
+
+// Y que update (el de producción) siga usando el reloj real: mismo camino, sin
+// cortocircuito.
+func TestToastUpdateUsaElRelojReal(t *testing.T) {
+	var tm toastManager
+	tm.show("hola", toastInfo)
+	tm.toasts[0].duration = time.Millisecond
+	tm.toasts[0].created = time.Now().Add(-time.Hour) // caducado de sobra
+
+	tm.update()
+
+	if len(tm.toasts) != 0 {
+		t.Errorf("update dejo %d toasts, want 0 (el caducado tiene que irse)", len(tm.toasts))
+	}
+}

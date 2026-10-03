@@ -68,8 +68,14 @@ func (t *toastManager) showInfo(text string)    { t.show(text, toastInfo) }
 func (t *toastManager) showWarning(text string) { t.show(text, toastWarning) }
 
 // update descarta los toasts expirados (se llama en cada tick de 1s).
-func (t *toastManager) update() {
-	now := time.Now()
+func (t *toastManager) update() { t.updateAt(time.Now()) }
+
+// updateAt es `update` con el instante YA decidid:  mismo corte que
+// gitstatus/tui/table.go:relativeAge, y por el mismo motivo. La guarda es un `<`
+// sobre la duración, así que lo único que separa `< duration` de `< duration - 1`
+// es una edad exactamente igual a la duración, y con `time.Now()` dentro esa
+// edad no se puede construir (entre medirla y mirarla pasa tiempo).
+func (t *toastManager) updateAt(now time.Time) {
 	active := t.toasts[:0]
 	for _, to := range t.toasts {
 		if now.Sub(to.created) < to.duration {

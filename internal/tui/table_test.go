@@ -792,3 +792,52 @@ func TestWorktreeBranchLabel(t *testing.T) {
 		}
 	}
 }
+
+// Los umbrales EXACTOS de cada bucket. Es lo que mata los mutantes de borde
+// (`< 1h` por `< 1h - 1ns`): solo una edad que caiga justo en el umbral cambia
+// de respuesta, y con el reloj dentro de relativeTime esa edad no se puede
+// construir, porque entre calcularla y mirarla siempre pasa tiempo.
+//
+// Por eso `relativeAge` recibe la edad ya hecha: aquí se la pasan exacta.
+//
+// El signo importa en las DOS direcciones, y en el último caso las dos dan lo
+// mismo a propósito: a los 30 días exactos, `int(d.Hours()/(24*7))` da 4 y
+// `int(d.Hours()/(24*30))` da 1, o sea que "4w" y "1mo" son distinguibles por el
+// número. Ese caso es el que mata el mutante de 30*24*time.Hour.
+func TestRelativeAgeEnElUmbralExacto(t *testing.T) {
+	for _, c := range []struct {
+		nombre string
+		edad   time.Duration
+		want   string
+	}{
+		{"1ns antes del minuto", time.Minute - time.Nanosecond, "now"},
+		{"justo el minuto", time.Minute, "1m"},
+		{"1ns antes de la hora", time.Hour - time.Nanosecond, "59m"},
+		{"justo la hora", time.Hour, "1h"},
+		{"1ns antes del día", 24*time.Hour - time.Nanosecond, "23h"},
+		{"justo el día", 24 * time.Hour, "1d"},
+		{"1ns antes de la semana", 7*24*time.Hour - time.Nanosecond, "6d"},
+		{"justo la semana", 7 * 24 * time.Hour, "1w"},
+		{"1ns antes del mes", 30*24*time.Hour - time.Nanosecond, "4w"},
+		{"justo el mes", 30 * 24 * time.Hour, "1mo"},
+	} {
+		if got := relativeAge(c.edad); got != c.want {
+			t.Errorf("%s: relativeAge(%s) = %q, want %q", c.nombre, c.edad, got, c.want)
+		}
+	}
+}
+
+// Y el ancla de `relativeTime`: con epoch invalido NO se llega a relativeAge, y
+// el corte queda en la misma clave que antes de partir la función.
+func TestRelativeTimeAnclaSigueCortandoEpochInvalido(t *testing.T) {
+	for _, epoch := range []int64{0, -1, -5} {
+		if got := relativeTime(epoch); got != "-" {
+			t.Errorf("relativeTime(%d) = %q, want -", epoch, got)
+		}
+	}
+	// Y el camino de la derecha sigue Vivo: un epoch real produce la misma
+	// cadena que antes (age >= 0 SIEMPRE, así que relativeAge da el bucket).
+	if got := relativeTime(time.Now().Unix()); got == "-" {
+		t.Error("relativeTime con epoch real = \"-\", want el bucket de la edad")
+	}
+}
