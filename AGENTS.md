@@ -85,19 +85,91 @@ measurement. The step summary is where the reason of a red is read.
 The whole gate lives in **`scripts/mutate.sh`** (measure **and** decide, in a
 single step), and that script is **not** decorative: the workflow only brings
 paths and refs. The workflow carries **no** `paths:`, no `needs:`/`if:` that could
-skip it, no `continue-on-error`, and the job stays at `timeout-minutes: 5` with the
-supervisor's ceiling (4m) well below. The check's name is exactly
+skip it, no `continue-on-error`, and the job stays at `timeout-minutes: 8` with the
+supervisor's ceiling (5m) well below it. The check's name is exactly
 `Mutation (diff)` because the `protect-main` ruleset demands that text.
+
+**The budget is a chain, not four numbers**, and each link exists for a reason:
+
+```
+2 * CAP < STALL < CEILING        CEILING + SETUP_RESERVE < JOB_CEILING
+    120s     180s     300s                   300s + 150s       480s
+```
+
+- **`2 * CAP < STALL`** is the one that is easy to get wrong. A mutant emits no
+  progress while it runs, so the stall detector and the engine's own per-mutant
+  timeout **race**. They used to be tied at 120s, so the supervisor's cut won, the
+  run arrived as a `124` with the log truncated, and the mutant that expired was
+  never reported: **the verdict's `TIMED OUT` branch became unreachable and an
+  honest signal was destroyed by the safety net.** A whole cap of slack under the
+  stall is what keeps both reachable. This is why the cap is 60s and not the roomier
+  120s — 120s would need a stall above 4m, which does not fit under an 8m job with a
+  150s reserve.
+- **`STALL < CEILING`**: a stalled run is cut by the supervisor, with its reason.
+- **`CEILING + SETUP_RESERVE < JOB_CEILING`**: the ceiling has to leave room for
+  everything that runs before it, or the platform cancels the job instead.
+
+**The budget invariant is NOT "the supervisor's ceiling fits in the job"**, which
+is what it looks like and what it was: it is **"everything that runs before the
+supervisor, plus its ceiling, fits in the job"**. Measured on the runner, what runs
+first is 98s of checkout + setup-go + the shell suites, plus ~28.5s of warm and
+dry-run; with the supervisor's ceiling at 4m the worst case came to **366.5s against
+the 300s** of a `timeout-minutes: 5`, which means the platform cancelled the job
+instead of letting the supervisor cut it — and a cancelled job is left with no
+reason, no report and no log. 8m leaves margin to spare; the number to raise if a
+run ever gets close is this one, not the ceiling.
+
+It is checked with **two** assertions, because each one sees the other one's blind
+spot:
+
+- **The declared one**, at startup, in the script: `ceiling + setup_reserve <
+  job_ceiling`, with `MUTATE_SETUP_RESERVE` (150s) as the declared floor of what the
+  setup may take, plus `2 * cap < stall < ceiling`. It catches a `timeout-minutes`
+  that is too short, and a budget whose own links contradict each other, before a
+  run is spent.
+- **The measured one**, right when the supervisor starts: `job_ceiling - (now -
+  MUTATE_JOB_START) > ceiling`, with the real clock. It catches what the declared
+  one cannot see, which is a setup that went past its reserve. **The clock is
+  marked in the job's FIRST step, before the checkout**: marked later it would
+  measure only the warm + dry-run and report the invariant satisfied while it was
+  not, which is the same class of lie this check exists to stop. It fires on the
+  path where a measurement is about to start, so a diff with nothing to mutate
+  reaches its verdict without it — there is no supervisor to feed in that case.
+
+Neither passes on its own with the invariant broken, and that is the point: the
+declared one is defeated by a reserve declared too small, the measured one by a
+clock that has not moved. The verdict also prints **the budget it ran with**,
+because its coupling with `timeout-minutes` is otherwise invisible.
 
 Who owns what, because these are responsibilities that overlap:
 
 - **`scripts/mutate.sh`**: scope precheck, warm-up, `elapsed` measurement,
   coefficient, forbidden flags, denominator, the supervisor call, the run log and
   the exit code.
-- **`scripts/watchdog.sh`** (vendored): cutting on a stall or on the ceiling, and
-  nothing else. It is a **frozen** copy from chezmoi; diverging from it is a PR in
-  the other repo, and `scripts/watchdog_test.sh` asserts the behaviour of *this*
-  copy.
+- **`scripts/watchdog.sh`** and **`scripts/watchdog_test.sh`** (vendored): cutting
+  on a stall or on the ceiling, and nothing else. A copy of chezmoi's with no
+  features added on top, and it differs from the origin in exactly four documented
+  ways: a vendored header, one extra sentence about the exit-code contract, the
+  dual-mode guard removed (inside this repo nothing consumes the function), and a
+  dropped trailing newline. Diverging further is a PR in the other repo, and
+  `watchdog_test.sh` asserts the behaviour of *this* copy. **Nothing checks the
+  bytes, on purpose**: a golden hash would turn the legitimate arrival of an upstream
+  chezmoi change into a constant to edit by hand, which is the rubber-stamping this
+  section exists to prevent. What is checked is that the files are still there.
+  **Deliberate exception to the comment convention**: these two files do NOT follow
+  the "English, one line, only the WHY" rule. They come that way from chezmoi and
+  reformatting them would make them diverge from their origin for no gain, which is
+  exactly what being a copy forbids. The three files in `scripts/` that **are**
+  ours (`mutate.sh`, `mutate_test.sh`, and the workflow's wiring) do follow it, and
+  the design that does not fit in a comment lives here.
+- **`shellcheck` is not wired into any gate**, and saying "shellcheck clean" without
+  a severity is the kind of claim this repo keeps paying for. The real state:
+  `mutate.sh` and `mutate_test.sh` report **no warning or error** (`-S warning`, zero
+  findings) and **2 notes at default severity**, both intentional and both left in
+  place — SC2086 on the unquoted `$ENGINE`, whose word splitting is the documented
+  behaviour the forbidden-flag guard mirrors, and SC2016 on a `$PWD` inside a
+  generated stub script, which has to reach the generated file unexpanded. The
+  vendored pair carries 1 warning and 1 note, and both are pre-existing and untouched.
 - **`.mutation-allowlist`**: the gate's reference. The gate is **not** the owner of
   the allowlist nor of the `comm -23`; it only compares **by line**, so an entry
   naming the file at another line does **not** cover the mutant that appeared.
@@ -107,29 +179,70 @@ Decisions that are not readable in the code:
 - **The scope is the COMMITTED diff**, not the index: a file that is only *staged*
   is invisible to the gate, so a smoke fixture has to be committed and pushed to
   prove anything. Both sides use merge-base, so the check's scope and the
-  `git diff --merge-base` the engine runs describe the same set.
+  `git diff --merge-base` the engine runs describe the same set. The base is
+  **verified and diffed with the SAME ref**: they used to be two (`origin/main` and
+  `main`) and on a runner, where the base only exists as a remote-tracking ref, the
+  diff failed and its empty output read as "nothing to mutate". A `git diff` that
+  cannot be computed is an **error**, not an empty scope: it prints the same bytes
+  as a diff with no `.go`.
+- **There are two counts, and they are not the same number.** The dry-run reports
+  **every mutant the engine considered**, and with `--diff` the ones outside the
+  scope come out as `SKIPPED`: 1090 of them for a two-file diff in this repo. The
+  dry-run yields two counts, `WATCH_LINES` (all of them, the **supervisor's
+  denominator**: the real run prints one line each, SKIPPED included) and
+  `EXPECTED_MEASURED` (only the in-scope ones, **what the verdict compares** with
+  the report). Using the first for both purposes is exactly how a diff that
+  measured nothing could come out "measured and clean".
 - **"Nothing to mutate" comes from the prior count**, never from the absence of a
   report. Re-deriving it from the absence does not fix the lie, it moves it. A PR
   with no `.go` and a PR touching only `_test.go` files are the two honest greens,
-  and both say that nothing was measured.
+  and both say that nothing was measured. Watch the shape of each: a `_test.go`-only
+  diff **still produces `report.json`**, because the `SKIPPED` mutants are results
+  too, so it arrives through the report branch with total 0 and not through "No
+  results to report".
+- **A prior count > 0 with a report that measured none of them is RED**, in both
+  directions, because the numerator and the denominator came out of different runs.
+- **The scope's integrity is `measured ⊆ announced`, not equality.** Measured with
+  the mutations the engine **reported**, excluding the `SKIPPED` ones: `files[]`
+  also lists the files it merely looked at, and the log's progress lines carry one
+  per considered mutant. Equality would be a guaranteed false positive, because an
+  announced file that produced no mutant (a `_test.go`, a file with nothing mutable)
+  is legitimate.
 - **The coefficient is `ceil(CAP/elapsed)`**, with `elapsed` measured on the
   **dry-run** and not on the warm: the warm with `-run '^$'` runs no suites, so its
-  duration is build time. Measurement absent or zero = **hard error**.
+  duration is build time and `ceil(CAP/build_time)` is a ceiling nobody agreed to.
+  There is no absolute per-mutant cap flag in gremlins — `--timeout-coefficient`
+  multiplies the duration of the coverage pass, and that is the only lever.
+  Measurement absent or zero = **hard error**, never a silent 0.
 - **The run log is always written and never deleted.** The verdict receives it as a
   positional argument, never by convention, and an empty path is a hard error: it
   is the only place `TIMED OUT` lives, and `report.json` excludes it from the total
   and from the efficacy. The log is cross-checked against itself (aggregate total
   against lines), because a count derived from truncated text gives a number that
   looks fine and is not.
+- **The run log carries the supervisor's stderr too**, folded in with `2>&1` rather
+  than kept in a second file. The supervisor's reasons (the stall, the ceiling, the
+  `alive` heartbeats) go to its stderr, and a stdout-only `tee` dropped the one line
+  that explains a `124`: the verdict printed literally `reason not found in the log`
+  on the red that most needs it. One file also keeps "the log the verdict reads is
+  the log the run produced" true. It cannot disturb the `TIMED OUT` cross-check
+  because the supervisor prefixes every line with its own name and neither counted
+  shape is line-anchored to anything it emits.
+- **A cut's reason is asserted end-to-end, not fabricated.** The verdict's tests used
+  to *invent* a log already containing the supervisor's line, which is the shape a
+  real run never produced and exactly why the hole survived 169 green assertions. The
+  case that matters drives the real supervisor over a wedging engine, so the line has
+  to arrive on its own.
 - **The budget is explicit in CI.** Under `--ci` the budget knobs are
   **mandatory**: "the environment wins" only fails in one way, a forgotten variable
-  landing on the local row, i.e. CI loosening its budget with no diff to show. And
-  the assertions are **invariants** (`stall < ceiling < the job's ceiling`,
-  `CAP ≤ ceiling`), not magic numbers. The verdict prints the budget it ran with,
-  because its coupling with `timeout-minutes` is otherwise invisible.
+  landing on the local row, i.e. CI loosening its budget with no diff to show.
+  `MUTATE_FORBIDDEN` is in that class for the same reason, and **the guard is
+  derived from the list** instead of repeating it: a guard that can diverge from the
+  list it claims to apply is a comment passing itself off as code.
 - **`jq` is a declared precondition, and the report is parsed before it is read**:
   a tool that fails leaves empty output, and an empty output read as "zero new
-  survivors" is exactly the green-without-measurement this check forbids.
+  survivors" is exactly the green-without-measurement this check forbids. Presence is
+  not parseability.
 - **The `runGit` convention is for Go, not for scripts**: every git exec goes
   through `gitstatus` because the binary's subprocesses are auditable from the log
   panel. `scripts/mutate.sh` is a CI script whose output goes to the step summary,
@@ -143,10 +256,15 @@ own scope would say "nothing to mutate" and measure nothing.
   verdict is a pure function of paths, so `report.json`, the log and the allowlist
   are fabricated in a `mktemp -d` in under a second, with no engine, no Go and no
   network. Exercising those reds inside the workflow would need a synthetic
-  Actions run, which is a hope and not a test.
-- `scripts/watchdog_test.sh` runs **as a workflow step**, because it is the only
-  thing that proves the supervisor works *on the runner*: a broken gate is loud, an
-  absent supervisor was green.
+  Actions run, which is a hope and not a test. For what does need the engine (the
+  run phase: warm, dry-run, the two counts, the budget) it uses a **fake engine**
+  with the shape of both real outputs and the real supervisor: without that, the
+  budget's measured assertion would be unreachable locally.
+- **Both suites run as a workflow step** (`Shell suites`), not just the
+  supervisor's: the supervisor's because it is the only thing that proves the
+  supervisor works *on the runner* (a broken gate is loud, an absent supervisor was
+  green), and the gate's because it costs ~1s and it is the only thing that proves
+  the red paths are still alive **on the runner**, which is where the gate runs.
 
 **What the gate does NOT guarantee** (knowing it avoids trusting it too much):
 
@@ -226,8 +344,16 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 
 - Code comments in **English**, and only the ones that justify the **WHY** (a
   decision that is not readable in the code), never the HOW nor a godoc that
-  repeats the name. Each one fits in **one line**: if it needs more, the design
-  goes in the sections below (or in `docs/`), not in the code.
+  repeats the name. The **intent** is one line each: if a comment needs more, the
+  design goes in the sections below (or in `docs/`), not in the code.
+  **What is enforced is a floor, not that intent** — `mutate_test.sh` section 22
+  fails the build if a comment in `scripts/mutate.sh` or `scripts/mutate_test.sh`
+  exceeds 170 characters, or if a contiguous run of comment lines is longer than 6
+  (the header, the budget table and the section banners are what the 6 is for). So
+  one line per comment is on the author and a wall of prose is a build failure; the
+  machine does not count lines because a header and a table legitimately need more
+  than one. A convention nobody checks is a comment. The two vendored files are the
+  documented exception and the test asserts that exception rather than assuming it.
 - **No references to specs or requirement/scenario IDs**: the code is the source
   of truth. There are no SDD artefacts in the repo and none are created
   (`proposal.md`, `spec.md`, specs with requirement/scenario IDs, `R#n SHALL`,
