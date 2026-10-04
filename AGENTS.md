@@ -31,6 +31,8 @@ go mod tidy                                        # after adding deps
 ```bash
 make coverage-check                                # coverage profile + gate (diff at 100%, total with a floor)
 make mutate-all                                    # mutation testing of the whole module, tuned to this machine
+bash scripts/mutate_test.sh                        # the gate's red paths (<1s)
+bash scripts/watchdog_test.sh                      # the mutation supervisor (also a CI step)
 ./scripts/gen-fixtures.sh                          # regenerates testdata/playground
 bin/gitdash --print                                # one-shot table mode
 # TUI smoke test (see Gotcha 3):
@@ -74,15 +76,86 @@ forever and blocks every PR that does not touch the filtered paths.
 
 ### `Mutation (diff)` (`.github/workflows/mutation.yml`) — PR only
 
-Mutation testing with gremlins **over the PR's diff**, not the whole module
-(which is why it takes ~20s; `make mutate` over the whole module is ~10min). It
-fails if a new `LIVED` mutant appears that is not in `.mutation-allowlist`.
+**The policy, short:** the required check goes **green only if the mutation was
+really measured** and **no new survivor was left untested**. *"Could not measure"*
+is a **red** verdict, never a green one. And since not every green is the same
+green, **a green that measured nothing has to say so**, or the team reads it as a
+measurement. The step summary is where the reason of a red is read.
 
-**The job is never skipped**, and that is the condition for it to be required:
-the allowlist's calibration is a *step*, not a `needs:` + `if:`. If the allowlist
-is missing the job **fails** saying how to seed it. With the previous structure
-(the job skipping itself) the gate could not be mandatory: a skipped check stays
-pending forever.
+The whole gate lives in **`scripts/mutate.sh`** (measure **and** decide, in a
+single step), and that script is **not** decorative: the workflow only brings
+paths and refs. The workflow carries **no** `paths:`, no `needs:`/`if:` that could
+skip it, no `continue-on-error`, and the job stays at `timeout-minutes: 5` with the
+supervisor's ceiling (4m) well below. The check's name is exactly
+`Mutation (diff)` because the `protect-main` ruleset demands that text.
+
+Who owns what, because these are responsibilities that overlap:
+
+- **`scripts/mutate.sh`**: scope precheck, warm-up, `elapsed` measurement,
+  coefficient, forbidden flags, denominator, the supervisor call, the run log and
+  the exit code.
+- **`scripts/watchdog.sh`** (vendored): cutting on a stall or on the ceiling, and
+  nothing else. It is a **frozen** copy from chezmoi; diverging from it is a PR in
+  the other repo, and `scripts/watchdog_test.sh` asserts the behaviour of *this*
+  copy.
+- **`.mutation-allowlist`**: the gate's reference. The gate is **not** the owner of
+  the allowlist nor of the `comm -23`; it only compares **by line**, so an entry
+  naming the file at another line does **not** cover the mutant that appeared.
+
+Decisions that are not readable in the code:
+
+- **The scope is the COMMITTED diff**, not the index: a file that is only *staged*
+  is invisible to the gate, so a smoke fixture has to be committed and pushed to
+  prove anything. Both sides use merge-base, so the check's scope and the
+  `git diff --merge-base` the engine runs describe the same set.
+- **"Nothing to mutate" comes from the prior count**, never from the absence of a
+  report. Re-deriving it from the absence does not fix the lie, it moves it. A PR
+  with no `.go` and a PR touching only `_test.go` files are the two honest greens,
+  and both say that nothing was measured.
+- **The coefficient is `ceil(CAP/elapsed)`**, with `elapsed` measured on the
+  **dry-run** and not on the warm: the warm with `-run '^$'` runs no suites, so its
+  duration is build time. Measurement absent or zero = **hard error**.
+- **The run log is always written and never deleted.** The verdict receives it as a
+  positional argument, never by convention, and an empty path is a hard error: it
+  is the only place `TIMED OUT` lives, and `report.json` excludes it from the total
+  and from the efficacy. The log is cross-checked against itself (aggregate total
+  against lines), because a count derived from truncated text gives a number that
+  looks fine and is not.
+- **The budget is explicit in CI.** Under `--ci` the budget knobs are
+  **mandatory**: "the environment wins" only fails in one way, a forgotten variable
+  landing on the local row, i.e. CI loosening its budget with no diff to show. And
+  the assertions are **invariants** (`stall < ceiling < the job's ceiling`,
+  `CAP ≤ ceiling`), not magic numbers. The verdict prints the budget it ran with,
+  because its coupling with `timeout-minutes` is otherwise invisible.
+- **`jq` is a declared precondition, and the report is parsed before it is read**:
+  a tool that fails leaves empty output, and an empty output read as "zero new
+  survivors" is exactly the green-without-measurement this check forbids.
+- **The `runGit` convention is for Go, not for scripts**: every git exec goes
+  through `gitstatus` because the binary's subprocesses are auditable from the log
+  panel. `scripts/mutate.sh` is a CI script whose output goes to the step summary,
+  so it neither competes with that rule nor should.
+
+**How the gate is tested**, because the repo's trap ("a new gate is not tested
+until it has actually passed") is worse here: this change touches no `.go`, so its
+own scope would say "nothing to mutate" and measure nothing.
+
+- `scripts/mutate_test.sh` is the only place the red paths are reached: the
+  verdict is a pure function of paths, so `report.json`, the log and the allowlist
+  are fabricated in a `mktemp -d` in under a second, with no engine, no Go and no
+  network. Exercising those reds inside the workflow would need a synthetic
+  Actions run, which is a hope and not a test.
+- `scripts/watchdog_test.sh` runs **as a workflow step**, because it is the only
+  thing that proves the supervisor works *on the runner*: a broken gate is loud, an
+  absent supervisor was green.
+
+**What the gate does NOT guarantee** (knowing it avoids trusting it too much):
+
+- It does not cover the whole module: only the PR's diff against its base. The
+  whole module is the manual local loop.
+- It does not measure timed-out mutants as such; it counts them from the log and
+  blocks on that, but it cannot say *what* expired them.
+- There is no verified local diff profile equivalent to CI's: the local loop is
+  `make mutate-all`.
 
 `main`'s rules (ruleset **`protect-main`**, reproducible with
 `scripts/setup-repo-protection.sh`, idempotent and with `--dry-run`):
