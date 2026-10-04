@@ -1,8 +1,4 @@
-// Package config carga la configuración XDG de gitdash.
-//
-// El fichero ~/.config/gitdash/config.toml es opcional: cualquier clave que
-// falte conserva su default. Una config malformada degrada a defaults con
-// warning, sin abortar el arranque.
+// Package config loads gitdash's XDG config: the file is optional and a malformed one degrades to defaults with a warning.
 package config
 
 import (
@@ -16,70 +12,45 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// FileName es el nombre del fichero de config dentro del directorio XDG.
 const FileName = "config.toml"
 
-// DirName es el subdirectorio de gitdash bajo $XDG_CONFIG_HOME.
 const DirName = "gitdash"
 
-// DefaultMarker es el marcador por defecto que identifica un proyecto.
 const DefaultMarker = ".gitdash.toml"
 
-// DefaultExclude son los nombres de directorio podados durante el walk
-// cuando la config no define exclusiones propias.
 var DefaultExclude = []string{
 	"node_modules", "target", "vendor", "dist", "build", "out", "coverage",
 	".venv", "__pycache__", ".gradle", ".terraform", "testdata",
 }
 
-// Keybindings mapea nombre de acción → tecla (una sola rune o nombre
-// especial como "enter", "esc", "tab", "home", "end", "ctrl+c").
 type Keybindings map[string]string
 
-// Commands mapea nombre de acción → comando git tal cual se pasa a
-// exec.Command (p. ej. "pull --rebase --autostash").
 type Commands map[string]string
 
-// Config es la configuración resuelta de gitdash.
 type Config struct {
-	Marker  string
-	Roots   []string
-	Exclude []string
-	Editor  string
-	// SyncBranch es la rama de referencia global para la columna SYNC:
-	// los marcadores pueden overridden por repo.
+	Marker     string
+	Roots      []string
+	Exclude    []string
+	Editor     string
 	SyncBranch string
-	// SyncBranchExplicit dice que el usuario puso sync_branch en su
-	// config.toml, en vez de heredar el default. El default no es una
-	// declaración: si el repo no tiene esa rama, la referencia effective
-	// puede caer a "master". Una declarada, no (ver gitstatus.Collect).
+	// SyncBranchExplicit tells a hand-written sync_branch from an inherited default: a default is a guess the repo can disprove, a declared branch is not.
 	SyncBranchExplicit bool
 	FetchAuto          bool
 	FetchConcurrency   int
 	FetchTimeout       time.Duration
 	Keybindings        Keybindings
 	Commands           Commands
-	// AICommands mapea acción AI (pull, commit…) → plantilla del comando. Es
-	// un namespace abierto: el ejecutable SOLO sale de la config global, nunca
-	// del marcador commiteado (input no confiable). Sin plantilla, la acción
-	// AI no se puede lanzar.
+	// The executable comes from the global config only, never from the committed marker (untrusted input), and without a template the AI action cannot launch.
 	AICommands map[string]string
-	// Forges mapea nombre de proveedor (github, gitlab) → dónde vive. Sin
-	// esta declaración, todo remote devuelve "forge desconocido" y la acción
-	// de abrir un PR falla en silencio: los hosts públicos vienen de
-	// DefaultForges, así que lo que hay que declarar son las instancias
-	// self-managed (y apagar las que no se usen, con enabled = false).
+	// Public hosts come from DefaultForges, so what needs declaring are the self-managed instances (or disabling unused ones with enabled = false).
 	Forges map[string]ForgeConfig
 }
 
-// aiActionConfig es la sección [ai.<acción>] del config.toml crudo.
 type aiActionConfig struct {
 	Command string `toml:"command"`
 }
 
-// forgeConfig refleja la sección [forge.<nombre>] del TOML crudo. Los punteros
-// distinguen "ausente" (conservar lo declarado/default) de "valor cero":
-// enabled = false apaga el proveedor, así que no puede ser un bool desnudo.
+// Pointers tell "absent" (keep what is declared) from "zero": enabled = false has to be able to switch a provider off.
 type forgeConfig struct {
 	Enabled   *bool   `toml:"enabled"`
 	Host      *string `toml:"host"`
@@ -87,15 +58,12 @@ type forgeConfig struct {
 	CloneBase *string `toml:"clone_base"`
 }
 
-// fetchConfig refleja la sección [fetch] del TOML, con punteros para
-// distinguir "ausente" (conservar default) de "valor cero" (p. ej. auto=false).
 type fetchConfig struct {
 	Auto        *bool   `toml:"auto"`
 	Concurrency *int    `toml:"concurrency"`
 	Timeout     *string `toml:"timeout"`
 }
 
-// fileConfig refleja el TOML crudo del disco.
 type fileConfig struct {
 	Marker      *string                   `toml:"marker"`
 	Roots       []string                  `toml:"roots"`
@@ -109,9 +77,7 @@ type fileConfig struct {
 	Forge       map[string]forgeConfig    `toml:"forge"`
 }
 
-// Load lee la config del path estándar XDG. Devuelve la config resuelta y
-// un warning (posiblemente nil) para notificar en la UI. Nunca falla:
-// ante cualquier error usa defaults.
+// Never fails: any error falls back to defaults and travels as a warning for the UI.
 func Load() (Config, string) {
 	path, err := Path()
 	if err != nil {
@@ -120,14 +86,13 @@ func Load() (Config, string) {
 	return LoadFrom(path)
 }
 
-// LoadFrom resuelve la config desde un fichero concreto (testeable).
 func LoadFrom(path string) (Config, string) {
 	cfg := Defaults()
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, "" // sin fichero, defaults silenciosos
+			return cfg, ""
 		}
 		return cfg, fmt.Sprintf("config: %v", err)
 	}
@@ -136,15 +101,14 @@ func LoadFrom(path string) (Config, string) {
 	if _, err := toml.Decode(string(raw), &fc); err != nil {
 		return cfg, fmt.Sprintf("config: %v", err)
 	}
-	// warns acumula los avisos parciales: una config puede estar bien en casi
-	// todo y aun así tener una tecla muerta.
+	// Warnings accumulate because a config can be fine almost everywhere and still have one dead key.
 	var warns []string
 
 	if fc.Marker != nil && *fc.Marker != "" {
 		cfg.Marker = *fc.Marker
 	}
 	if fc.Roots != nil {
-		cfg.Roots = expandAll(fc.Roots) // sustituye, no añade
+		cfg.Roots = expandAll(fc.Roots)
 	}
 	if fc.Exclude != nil {
 		cfg.Exclude = fc.Exclude
@@ -153,9 +117,7 @@ func LoadFrom(path string) (Config, string) {
 		cfg.Editor = *fc.Editor
 	}
 	if fc.SyncBranch != nil && *fc.SyncBranch != "" {
-		cfg.SyncBranch = *fc.SyncBranch // override global
-		// Declarada a mano: la referencia es una intención, no una suposición
-		// que el repo pueda desmentir (ver SyncBranchExplicit).
+		cfg.SyncBranch = *fc.SyncBranch
 		cfg.SyncBranchExplicit = true
 	}
 	if fc.Fetch != nil {
@@ -173,10 +135,7 @@ func LoadFrom(path string) (Config, string) {
 			}
 		}
 	}
-	// Keybindings: merge sobre defaults (el usuario solo sobreescribe lo que cambia).
-	// Una acción que ya no existe se ignora, pero se avisa: sin el aviso, un
-	// `detail = "enter"` de una config vieja deja la tecla muerta y parece un
-	// bug de la TUI.
+	// Unknown actions are ignored but warned about: without the warning a stale `detail = "enter"` looks like a dead TUI key.
 	var stale []string
 	for k, v := range fc.Keybindings {
 		if _, known := DefaultKeybindings()[k]; !known {
@@ -189,25 +148,20 @@ func LoadFrom(path string) (Config, string) {
 	}
 	if len(stale) > 0 {
 		sort.Strings(stale)
-		warns = append(warns, "config: keybindings ignoradas, acción inexistente: "+strings.Join(stale, ", "))
+		warns = append(warns, "config: ignored keybindings, unknown action: "+strings.Join(stale, ", "))
 	}
-	// Commands: merge sobre defaults.
 	for k, v := range fc.Commands {
 		if v != "" {
 			cfg.Commands[k] = v
 		}
 	}
-	// AI: merge key por key. No hay lista de acciones válidas (el namespace es
-	// abierto por diseño): una acción desconocida simplemente nunca se usa.
+	// Merged key by key and with no list of valid actions on purpose: the namespace is open, so an unknown one is simply never used.
 	for k, v := range fc.AI {
 		if v.Command != "" {
 			cfg.AICommands[k] = v.Command
 		}
 	}
-	// Forge: merge sobre los defaults (ver addForge). Un proveedor que no
-	// soportamos avisa en vez de aceptarse en silencio: con él, sus hosts
-	// resuelven a un forge sin puerta y cada PR falla con un motivo que no
-	// señala la config.
+	// An unsupported provider warns instead of being accepted silently, otherwise its hosts resolve to a forge with no door and every PR fails with a cause that does not point at the config.
 	var unknownForges []string
 	for name, f := range fc.Forge {
 		if !supportedForge(name) {
@@ -218,12 +172,11 @@ func LoadFrom(path string) (Config, string) {
 	}
 	if len(unknownForges) > 0 {
 		sort.Strings(unknownForges)
-		warns = append(warns, "config: forge no soportado, se ignora: "+strings.Join(unknownForges, ", "))
+		warns = append(warns, "config: unsupported forge, ignored: "+strings.Join(unknownForges, ", "))
 	}
 	return cfg, strings.Join(warns, "; ")
 }
 
-// Path devuelve la ruta del fichero de config respetando $XDG_CONFIG_HOME.
 func Path() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -232,9 +185,7 @@ func Path() (string, error) {
 	return filepath.Join(dir, DirName, FileName), nil
 }
 
-// DefaultKeybindings devuelve el mapa de teclas por defecto.
-// Las teclas de navegación (arrows, home, end) y especiales (enter, esc,
-// tab, ctrl+c) son universales y no se configuran aquí.
+// Navigation and universal keys (arrows, home, end, enter, esc, tab, ctrl+c) are not configurable.
 func DefaultKeybindings() Keybindings {
 	return Keybindings{
 		"quit":      "q",
@@ -242,43 +193,26 @@ func DefaultKeybindings() Keybindings {
 		"search":    "/",
 		"fetch":     "f",
 		"fetch_all": "F",
-		"pull":      "p", // abre el selector de variante (p/r/f/m)
+		"pull":      "p",
 		"push":      "P",
 		"editor":    "e",
 		"lazygit":   "g",
 		"rescan":    "r",
 		"recollect": "R",
-		// `enter` es la única tecla de plegado: pliega/despliega los worktrees
-		// del repo bajo el cursor y los bloques de grupo. No hay vista de
-		// detalle aparte —la ficha vive en su propia sección—, así que `enter`
-		// ya no hace falta para abrirla.
-		"fold":    "enter",
-		"command": "!",
-		// Panel del command log: qué se ejecutó de verdad y con qué
-		// resultado (incluida la política de pull que decidió el gitconfig).
-		"log": "l",
-		// Borrado de un worktree desde su sub-fila (nunca la rama).
+		// enter is the only fold key: it folds the worktrees under the cursor and the group blocks, since the repo card has its own section and nothing needs a detail view.
+		"fold":            "enter",
+		"command":         "!",
+		"log":             "l",
 		"worktree_remove": "D",
-		// Selector de preview visual con git-sim (`v` arma, la segunda tecla
-		// elige pull/merge/rebase). Es un camino paralelo al de `p`: no ejecuta
-		// git, cede la terminal a git-sim.
-		"visual": "v",
-		// Overlay de creación de PR/MR: recoge título, cuerpo, base y draft,
-		// y lanza gh/glab. Es un view mode (vive N pulsaciones) y no un
-		// selector de variante como `p` o `v`.
-		"pr": "O",
+		"visual":          "v",
+		"pr":              "O",
 	}
 }
 
-// DefaultCommands devuelve los comandos git por defecto.
-//
-// `pull` va SIN flags a propósito: la política de reconciliación (merge,
-// rebase, ff-only) vive en el gitconfig del usuario y los flags en la línea de
-// comandos la pisan. Las variantes con flags existen para el selector de la
-// tecla `p`, que ofrece la política explícita sin cambiar el default.
+// `pull` carries no flags on purpose: flags on the command line override the gitconfig, and the user's reconciliation policy must win.
 func DefaultCommands() Commands {
 	return Commands{
-		"pull":        "pull", // default: decide el gitconfig
+		"pull":        "pull",
 		"pull_rebase": "pull --rebase --autostash",
 		"pull_ff":     "pull --ff-only",
 		"pull_merge":  "pull --no-rebase",
@@ -287,7 +221,6 @@ func DefaultCommands() Commands {
 	}
 }
 
-// Defaults construye la config por defecto.
 func Defaults() Config {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -298,20 +231,18 @@ func Defaults() Config {
 		Roots:            expandAll([]string{"~/dev"}),
 		Exclude:          append([]string(nil), DefaultExclude...),
 		Editor:           editor,
-		SyncBranch:       "main", // default global de la sync branch
+		SyncBranch:       "main",
 		FetchAuto:        true,
 		FetchConcurrency: 4,
 		FetchTimeout:     30 * time.Second,
 		Keybindings:      DefaultKeybindings(),
 		Commands:         DefaultCommands(),
-		// Sin binario AI por defecto: la feature es opt-in; sin `command` la
-		// acción AI solo puede avisar.
+		// No default AI binary: the feature is opt-in, so without `command` the AI action can only warn.
 		AICommands: map[string]string{},
 		Forges:     DefaultForges(),
 	}
 }
 
-// expandAll expande `~/` a home en cada entrada.
 func expandAll(in []string) []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -327,8 +258,6 @@ func expandAll(in []string) []string {
 	return out
 }
 
-// KeyFor devuelve la tecla configurada para una acción, o el default si
-// no está en el mapa.
 func (c Config) KeyFor(action string) string {
 	if k, ok := c.Keybindings[action]; ok {
 		return k
@@ -336,9 +265,6 @@ func (c Config) KeyFor(action string) string {
 	return DefaultKeybindings()[action]
 }
 
-// CmdArgs devuelve los argumentos del comando git para una acción,
-// separados por espacios. Ej: "pull --rebase --autostash" →
-// ["pull", "--rebase", "--autostash"].
 func (c Config) CmdArgs(action string) []string {
 	raw, ok := c.Commands[action]
 	if !ok {
@@ -347,14 +273,10 @@ func (c Config) CmdArgs(action string) []string {
 	return strings.Fields(raw)
 }
 
-// AICommand devuelve la plantilla del comando AI para una acción, o "" si no
-// está configurada. No hay default: sin plantilla la acción AI no se lanza.
 func (c Config) AICommand(action string) string {
 	return c.AICommands[action]
 }
 
-// KeyByAction devuelve un mapa invertido tecla → acción para el
-// procesamiento de input en la TUI.
 func (c Config) KeyByAction() map[string]string {
 	inv := make(map[string]string, len(c.Keybindings))
 	for action, key := range c.Keybindings {
@@ -363,47 +285,30 @@ func (c Config) KeyByAction() map[string]string {
 	return inv
 }
 
-// hintLabels es la etiqueta corta de cada acción para la barra de hints: SOLO la
-// acción, sin la tecla, que la antepone HintBarLines. Si la etiqueta llevara la
-// tecla dentro, un rebind produciría hints como "w enter fold".
-// Acciones internas como "quit" no aparecen (ya están hardcodeadas
-// en la UI o son universales).
+// Labels carry the action only, never the key (HintBarLines prepends it), or a rebind would render hints like "w enter fold".
 var hintLabels = map[string]string{
-	"up":        "↑/k",
-	"down":      "↓/j",
-	"dirty":     "dirty",
-	"search":    "filter",
-	"fetch":     "fetch",
-	"fetch_all": "fetch all",
-	"pull":      "pull ▸",
-	"push":      "push",
-	"lazygit":   "lazygit",
-	"editor":    "edit",
-	"rescan":    "rescan",
-	"recollect": "recollect",
-	"fold":      "fold",
-	"command":   "cmd",
-	"log":       "log",
-	"quit":      "quit",
-	// acción de borrado de worktree: la tecla la antepone HintBarLines.
+	"up":              "↑/k",
+	"down":            "↓/j",
+	"dirty":           "dirty",
+	"search":          "filter",
+	"fetch":           "fetch",
+	"fetch_all":       "fetch all",
+	"pull":            "pull ▸",
+	"push":            "push",
+	"lazygit":         "lazygit",
+	"editor":          "edit",
+	"rescan":          "rescan",
+	"recollect":       "recollect",
+	"fold":            "fold",
+	"command":         "cmd",
+	"log":             "log",
+	"quit":            "quit",
 	"worktree_remove": "remove wt",
-	// acción de preview visual: etiqueta sin la tecla, que la antepone HintBarLines.
-	"visual": "visual",
-	// acción de creación de PR/MR: la etiqueta no lleva la tecla dentro (la
-	// antepone HintBarLines) y coincide con el rótulo del overlay, para que el
-	// hint y el título del formulario sean la misma palabra.
-	"pr": "open PR",
+	"visual":          "visual",
+	"pr":              "open PR",
 }
 
-// hintActions es el ORDEN en que la barra de hints compone sus filas: cada
-// hint sale de aquí y de `hintLabels`. Vive fuera de HintBarLines para que un
-// test pueda exigir que toda acción tenga etiqueta: el `hintLabels[action]` de
-// abajo indexa a pelo, y sin ese test una acción nueva sin etiqueta pintaría un
-// hint con la tecla y nada más ("p "), que es indistinguible de un bug de
-// render.
-//
-// Las acciones sin etiqueta (navegación, hardcodeadas en la UI) NO entran aquí:
-// la barra las escribe a mano.
+// Lives outside HintBarLines so a test can require a label per action: an unlabelled one would render as a bare key ("p "), indistinguishable from a render bug.
 var hintActions = []string{
 	"dirty", "search", "fetch", "fetch_all", "pull",
 	"push", "lazygit", "editor", "rescan", "recollect",
@@ -411,13 +316,10 @@ var hintActions = []string{
 	"pr",
 }
 
-// HintBarLines devuelve las líneas de hints agrupadas por categoría,
-// derivada de los keybindings configurados. Cada línea es un string
-// con los hints separados por " · ".
 func (c Config) HintBarLines() []string {
-	row1 := []string{"j/k move"} // navegación + vista
-	row2 := []string{}           // acciones git
-	row3 := []string{}           // tools
+	row1 := []string{"j/k move"}
+	row2 := []string{}
+	row3 := []string{}
 
 	for _, action := range hintActions {
 		key, ok := c.Keybindings[action]

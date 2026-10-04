@@ -1,155 +1,157 @@
-# Plan — Preview visual de pull con `git-sim`
+# Plan — Visual pull preview with `git-sim`
 
 adr_required: false
-(No hay decisión arquitectónica con tradeoffs de peso ni breaking change: la
-feature es aditiva y reutiliza tres raíles ya probados — selector prefix-key,
-handoff de terminal y command log. Las decisiones tomadas quedan documentadas
-aquí abajo.)
+(There is no architectural decision with heavy tradeoffs nor a breaking change: the
+feature is additive and reuses three already-proven rails — the prefix-key
+selector, the terminal handoff and the command log. The decisions taken are
+documented below.)
 
-## Resultado buscado
+## Wanted outcome
 
-Con el cursor sobre un repo, `v` arma un selector y la segunda tecla abre una
-previsualización visual de `git-sim` (`pull` / `merge <upstream>` /
-`rebase <upstream>`), cediendo la terminal al hijo. git-sim dibuja sin tocar el
-repo real. Al volver, gitdash registra el exec con su argv real y re-colecta.
+With the cursor on a repo, `v` arms a selector and the second key opens a visual
+`git-sim` preview (`pull` / `merge <upstream>` / `rebase <upstream>`), handing the
+terminal to the child. git-sim draws without touching the real repo. On return,
+gitdash records the exec with its real argv and re-collects.
 
-## Enfoque (alto nivel)
+## Approach (high level)
 
-Un **camino paralelo** al de `p`/`pullArmed`: mismo mecanismo (armar con la
-primera tecla, consumir la variante antes del enrutado normal, cancelar sin
-consumir el resto), misma pintura del aviso (`promptLine()`), mismo handoff
-(`execDoneMsg`). No se toca `PullKinds`, ni `commands.pull*`, ni `[ai.pull]`.
+A **parallel path** to `p`/`pullArmed`: the same mechanism (arm with the first key,
+consume the variant before the normal routing, cancel without consuming the
+rest), the same warning painting (`promptLine()`), the same handoff
+(`execDoneMsg`). `PullKinds`, `commands.pull*` and `[ai.pull]` are not touched.
 
-Puntos clave del diseño:
+Key design points:
 
-- **Fuente única de variantes visuales** análoga a `pullOptions`, con p/m/r.
-  Derivan de ella el prompt y las etiquetas. Nada de slices hardcodeados.
-- **El media-dir es obligatorio**, no cosmético: sin él git-sim escribe
-  `git-sim_media/` dentro del repo y gitdash lo marcaría dirty (usa `git status`
-  real). Debe crearse si falta; si no se puede crear, se aborta con toast en vez
-  de lanzar (lanzar ensuciaría el repo).
-- **Auto-open activo**: no se pasa `-d`. Sin `--animate`. Sin
-  `--output-only-path` (implicaría capturar stdout, y el handoff no captura;
-  la ruta de la imagen es no determinista por el timestamp y no se necesita — el
-  argv del log basta para saber qué se ejecutó).
-- **`git-sim` NO es git**: se resuelve por PATH y va por handoff; no pasa por
-  `runGit`/`runGitCombined`.
-- **Rebase en curso NO bloquea** el selector: git-sim no muta el repo real
-  (las operaciones de red corren en un clon temporal). Previsualizar un rebase
-  a medias es precisamente útil. Coherente con la variante AI, que tampoco
-  consulta `RebaseInProgress`.
+- **Single source of visual variants**, analogous to `pullOptions`, with p/m/r.
+  The prompt and the labels derive from it. No hardcoded slices.
+- **The media-dir is mandatory**, not cosmetic: without it git-sim writes
+  `git-sim_media/` inside the repo and gitdash would mark it dirty (it uses real
+  `git status`). It has to be created if missing; if it cannot be created, it
+  aborts with a toast instead of launching (launching would dirty the repo).
+- **Auto-open active**: `-d` is not passed. No `--animate`. No
+  `--output-only-path` (it would mean capturing stdout, and the handoff does not
+  capture; the image's path is non-deterministic due to the timestamp and is not
+  needed — the log's argv is enough to know what ran).
+- **`git-sim` is NOT git**: it is resolved through PATH and goes through the
+  handoff; it does not go through `runGit`/`runGitCombined`.
+- **A rebase in progress does NOT block** the selector: git-sim does not mutate
+  the real repo (the network operations run in a temporary clone). Previewing a
+  half-done rebase is precisely the useful thing. Consistent with the AI variant,
+  which does not consult `RebaseInProgress` either.
 
-Decisiones secundarias documentadas:
+Documented secondary decisions:
 
-- `p` visual se permite **sin upstream** (espejo del `p` pelado de gitdash, que
-  delega en git; git-sim pull simula y no exige ref). `m`/`r` sí exigen upstream
-  (necesitan el `<upstream-ref>` explícito): sin él, toast y nada se lanza.
-- El armado **captura path + upstream** al pulsar `v` (el upstream sale del
-  `Snapshot.Status.Upstream`, p. ej. `origin/main`), para que el argv sea
-  determinista respecto a la fila elegida.
-- El dir de caché sale de `os.UserCacheDir()` + `gitdash/git-sim`; si falla, se
-  degrada con toast (nunca al repo).
+- Visual `p` is allowed with **no upstream** (mirror of gitdash's plain `p`, which
+  delegates to git; git-sim pull simulates and does not require a ref). `m`/`r` do
+  require an upstream (they need the explicit `<upstream-ref>`): without it, a
+  toast and nothing is launched.
+- Arming **captures path + upstream** when `v` is pressed (the upstream comes from
+  `Snapshot.Status.Upstream`, e.g. `origin/main`), so that the argv is
+  deterministic with respect to the chosen row.
+- The cache dir comes from `os.UserCacheDir()` + `gitdash/git-sim`; if that fails,
+  it degrades with a toast (never to the repo).
 
-## Pasos y ficheros que toca cada uno
+## Steps and the files each one touches
 
 1. **Config** — `internal/config/config.go`
-   - `DefaultKeybindings()`: añadir `"visual": "v"`.
-   - `hintLabels`: añadir `"visual": "visual"` (etiqueta SIN la tecla).
-   - `HintBarLines()`: añadir `"visual"` a la lista de acciones; cae en la fila
-     de tools (`default`) por el `switch` actual.
-   - La validación de acciones obsoletas de `LoadFrom` sigue funcionando sola
-     (valida contra `DefaultKeybindings()`).
+   - `DefaultKeybindings()`: add `"visual": "v"`.
+   - `hintLabels`: add `"visual": "visual"` (label WITHOUT the key).
+   - `HintBarLines()`: add `"visual"` to the action list; it lands on the tools
+     row (`default`) through the current `switch`.
+   - `LoadFrom`'s stale-action validation keeps working on its own (it validates
+     against `DefaultKeybindings()`).
 
-2. **Modelo y variantes** — `internal/tui/app.go`
-   - Tipo `visualOption{key, kind, label, needsUpstream}` + slice `visualOptions`
-     (p/m/r) como fuente única.
-   - Tipo `armedVisual{path, upstream string}` y campo `visualArmed *armedVisual`
-     en `Model` (efímero, como `pullArmed`).
-   - `visualOptions` NO entra en `PullKinds`.
-   - Funciones puras y testeables: `visualMediaDir()` (caché + creación del
-     dir), `visualArgv(kind, upstream, mediaDir) []string` (compone
+2. **Model and variants** — `internal/tui/app.go`
+   - `visualOption{key, kind, label, needsUpstream}` type + `visualOptions` slice
+     (p/m/r) as the single source.
+   - `armedVisual{path, upstream string}` type and `visualArmed *armedVisual` field
+     in `Model` (ephemeral, like `pullArmed`).
+   - `visualOptions` does NOT go into `PullKinds`.
+   - Pure, testable functions: `visualMediaDir()` (cache + dir creation),
+     `visualArgv(kind, upstream, mediaDir) []string` (composes
      `git-sim --media-dir <dir> <sub> [upstream]`), `visualVariantLabel(kind)`.
-   - `startVisualCmd(path, kind, argv)`: guard de "ya hay acción en curso",
-     `exec.LookPath("git-sim")` (si falta → toast), `m.running[path]="visual"`,
-     `tea.ExecProcess` que devuelve `execDoneMsg{action: kind, argv}`.
-   - Reutiliza el handler existente de `execDoneMsg`: logging con `Dur=0` y
-     re-colecta (no se inventa camino nuevo).
+   - `startVisualCmd(path, kind, argv)`: "an action is already running" guard,
+     `exec.LookPath("git-sim")` (missing → toast), `m.running[path]="visual"`,
+     `tea.ExecProcess` returning `execDoneMsg{action: kind, argv}`.
+   - Reuses the existing `execDoneMsg` handler: logging with `Dur=0` and
+     re-collect (no new path is invented).
 
-3. **Enrutado y máquina de estados** — `internal/tui/update.go`
-   - Nuevo bloque `if m.visualArmed != nil { ... }` justo **después** del bloque
-     `pullArmed` y **antes** del panel del log y del enrutado normal:
-     - consume `p`/`m`/`r` como variantes;
-     - registra la INTENCIÓN (`cmdlog.RecordIntent` con tecla + variante + repo)
-       y lanza `startVisualCmd`;
-     - para `m`/`r` sin upstream → toast "no upstream" y no lanza;
-     - cualquier otra tecla desarma y NO retorna (sigue su curso normal).
-   - Añadir `"visual"` a `commandActions` (deja intención) y a `rowActions`
-     (necesita fila).
-   - En el `switch action`, caso `"visual"`: si no hay fila o no es repo → toast;
-     si hay repo → `m.visualArmed = &armedVisual{path, upstream}` (sin ejecutar).
-   - `visualPrompt()`: aviso derivado de `visualOptions`, análogo a
+3. **Routing and state machine** — `internal/tui/update.go`
+   - New `if m.visualArmed != nil { ... }` block right **after** the `pullArmed`
+     block and **before** the log panel and the normal routing:
+     - consumes `p`/`m`/`r` as variants;
+     - records the INTENT (`cmdlog.RecordIntent` with key + variant + repo) and
+       launches `startVisualCmd`;
+     - for `m`/`r` with no upstream → "no upstream" toast and no launch;
+     - any other key disarms and does NOT return (it carries on normally).
+   - Add `"visual"` to `commandActions` (leaves an intent) and to `rowActions`
+     (needs a row).
+   - In the `switch action`, the `"visual"` case: no row or not a repo → toast;
+     with a repo → `m.visualArmed = &armedVisual{path, upstream}` (without
+     running).
+   - `visualPrompt()`: warning derived from `visualOptions`, analogous to
      `pullPrompt()`.
 
-4. **Pintura del aviso** — `internal/tui/sections.go`
-   - `promptLine()`: añadir `case m.visualArmed != nil: return m.visualPrompt()`
-     (los armados tienen prioridad sobre la leyenda del log; un solo armado a
-     la vez porque la segunda pulsación desarma el anterior).
-   - `keybindsLines()`/`keepKeybinds`/`computeLayout` derivan solos de
-     `promptLine()`: no requieren cambios.
+4. **Painting the warning** — `internal/tui/sections.go`
+   - `promptLine()`: add `case m.visualArmed != nil: return m.visualPrompt()`
+     (the armed states have priority over the log's legend; only one armed at a
+     time because the second press disarms the previous one).
+   - `keybindsLines()`/`keepKeybinds`/`computeLayout` derive from `promptLine()` on
+     their own: they need no changes.
 
 5. **Tests** — `internal/tui/` (+ `internal/config/`)
-   - `visual_selector_test.go` (nuevo), patrón directo: construir Model, `press`,
-     inspeccionar estado (sin teatest).
+   - `visual_selector_test.go` (new), direct pattern: build the Model, `press`,
+     inspect state (no teatest).
 
-## Casos de test (obligatorios)
+## Mandatory test cases
 
-- **Armado/cancelación del selector**: `v` arma sin lanzar (`running` intacto);
-  tecla no-variante desarma y sigue su curso; `esc` desarma.
-- **Sin fila / fila sin repo**: `v` sobre header o proyecto sin repo → toast y
-  sin armado.
-- **Variante por variante con argv exacto**: `visualArgv` puro →
+- **Selector arming/cancel**: `v` arms without launching (`running` untouched); a
+  non-variant key disarms and carries on; `esc` disarms.
+- **No row / row with no repo**: `v` on a header or a project with no repo → toast
+  and no arming.
+- **Variant by variant with the exact argv**: pure `visualArgv` →
   `["git-sim","--media-dir",<dir>,"pull"]`,
   `[...,"merge","origin/main"]`, `[...,"rebase","origin/main"]`.
-- **Media-dir presente** en todas las variantes y apuntando a la caché, NO al
-  repo; el dir se crea si falta.
-- **Ausencia de upstream**: `m`/`r` → toast "no upstream" y nada lanzado; `p`
-  sí se permite.
-- **Ausencia del binario**: `exec.LookPath("git-sim")` falla → toast
-  "git-sim not installed" y sin handoff (comprobar el `tea.Cmd` devuelto).
-- **Media-dir no creable** → toast de error, sin handoff.
-- **Config/hints**: `visual` en `DefaultKeybindings`; hint "v visual"
-  (etiqueta sin tecla); `HintBarLines` incluye la fila.
-- **Aviso**: `promptLine()` con `visualArmed` set; `keybindsLines()==1`.
-- **Intención + exec**: elegir variante registra la intención; al simular
-  `execDoneMsg` se registra el exec con el argv real (incluye `--media-dir` y
-  el ref) y `Dur=0`.
+- **Media-dir present** in every variant and pointing at the cache, NOT the repo;
+  the dir is created if missing.
+- **No upstream**: `m`/`r` → "no upstream" toast and nothing launched; `p` is
+  allowed.
+- **Binary missing**: `exec.LookPath("git-sim")` fails → "git-sim not installed"
+  toast and no handoff (check the returned `tea.Cmd`).
+- **Uncreatable media-dir** → error toast, no handoff.
+- **Config/hints**: `visual` in `DefaultKeybindings`; the "v visual" hint (label
+  without key); `HintBarLines` includes the row.
+- **Warning**: `promptLine()` with `visualArmed` set; `keybindsLines()==1`.
+- **Intent + exec**: picking a variant records the intent; on a simulated
+  `execDoneMsg` the exec is recorded with the real argv (including `--media-dir`
+  and the ref) and `Dur=0`.
 
-Fixture con upstream: usar el patrón de `pull_selector_test.go` + `testutil`
-(`AddUpstream`/`PushUpstreamCommits`/`FetchLocal`). Para el caso "sin upstream",
-reutilizar un fixture sin upstream.
+Fixture with an upstream: use `pull_selector_test.go`'s pattern + `testutil`
+(`AddUpstream`/`PushUpstreamCommits`/`FetchLocal`). For the "no upstream" case,
+reuse a no-upstream fixture.
 
-## Riesgos y cómo verificarlos
+## Risks and how to verify them
 
-- **`git-sim` no instalado en la máquina del usuario** → solo toast; no hay
-  handoff. Verificable manualmente con PATH sin git-sim.
-- **`--media-dir` omitido en algún camino** → el repo se ensucia con
-  `git-sim_media/`. Verificación: test de `visualArgv` (argv exacto) + manual
-  con `git status` tras un preview.
-- **La versión de git-sim cambia flags** (0.4.0 en overhaul usa skia). Verificar
-  contra git-sim 0.3.5 real; anotar que el plan asume 0.3.5.
-- **Handoff de terminal + auto-open** (xdg-open) no es testeable en la suite:
-  verificación manual con tmux (`tmux capture-pane`) y comprobando que la imagen
-  se abre y que el command log registra el argv.
-- **Solape con los estados armados** (`visual` vs `pull` vs `remove`): un solo
-  armado a la vez; lo cubren los tests de armado/cancelación.
-- **AGENTS.md prohíbe artefactos SDD en el repo** (`docs/planning/`) mientras el
-  orquestador exige depositar el paquete de planificación en `planning_dir`.
-  Conflicto conocido: estos artefactos deben retirarse antes del merge (o el PR
-  los excluye), porque la convención del repo no permite `docs/planning/`.
+- **`git-sim` not installed on the user's machine** → only a toast; no handoff.
+  Verifiable by hand with a PATH without git-sim.
+- **`--media-dir` omitted on some path** → the repo gets dirtied with
+  `git-sim_media/`. Verification: a `visualArgv` test (exact argv) + manual with
+  `git status` after a preview.
+- **git-sim's version changes flags** (0.4.0 in the overhaul uses skia). Check
+  against real git-sim 0.3.5; note that the plan assumes 0.3.5.
+- **Terminal handoff + auto-open** (xdg-open) is not testable in the suite: manual
+  verification with tmux (`tmux capture-pane`) and checking that the image opens
+  and that the command log records the argv.
+- **Overlap with the armed states** (`visual` vs `pull` vs `remove`): only one
+  armed at a time; the arming/cancel tests cover it.
+- **AGENTS.md forbids SDD artefacts in the repo** (`docs/planning/`) while the
+  orchestrator insists on depositing the planning package in `planning_dir`.
+  Known conflict: these artefacts must be removed before the merge (or the PR
+  excludes them), because the repo's convention does not allow `docs/planning/`.
 
-## Orden de trabajo (grueso)
+## Work order (rough)
 
-1. config (acción/keybind/hint) → 2. modelo + argv puro + handoff (app.go) →
-3. enrutado + armado + intención (update.go) → 4. aviso en promptLine
-(sections.go) → 5. tests → 6. build/vet/test + `make install` y verificación
-manual con tmux.
+1. config (action/keybind/hint) → 2. model + pure argv + handoff (app.go) →
+3. routing + arming + intent (update.go) → 4. warning in promptLine
+(sections.go) → 5. tests → 6. build/vet/test + `make install` and manual
+verification with tmux.

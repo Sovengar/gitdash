@@ -2,21 +2,7 @@ package config
 
 import "strings"
 
-// BuildAIArgv construye el argv del comando AI a partir de la plantilla de la
-// config global y el prompt del marcador.
-//
-// El límite de seguridad vive aquí: el prompt entra como UN elemento de argv
-// (nunca interpolado en un `sh -c`), así que puede contener espacios, saltos de
-// línea, comillas o `$` sin que nada los interprete.
-//
-// vars son los placeholders de contexto ({branch}, {behind}, …) ya resueltos
-// por quien llama: config no importa gitstatus para no crear un ciclo
-// config → gitstatus → discovery → config.
-//
-// La separación por campos comparte la limitación ya aceptada de CmdArgs: no se
-// pueden expresar argumentos con espacios dentro de comillas. El reemplazo es
-// de una sola pasada (strings.Replacer no re-escanea lo insertado), así que un
-// prompt que contenga `{branch}` queda literal en vez de expandirse en cascada.
+// Security boundary: the prompt becomes ONE argv element, never interpolated into an sh -c, and the {branch}/{behind} vars arrive resolved because config must not import gitstatus.
 func BuildAIArgv(template, prompt string, vars map[string]string) []string {
 	fields := strings.Fields(template)
 	if len(fields) == 0 {

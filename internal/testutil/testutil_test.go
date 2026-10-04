@@ -7,88 +7,77 @@ import (
 	"testing"
 )
 
-// El marcador es el contrato entre el fixture y el código que se prueba, así que
-// el helper tiene que ser fiel: una clave con valor "" se OMITE, no se escribe
-// como `name = ""`. Si se escribiera, el discovery leería un proyecto sin nombre
-// (o sin grupo) y el test que lo usara estaría probando otra cosa sin que nadie lo
-// supiera: el fallo aparecería en el código de producción, no en el fixture.
-func TestMarkerOmiteLasClavesVacias(t *testing.T) {
+// The marker is the contract between the fixture and the code under test, so the helper has to be faithful: a key with value "" is OMITTED and not written as `name = ""`. Writing it would make discovery read a project with no name (or no group) and the test using it would be testing something else without anyone knowing: the failure would show up in production code, not in the fixture.
+func TestMarkerSkipsTheKeysEmpty(t *testing.T) {
 	for _, c := range []struct {
-		nombre                   string
+		title                    string
 		name, primary, secondary string
-		quiere                   []string
-		noQuiere                 []string
+		want                     []string
+		noWant                   []string
 	}{
 		{
-			nombre: "los tres", name: "api", primary: "vsocial", secondary: "backend",
-			quiere:   []string{`name = "api"`, `primary_group = "vsocial"`, `secondary_group = "backend"`},
-			noQuiere: nil,
+			title: "all three", name: "api", primary: "vsocial", secondary: "backend",
+			want:   []string{`name = "api"`, `primary_group = "vsocial"`, `secondary_group = "backend"`},
+			noWant: nil,
 		},
 		{
-			nombre: "sin nombre", name: "", primary: "vsocial", secondary: "backend",
-			quiere:   []string{`primary_group = "vsocial"`, `secondary_group = "backend"`},
-			noQuiere: []string{"name"},
+			title: "no name", name: "", primary: "vsocial", secondary: "backend",
+			want:   []string{`primary_group = "vsocial"`, `secondary_group = "backend"`},
+			noWant: []string{"name"},
 		},
 		{
-			nombre: "sin grupos", name: "api", primary: "", secondary: "",
-			quiere:   []string{`name = "api"`},
-			noQuiere: []string{"group"},
+			title: "no groups", name: "api", primary: "", secondary: "",
+			want:   []string{`name = "api"`},
+			noWant: []string{"group"},
 		},
 		{
-			nombre: "solo el primario", name: "api", primary: "vsocial", secondary: "",
-			quiere:   []string{`name = "api"`, `primary_group = "vsocial"`},
-			noQuiere: []string{"secondary_group"},
+			title: "only the primary", name: "api", primary: "vsocial", secondary: "",
+			want:   []string{`name = "api"`, `primary_group = "vsocial"`},
+			noWant: []string{"secondary_group"},
 		},
 		{
-			// Solo el secundario, sin primario: se escribe igual. El grupo de un
-			// nivel no es un error de quien llama, y el fixture no debe
-			// inventarse una regla que el producto no tiene.
-			nombre: "solo el secundario", name: "", primary: "", secondary: "backend",
-			quiere:   []string{`secondary_group = "backend"`},
-			noQuiere: []string{"primary_group", "name"},
+			// Only the secondary, no primary: it is written anyway. A one-level group is not a caller error and the fixture must not invent a rule the product does not have.
+			title: "only the secondary", name: "", primary: "", secondary: "backend",
+			want:   []string{`secondary_group = "backend"`},
+			noWant: []string{"primary_group", "name"},
 		},
 		{
-			nombre: "nada de nada", name: "", primary: "", secondary: "",
-			quiere:   nil,
-			noQuiere: []string{"name", "group"},
+			title: "nada de nada", name: "", primary: "", secondary: "",
+			want:   nil,
+			noWant: []string{"name", "group"},
 		},
 	} {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.title, func(t *testing.T) {
 			dir := t.TempDir()
 			Marker(t, dir, c.name, c.primary, c.secondary, false)
 
 			raw, err := os.ReadFile(filepath.Join(dir, ".gitdash.toml"))
 			if err != nil {
-				t.Fatalf("el marcador no se escribió: %v", err)
+				t.Fatalf("the marker was not written: %v", err)
 			}
 			got := string(raw)
-			for _, clave := range c.quiere {
-				if !strings.Contains(got, clave) {
-					t.Errorf("falta %s en el marcador:\n%s", clave, got)
+			for _, key := range c.want {
+				if !strings.Contains(got, key) {
+					t.Errorf("%s missing from the marker:\n%s", key, got)
 				}
 			}
-			for _, clave := range c.noQuiere {
-				if strings.Contains(got, clave) {
-					t.Errorf("%s aparece en el marcador y debía omitirse:\n%s", clave, got)
+			for _, key := range c.noWant {
+				if strings.Contains(got, key) {
+					t.Errorf("%s shows up in the marker and should have been omitted:\n%s", key, got)
 				}
 			}
 		})
 	}
 }
 
-// Y el marcador malformado tiene que ser TOML inválido de verdad, no un caso
-// raro: es lo que hace que la app avise en vez de tragarse el fichero y descubrir
-// repos que el usuario no tiene.
-func TestMarkerMalformadoEsTOMLInvalido(t *testing.T) {
+func TestMarkerMalformedIsTOMLInvalid(t *testing.T) {
 	dir := t.TempDir()
 	Marker(t, dir, "api", "vsocial", "backend", true)
 	raw, err := os.ReadFile(filepath.Join(dir, ".gitdash.toml"))
 	if err != nil {
-		t.Fatalf("no se escribió el marcador: %v", err)
+		t.Fatalf("the marker was not written: %v", err)
 	}
-	// El fixture no declara un parser, así que la prueba es que NO es TOML
-	// válido: un array sin cerrar.
 	if !strings.Contains(string(raw), "[roto") {
-		t.Errorf("el marcador malformado no parece malformado:\n%s", raw)
+		t.Errorf("the malformed marker does not look malformed:\n%s", raw)
 	}
 }

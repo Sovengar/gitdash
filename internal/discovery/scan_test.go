@@ -87,13 +87,9 @@ func TestNestedValid(t *testing.T) {
 	}
 }
 
-// Scan entrega los proyectos ordenados por ruta, no en el orden del walk (que
-// depende del sistema de ficheros). Sin esto, invertir el comparador no lo
-// detecta nadie: la TUI vería los repos reordenados entre escaneos.
-func TestScanOrdenaPorRuta(t *testing.T) {
+// Scan returns the projects sorted by path and not in walk order (which depends on the filesystem); without this, inverting the comparator would go unnoticed and the TUI would see repos reshuffled between scans.
+func TestScanSortsForPath(t *testing.T) {
 	root := t.TempDir()
-	// Se crean en orden inverso al que deben salir: el walk los devuelve en
-	// orden de lectura del directorio, no en orden alfabético.
 	creados := []string{"zeta", "alfa", "middle"}
 	for _, name := range creados {
 		dir := filepath.Join(root, name)
@@ -115,33 +111,27 @@ func TestScanOrdenaPorRuta(t *testing.T) {
 	}
 	for i, w := range want {
 		if projects[i].Path != w {
-			t.Errorf("projects[%d] = %q, want %q (orden por ruta)", i, projects[i].Path, w)
+			t.Errorf("projects[%d] = %q, want %q (ordered by path)", i, projects[i].Path, w)
 		}
 	}
 }
 
-// Con varios roots el orden global sigue siendo por ruta, no "root a root": un
-// root puede intercalar sus proyectos entre los del otro. Los roots se crean
-// bajo un padre común y en orden invertido a propósito, para que ese entrecruzado
-// sea observable: con el orden por root, "a-root" saldría al final y el test
-// fallaría.
-func TestScanOrdenaEntreRoots(t *testing.T) {
+// With several roots the global order is still by path, not root by root: a root can interleave its projects with the other one's. The roots are created under a common parent and in reversed order on purpose, so that interleaving is observable: with per-root order "a-root" would come out last and the test would fail.
+func TestScanSortsBetweenRoots(t *testing.T) {
 	base := t.TempDir()
-	// "a-root" se escanea segundo pero ordena antes: sin el orden global por
-	// ruta, sus proyectos saldrían al final.
-	segundo := filepath.Join(base, "a-root")
-	primero := filepath.Join(base, "z-root")
+	second := filepath.Join(base, "a-root")
+	first := filepath.Join(base, "z-root")
 	for _, dir := range []string{
-		filepath.Join(primero, "b"),
-		filepath.Join(primero, "d"),
-		filepath.Join(segundo, "a"),
-		filepath.Join(segundo, "c"),
+		filepath.Join(first, "b"),
+		filepath.Join(first, "d"),
+		filepath.Join(second, "a"),
+		filepath.Join(second, "c"),
 	} {
 		testutil.Init(t, dir)
 		testutil.Marker(t, dir, "", "", "", false)
 	}
 
-	projects, err := Scan(cfgRoots(primero, segundo))
+	projects, err := Scan(cfgRoots(first, second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,10 +139,10 @@ func TestScanOrdenaEntreRoots(t *testing.T) {
 		t.Fatalf("projects = %d, want 4", len(projects))
 	}
 	want := []string{
-		filepath.Join(segundo, "a"),
-		filepath.Join(segundo, "c"),
-		filepath.Join(primero, "b"),
-		filepath.Join(primero, "d"),
+		filepath.Join(second, "a"),
+		filepath.Join(second, "c"),
+		filepath.Join(first, "b"),
+		filepath.Join(first, "d"),
 	}
 	for i, w := range want {
 		if projects[i].Path != w {
@@ -189,7 +179,7 @@ func TestWorktree(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("worktree no descubierto")
+		t.Error("worktree not discovered")
 	}
 }
 
@@ -206,7 +196,7 @@ func TestMarkerWithoutRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(projects) != 1 || projects[0].HasRepo {
-		t.Errorf("projects = %+v, want 1 sin repo", projects)
+		t.Errorf("projects = %+v, want 1 with no repo", projects)
 	}
 }
 
@@ -237,15 +227,13 @@ func TestMarkerMetadata(t *testing.T) {
 		t.Errorf("name/primary = %q/%q", p.Name, p.PrimaryGroup)
 	}
 	if p := byPath["emptymarker"]; p.PrimaryGroup != "" {
-		t.Errorf("primary = %q, want vacío", p.PrimaryGroup)
+		t.Errorf("primary = %q, want empty", p.PrimaryGroup)
 	}
 	if p := byPath["badmarker"]; p.MarkerErr == "" {
-		t.Error("marcador malformado sin error visible")
+		t.Error("malformed marker with no visible error")
 	}
 }
 
-// Primary_group/secondary_group del marcador; la clave
-// vieja group ya no agrupa; secondary sin primary se ignora.
 func TestMarkerGroups(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
@@ -272,14 +260,14 @@ func TestMarkerGroups(t *testing.T) {
 		t.Errorf("primary/secondary = %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 	if p := byPath["oldkey"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
-		t.Errorf("group viejo agrupó: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+		t.Errorf("old group grouped: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 	if p := byPath["solo"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
-		t.Errorf("secondary sin primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
+		t.Errorf("secondary without primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 }
 
-func TestIlegibleRootNoAborta(t *testing.T) {
+func TestUnreadableRootNotAborts(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "ok")
 	testutil.Init(t, proj)
@@ -287,60 +275,47 @@ func TestIlegibleRootNoAborta(t *testing.T) {
 
 	_, err := Scan(cfgRoots(root, filepath.Join(root, "fantasma")))
 	if err == nil {
-		t.Error("se esperaba error agregado por root ilegible")
+		t.Error("expected an aggregated error for an unreadable root")
 	}
 }
 
-// Scan es tolerante a roots malos: los reporta como error agregado y sigue con
-// los demas. Un root que no existe y un root que es un FICHERO (no un
-// directorio) tienen que acabar los dos en el mismo saco, y ademas con el mismo
-// texto de aviso, porque para el usuario son la misma cosa: "esta ruta de la
-// config no se puede recorrer".
-func TestScanToleraRootsInutiles(t *testing.T) {
+// Scan tolerates bad roots: it reports them as one aggregated error and carries on. A missing root and a root that is a FILE (not a directory) have to end up in the same sack and with the same warning text, because for the user they are the same thing: "this config path cannot be walked".
+func TestScanToleratesRootsUseless(t *testing.T) {
 	root := t.TempDir()
-	bueno := filepath.Join(root, "proyecto")
-	testutil.Init(t, bueno)
-	testutil.Marker(t, bueno, "", "", "", false)
+	good := filepath.Join(root, "proyecto")
+	testutil.Init(t, good)
+	testutil.Marker(t, good, "", "", "", false)
 
-	// Un fichero donde deberia haber un directorio.
-	noDir := filepath.Join(root, "un-fichero")
+	noDir := filepath.Join(root, "a-file")
 	if err := os.WriteFile(noDir, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := cfgRoots(root, filepath.Join(root, "no-existe"), noDir)
+	cfg := cfgRoots(root, filepath.Join(root, "nonexistent"), noDir)
 	projects, err := Scan(cfg)
 
-	// El proyecto bueno se sigue descubriendo: el fallo de los otros no aborta.
-	if len(projects) != 1 || projects[0].Path != bueno {
-		t.Errorf("projects = %+v, want solo %s (un root malo no aborta el resto)", projects, bueno)
+	if len(projects) != 1 || projects[0].Path != good {
+		t.Errorf("projects = %+v, want only %s (a bad root does not abort the rest)", projects, good)
 	}
 	if err == nil {
-		t.Fatal("Scan = nil error, want aviso de los roots ilegibles")
+		t.Fatal("Scan = nil error, want a notice about the unreadable roots")
 	}
-	// Los dos malos se nombran, para que el usuario sepa cual quitar de la config.
-	for _, quiere := range []string{"no-existe", "un-fichero"} {
-		if !strings.Contains(err.Error(), quiere) {
-			t.Errorf("error = %q, want que nombre %q", err, quiere)
+	for _, want := range []string{"nonexistent", "a-file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err, want)
 		}
 	}
-	// Y el error es AGREGADO: los dos en el mismo error, no uno y el otro fuera.
-	if n := strings.Count(err.Error(), "root ilegible"); n != 2 {
-		t.Errorf("el error menciona %d roots ilegibles, want 2 (los que no son directorios)", n)
+	if n := strings.Count(err.Error(), "unreadable root"); n != 2 {
+		t.Errorf("the error mentions %d unreadable roots, want 2 (the ones that are not directories)", n)
 	}
 }
 
-// classifyGit distingue repo (dir), worktree (fichero gitdir:) y nada. El caso
-// del `.git` INEXISTENTE es el de un marcador commiteado en un repo de pruebas
-// que todavia no se ha inicializado: no es un error, es "sin repo", y asi lo
-// tiene que decir el discoverer sin que Scan lo escupe.
-func TestClassifyGitSinGit(t *testing.T) {
+func TestClassifyGitWithoutGit(t *testing.T) {
 	dir := t.TempDir()
 	if k, main := classifyGit(filepath.Join(dir, ".git")); k != gitNone || main != "" {
 		t.Errorf("classifyGit(inexistente) = %v/%q, want gitNone/\"\"", k, main)
 	}
 
-	// Un .git que existe pero es un DIRECTORIO es un repo normal.
 	repo := filepath.Join(dir, "repo")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -349,19 +324,15 @@ func TestClassifyGitSinGit(t *testing.T) {
 		t.Errorf("classifyGit(dir) = %v/%q, want gitDir/%q", k, main, "")
 	}
 
-	// Un .git que es un FICHERO pero no dice "gitdir:" no es un worktree
-	// registrable: se descarta en vez de devolver un repo principal inventado.
 	raro := filepath.Join(dir, "raro")
-	if err := os.WriteFile(raro, []byte("no soy un gitdir"), 0o644); err != nil {
+	if err := os.WriteFile(raro, []byte("I am not a gitdir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if k, main := classifyGit(raro); k != gitNone || main != "" {
-		t.Errorf("classifyGit(fichero sin gitdir:) = %v/%q, want gitNone/%q", k, main, "")
+		t.Errorf("classifyGit(file without gitdir:) = %v/%q, want gitNone/%q", k, main, "")
 	}
 }
 
-// Un worktree de verdad: `.git` es un fichero que apunta a
-// <main>/.git/worktrees/<nombre>, y el repo principal son dos niveles arriba.
 func TestClassifyGitWorktree(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "main-repo")
@@ -379,130 +350,100 @@ func TestClassifyGitWorktree(t *testing.T) {
 	}
 	k, repoPrincipal := classifyGit(pointer)
 	if k != gitFile {
-		t.Fatalf("classifyGit = %v, want gitFile (es un worktree)", k)
+		t.Fatalf("classifyGit = %v, want gitFile (it is a worktree)", k)
 	}
-	// El puntero acaba en <main>/.git/worktrees/<nombre>, y el repo principal es
-	// dos niveles arriba de ahi, es decir el propio <main>.
 	if want := main; repoPrincipal != want {
 		t.Errorf("repo principal = %q, want %q", repoPrincipal, want)
 	}
 }
 
-// El marcador de un worktree sintetico puede no existir (por ejemplo, un test
-// que construye la forma sin el marcador committed). MarkerPrompt lo trata como
-// vacio y no como error: la accion AI sin prompt es un "no hay nada que
-// Mandar", no un fallo.
-func TestMarkerPromptSinMarcadorNoEsError(t *testing.T) {
+func TestMarkerPromptWithoutMarkerNotIsError(t *testing.T) {
 	dir := t.TempDir()
 	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err != nil {
-		t.Errorf("MarkerPrompt sin marcador = %v, want nil (sin prompt no hay error)", err)
+		t.Errorf("MarkerPrompt without a marker = %v, want nil (no prompt is no error)", err)
 	}
 	if p != "" {
-		t.Errorf("prompt = %q, want vacio", p)
+		t.Errorf("prompt = %q, want empty", p)
 	}
 }
 
-// Un directorio sin permiso de lectura es el caso real de la rama de error del
-// walk: el usuario tiene un repo dentro de algo que no puede leer y Scan tiene
-// que SALTARSELO, no abortar el escaneo entero. Abortar seria perder todos los
-// repos que sí se ven por un directorio ajeno.
-func TestScanSaltaDirectorioIlegible(t *testing.T) {
+// A directory without read permission is the real case behind the walk's error branch: the user has a repo inside something unreadable and Scan has to SKIP it instead of aborting the whole scan (aborting would lose every visible repo because of a stranger's directory).
+func TestScanJumpsDirectoryUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("como root los permisos de directorio no impiden la lectura")
+		t.Skip("as root directory permissions do not prevent reading")
 	}
 	root := t.TempDir()
-	bueno := filepath.Join(root, "proyecto")
-	testutil.Init(t, bueno)
-	testutil.Marker(t, bueno, "", "", "", false)
+	good := filepath.Join(root, "proyecto")
+	testutil.Init(t, good)
+	testutil.Marker(t, good, "", "", "", false)
 
-	// Un directorio sin permiso, dentro del root pero sin marcador.
-	bloqueado := filepath.Join(root, "sin-acceso")
+	bloqueado := filepath.Join(root, "no-access")
 	if err := os.MkdirAll(bloqueado, 0o000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(bloqueado, 0o755) })
 
 	projects, err := Scan(cfgRoots(root))
-	if len(projects) != 1 || projects[0].Path != bueno {
-		t.Errorf("projects = %+v, want solo %s (un dir ilegible no aborta)", projects, bueno)
+	if len(projects) != 1 || projects[0].Path != good {
+		t.Errorf("projects = %+v, want only %s (an unreadable dir does not abort)", projects, good)
 	}
 	if err != nil {
-		t.Errorf("Scan = %v, want nil (el dir ilegible se salta en silencio)", err)
+		t.Errorf("Scan = %v, want nil (the unreadable dir is skipped silently)", err)
 	}
 }
 
-// MarkerPrompt con un marcador MALFORMADO sí es error, a diferencia del
-// inexistente. La diferencia importa: sin prompt la acción AI no se lanza (un
-// aviso), pero con un marcador corrupto el usuario tiene un `.gitdash.toml`
-// roto que debe arreglar, y avisar de eso es mas util que decir "no hay prompt".
-func TestMarkerPromptMalformadoEsError(t *testing.T) {
+func TestMarkerPromptMalformedIsError(t *testing.T) {
 	dir := t.TempDir()
 	writeMarker(t, dir, "name = [roto\n")
 	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err == nil {
-		t.Fatal("MarkerPrompt con marcador malformado = nil, want error (el fichero esta roto)")
+		t.Fatal("MarkerPrompt with a malformed marker = nil, want an error (the file is broken)")
 	}
 	if !strings.Contains(err.Error(), "marker") {
-		t.Errorf("error = %q, want que nombre el marcador", err)
+		t.Errorf("error = %q, want it to name the marker", err)
 	}
 	if p != "" {
-		t.Errorf("prompt = %q con error, want vacio", p)
+		t.Errorf("prompt = %q with an error, want empty", p)
 	}
 }
 
-// classifyGit con un `.git` que existe pero no se puede LEER (es un fichero sin
-// permiso) no es un worktree: no hay gitdir que seguir, asi que se descarta. La
-// comprobacion es de que no devuelve un repo principal inventado.
-func TestClassifyGitConFicheroIlegible(t *testing.T) {
+func TestClassifyGitWithFileUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("como root los permisos de fichero no impiden la lectura")
+		t.Skip("as root file permissions do not prevent reading")
 	}
 	dir := t.TempDir()
 	git := filepath.Join(dir, ".git")
-	if err := os.WriteFile(git, []byte("gitdir: /no/se/puede/leer\n"), 0o000); err != nil {
+	if err := os.WriteFile(git, []byte("gitdir: /no/can/read\n"), 0o000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(git, 0o644) })
 
 	if k, main := classifyGit(git); k != gitNone || main != "" {
-		t.Errorf("classifyGit(ilegible) = %v/%q, want gitNone/%q", k, main, "")
+		t.Errorf("classifyGit(unreadable) = %v/%q, want gitNone/%q", k, main, "")
 	}
 }
 
-// Un marcador que NO es un fichero (es un directorio) es un error de lectura, no
-// una ausencia: por eso no cae en el caso de "sin marcador, sin prompt". El
-// aviso importa porque hay algo que arreglar y no es "no hay prompt".
-//
-// Se dispara con un directorio en vez de con permisos a proposito: un 0o000 lo
-// lee root, asi que un test de permisos diria una cosa en local y otra en CI,
-// y este no depende de quien corre.
-func TestMarkerPromptConMarcadorNoLegibleEsError(t *testing.T) {
+// Triggered with a directory instead of with permissions on purpose: root reads a 0o000 file, so a permissions test would say one thing locally and another in CI, while this one does not depend on who runs it.
+func TestMarkerPromptWithMarkerNotReadableIsError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err == nil {
-		t.Fatal("MarkerPrompt con un marcador que es un directorio = nil, want error")
+		t.Fatal("MarkerPrompt with a marker that is a directory = nil, want an error")
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		t.Errorf("error = %v, want EISDIR y no ENOENT: un directorio NO es un marcador ausente", err)
+		t.Errorf("error = %v, want EISDIR and not ENOENT: a directory is NOT a missing marker", err)
 	}
 	if p != "" {
-		t.Errorf("prompt = %q con error, want vacio", p)
+		t.Errorf("prompt = %q with an error, want empty", p)
 	}
 }
 
-// Un root RELATIVO solo se puede resolver si el proceso tiene cwd, y `Abs`
-// falla sin él. No es teórico: `filepath.Abs` llama a `os.Getwd`, que da ENOENT
-// cuando el directorio de trabajo ya no existe (un repo movido o un `cd` a un
-// tmpdir borrado por otro proceso).
-//
-// El aviso importa: sin él, un root relativo con el cwd roto devuelve cero
-// proyectos y SIN error, que se lee como "no tengo repos" en vez de como "no
-// puedo ni mirar dónde estoy".
-func TestScanConCwdBorradoReportaElRoot(t *testing.T) {
+// The warning matters: without it a relative root with a broken cwd returns zero projects and NO error, which reads as "I have no repos" instead of "I cannot even tell where I am".
+func TestScanWithCwdDeletedReportsTheRoot(t *testing.T) {
 	roto := t.TempDir()
 	t.Chdir(roto)
 	if err := os.RemoveAll(roto); err != nil {
@@ -511,43 +452,34 @@ func TestScanConCwdBorradoReportaElRoot(t *testing.T) {
 
 	projects, err := Scan(cfgRoots("."))
 	if err == nil {
-		t.Fatalf("Scan con el cwd borrado = nil, want error (0 proyectos y sin aviso parece un root vacío): %+v", projects)
+		t.Fatalf("Scan with the cwd deleted = nil, want an error (0 projects and no notice looks like an empty root): %+v", projects)
 	}
 	if len(projects) != 0 {
 		t.Errorf("projects = %+v, want ninguno", projects)
 	}
 	if !strings.Contains(err.Error(), ".") {
-		t.Errorf("error = %q, want que nombre el root que no pudo resolver", err)
+		t.Errorf("error = %q, want it to name the root it could not resolve", err)
 	}
 }
 
-// `parseMarker` con un marcador que NO se puede leer. No hace falta un 0o000
-// (que root lee): un DIRECTORIO con el nombre del marcador da EISDIR, y el
-// error tiene que PROPAGARSE.
-//
-// `Scan` nunca llama aquí con algo ilegible —`hasMarker` exige que sea un
-// fichero— así que esta es la única forma de que el error llegue al modelo: por
-// eso se prueba la unidad, no el scan. El contrato que importa es que
-// `inspect` lo mete en `MarkerErr`, que es lo que la TUI enseña.
-func TestParseMarkerIlegiblePropagaElError(t *testing.T) {
+// No 0o000 is needed (root reads it): a DIRECTORY named after the marker gives EISDIR, and the unit is the only way that error reaches the model (Scan never calls it unreadable, hasMarker requires a file).
+func TestParseMarkerUnreadablePropagatesTheError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, err := parseMarker(filepath.Join(dir, ".gitdash.toml"))
 	if err == nil {
-		t.Fatal("parseMarker = nil, want el error de lectura")
+		t.Fatal("parseMarker = nil, want the read error")
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		t.Errorf("error = %v, want EISDIR y no ENOENT", err)
+		t.Errorf("error = %v, want EISDIR and not ENOENT", err)
 	}
-	// Y el modelo lo muestra en vez de tragárselo: un marcador ilegible es algo
-	// que el usuario tiene que arreglar, no un proyecto sin metadatos.
 	p := inspect(dir, ".gitdash.toml")
 	if p.MarkerErr == "" {
-		t.Errorf("MarkerErr vacio, want el error de lectura: %+v", p)
+		t.Errorf("MarkerErr empty, want the read error: %+v", p)
 	}
 	if p.Name != filepath.Base(dir) {
-		t.Errorf("Name = %q, want el nombre del directorio (el marcador no dio ninguno)", p.Name)
+		t.Errorf("Name = %q, want the directory's name (the marker gave none)", p.Name)
 	}
 }

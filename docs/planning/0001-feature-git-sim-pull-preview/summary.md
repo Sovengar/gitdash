@@ -2,37 +2,37 @@
 
 ## Metadata
 - **Completed:** 2026-09-28 00:17
-- **Duration:** ~35 min de desarrollo (primer commit 2026-09-27 23:12 → último 23:42) + revisión
+- **Duration:** ~35 min of development (first commit 2026-09-27 23:12 → last 23:42) + review
 - **Plan Number:** 0001
 
 ## Scenarios
 | Scenario (behavior.feature) | Status |
 |-----------------------------|--------|
-| La tecla visual arma el selector sin ejecutar nada | ✅ Passed |
-| Sin fila bajo el cursor no se arma | ✅ Passed |
-| Sobre una fila sin repo no se arma | ✅ Passed |
-| Una tecla que no es variante cancela el armado y sigue su curso | ✅ Passed |
-| El armado sobrevive a la fila correcta aunque el cursor se mueva | ✅ Passed |
-| La variante p lanza git-sim pull sin argumentos posicionales | ✅ Passed |
-| La variante m lanza git-sim merge con el upstream de la rama | ✅ Passed |
-| La variante r lanza git-sim rebase con el upstream de la rama | ✅ Passed |
-| Sin upstream, merge y rebase no lanzan nada | ✅ Passed |
-| Sin upstream, la variante p sí se permite | ✅ Passed |
-| El media-dir siempre apunta a la caché de gitdash, nunca al repo | ✅ Passed |
-| No se desactiva el auto-open ni se anima | ✅ Passed |
-| Sin el binario en PATH solo hay toast | ✅ Passed |
-| Si el media-dir no se puede crear, no se lanza nada | ✅ Passed |
-| Al volver del handoff se registra el exec y se re-colecta | ✅ Passed |
-| El selector visual no consulta ni bloquea por rebase en curso | ✅ Passed |
-| La acción visual es configurable y aparece en las hints | ✅ Passed |
-| El aviso del selector se pinta por el punto único de keybinds | ✅ Passed |
+| The visual key arms the selector without running anything | ✅ Passed |
+| With no row under the cursor it does not arm | ✅ Passed |
+| On a row with no repo it does not arm | ✅ Passed |
+| A key that is not a variant cancels the arming and carries on | ✅ Passed |
+| The arming keeps the right row even if the cursor moves | ✅ Passed |
+| The p variant launches git-sim pull with no positional arguments | ✅ Passed |
+| The m variant launches git-sim merge with the branch's upstream | ✅ Passed |
+| The r variant launches git-sim rebase with the branch's upstream | ✅ Passed |
+| With no upstream, merge and rebase launch nothing | ✅ Passed |
+| With no upstream, the p variant is allowed | ✅ Passed |
+| The media-dir always points at gitdash's cache, never the repo | ✅ Passed |
+| Auto-open is not disabled and nothing is animated | ✅ Passed |
+| With the binary missing from PATH there is only a toast | ✅ Passed |
+| If the media-dir cannot be created, nothing is launched | ✅ Passed |
+| On return from the handoff the exec is recorded and it re-collects | ✅ Passed |
+| The visual selector neither consults nor blocks on a rebase in progress | ✅ Passed |
+| The visual action is configurable and shows up in the hints | ✅ Passed |
+| The selector's warning is painted through keybinds' single point | ✅ Passed |
 
 ## Commits
 - `feat(config): add configurable visual action for git-sim preview`
 - `feat(tui): add git-sim visual preview selector and handoff`
 
-(Historial finalizado determinísticamente: 6 commits originales → 2 agrupados por
-unidad de comportamiento, con invariante de tree-hash verificado.)
+(History finalised deterministically: 6 original commits → 2 grouped by unit of
+behaviour, with the tree-hash invariant verified.)
 
 ## Files
 - Created:
@@ -53,15 +53,16 @@ unidad de comportamiento, con invariante de tree-hash verificado.)
   - `AGENTS.md`
 
 ## Tests
-- Added: 20 test functions (19 en `visual_selector_test.go` + 1 en `config_test.go`)
-- System Tests: ✅ Passed (`make test` → `go test -race -count=1 ./...`, suite completa en verde)
+- Added: 20 test functions (19 in `visual_selector_test.go` + 1 in `config_test.go`)
+- System Tests: ✅ Passed (`make test` → `go test -race -count=1 ./...`, the whole suite green)
 
 ## Documentation
-- Changelog: ⏭️ No aplica — el repo no tiene ni mantiene `CHANGELOG.md` (la documentación
-  de cambios es el propio historial). No se introduce un artefacto de changelog nuevo.
-- Docs: `docs/planning/0001-feature-git-sim-pull-preview/` (paquete de planificación,
-  conservado en el repo por decisión del usuario: no es artefacto SDD).
-- ADR: No required
+- Changelog: ⏭️ Not applicable — the repo neither has nor maintains `CHANGELOG.md`
+  (change documentation is the history itself). No new changelog artefact is
+  introduced.
+- Docs: `docs/planning/0001-feature-git-sim-pull-preview/` (planning package,
+  kept in the repo by the user's decision: it is not an SDD artefact).
+- ADR: Not required
 
 ## Code Review Issues
 - Critical Found: 0
@@ -69,5 +70,5 @@ unidad de comportamiento, con invariante de tree-hash verificado.)
 - User Decision: Approved to continue
 
 ## Next Step
-Merge mediante la review request (rebase lineal, `main` protegida en verde), y
-comprobación del workflow `push` de `main` tras el merge.
+Merge via the review request (linear rebase, `main` protected and green), and a
+check of main's `push` workflow after the merge.

@@ -1,7 +1,5 @@
-# Atajos de desarrollo de gitdash.
-# El binario que ejecuta el usuario vive en $(PREFIX)/bin (default ~/.local/bin,
-# ver AGENTS.md): tras cualquier cambio de código hay que instalarlo con
-# `make install` (compila bin/gitdash y lo copia).
+# Dev shortcuts; the binary the user runs lives in $(PREFIX)/bin (default
+# ~/.local/bin, see AGENTS.md), so after any change it must be reinstalled with `make install`.
 
 SHELL := /bin/bash
 
@@ -10,58 +8,54 @@ BINDIR      := $(PREFIX)/bin
 BIN         := bin/gitdash
 PKG         := ./cmd/gitdash
 
-# Misma versión que usa dbx; se ejecuta con `go run`, sin binario global.
+# Same version dbx uses; run with `go run`, no global binary.
 GOLANGCI_LINT_VERSION := v2.13.2
 MUTATE_BASE ?= main
 
 .DEFAULT_GOAL := help
 .PHONY: help build install uninstall fmt fmt-check vet lint test test-race check all run print fixtures smoke tidy clean mutate mutate-diff mutate-all mutate-all-diff coverage coverage-check _mutate_check _mutate_total _mutate_total_diff
 
-help: ## Muestra esta ayuda
+help: ## Shows this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-11s\033[0m %s\n", $$1, $$2}'
 
-build: ## Compila el binario en bin/gitdash
+build: ## Builds the binary at bin/gitdash
 	go build -o $(BIN) $(PKG)
 
-install: build ## Instala bin/gitdash en PREFIX/bin (default ~/.local/bin; obligatorio tras cambios)
+install: build ## Installs bin/gitdash into PREFIX/bin (default ~/.local/bin; mandatory after changes)
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 $(BIN) $(DESTDIR)$(BINDIR)/gitdash
 
-uninstall: ## Borra el binario instalado de PREFIX/bin (default ~/.local/bin)
+uninstall: ## Deletes the installed binary from PREFIX/bin (default ~/.local/bin)
 	rm -f $(DESTDIR)$(BINDIR)/gitdash
 
-fmt: ## Aplica gofmt sobre el árbol
+fmt: ## Runs gofmt over the tree
 	gofmt -w .
 
-fmt-check: ## Verifica formato gofmt sin modificar (falla si hay pendientes)
+fmt-check: ## Checks gofmt formatting without writing (fails if anything is pending)
 	@out="$$(gofmt -l .)"; \
-	if [ -n "$$out" ]; then echo "gofmt pendiente en:"; echo "$$out"; exit 1; fi
+	if [ -n "$$out" ]; then echo "gofmt pending in:"; echo "$$out"; exit 1; fi
 
 vet: ## go vet
 	go vet ./...
 
-lint: vet fmt-check ## go vet + gofmt + golangci-lint (versión pineada, siempre vía go run)
+lint: vet fmt-check ## go vet + gofmt + golangci-lint (version pinned, always via go run)
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
-test: ## Ejecuta la suite de tests con -race (misma clase que CI)
+test: ## Runs the test suite with -race (same class as CI)
 	go test -race -count=1 ./...
 
-test-race: test ## Alias de test: la suite ya corre con -race
+test-race: test ## Alias of test: the suite already runs with -race
 
-# La cobertura se mide sobre el perfil deduplicado que produce
-# `go test -coverprofile` (un bloque por test binary), mas el perfil del
-# subproceso que ejecuta func main(), que ese test no recoge.
+# Coverage is measured on the deduplicated `go test -coverprofile` output (one
+# block per test binary) plus the profile of the subprocess running func main(),
+# which that test cannot collect.
 COVER_PROFILE ?= coverage.out
 COVER_MAIN ?= .covmain/main.txt
 
-# .covmain se BORRA, no se reutiliza: guarda los contadores del binario
-# instrumentado, y los de una build anterior tienen rangos que el codigo de hoy
-# ya no tiene. Fusionarlos suma bloques que ya no existen al perfil y el total
-# baja solo (medido: 80.24% con 7 ficheros viejos, 99.74% limpio). El `rm` va en
-# la recipe, y este comentario FUERA: dentro se lo pasa al shell, que lo ejecuta
-# como un comando mas y rompe el target.
-coverage: ## Perfil de cobertura deduplicado + el del subproceso de main()
+# .covmain is deleted, not reused: it holds the instrumented binary's counters and a previous build's refer to ranges today's code no longer has, so merging them drags the total down (measured: 80.24% with 7 stale files, 99.74% clean).
+# The `rm` sits in the recipe and this comment OUTSIDE: inside a recipe it is passed to the shell, which runs it as another command and breaks the target.
+coverage: ## Deduplicated coverage profile + the one of main()'s subprocess
 	@go test -count=1 -coverpkg ./... -coverprofile=$(COVER_PROFILE) ./... > /dev/null
 	@rm -rf .covmain
 	@mkdir -p .covmain
@@ -69,28 +63,28 @@ coverage: ## Perfil de cobertura deduplicado + el del subproceso de main()
 	@XDG_CONFIG_HOME="$$(mktemp -d)" GOCOVERDIR="$$PWD/.covmain" \
 		./.covmain/gitdash --print >/dev/null 2>&1 || true
 	@go tool covdata textfmt -i=.covmain -o=$(COVER_MAIN)
-	@echo "perfiles: $(COVER_PROFILE) $(COVER_MAIN)"
+	@echo "profiles: $(COVER_PROFILE) $(COVER_MAIN)"
 
-coverage-check: coverage ## Gate: el DIFF de este cambio al 100%, y el total con suelo
+coverage-check: coverage ## Gate: this change's DIFF at 100%, and the total with a floor
 	@extra=""; [ -f "$(COVER_MAIN)" ] && extra="-a $$PWD/$(COVER_MAIN)"; \
 		scripts/diff-coverage.sh "$(COVER_PROFILE)" "$(MUTATE_BASE)" $$extra
 
-check: build lint test ## build + lint + test (equivalente al gate de CI)
+check: build lint test ## build + lint + test (equivalent to CI's gate)
 	@echo "check OK"
 
 all: check test-race ## check + test-race
 
-run: ## Arranca la TUI contra tu config real
+run: ## Starts the TUI against your real config
 	go run $(PKG)
 
-print: ## Modo tabla one-shot (--print)
+print: ## One-shot table mode (--print)
 	go run $(PKG) --print
 
-fixtures: ## Regenera testdata/playground (repos git fixture)
+fixtures: ## Regenerates testdata/playground (git repo fixtures)
 	./scripts/gen-fixtures.sh
 
-smoke: build ## Smoke test de la TUI en tmux con config aislada y fixtures
-	@test -d testdata/playground || { echo "falta testdata/playground — corre 'make fixtures'"; exit 1; }
+smoke: build ## Smoke tests the TUI in tmux with an isolated config and the fixtures
+	@test -d testdata/playground || { echo "testdata/playground is missing — run 'make fixtures'"; exit 1; }
 	@tmp="$$(mktemp -d)"; mkdir -p "$$tmp/gitdash"; \
 	printf 'roots = ["%s/testdata/playground"]\n' "$(CURDIR)" > "$$tmp/gitdash/config.toml"; \
 	tmux kill-session -t gitdash-smoke 2>/dev/null || true; \
@@ -103,134 +97,49 @@ smoke: build ## Smoke test de la TUI en tmux con config aislada y fixtures
 tidy: ## go mod tidy
 	go mod tidy
 
-# MUTATE_EXCLUDE deja fuera lo que NO es codigo del modulo. Sin esto, gremlins
-# recorre .worktrees/ (Worktrunk) y mide una COPIA completa del repo en otro
-# commit: duplica el informe, infla el "not covered" y mezcla codigo viejo. El
-# patron se ancla al path, no al nombre del directorio.
-#
-# internal/testutil queda fuera por un motivo distinto: es andamiaje de tests.
-# Su correccion la ejercitan TODOS los suites del modulo (por eso --coverpkg lo
-# da por cubierto), pero gremlins muta paquete a paquete y ejecuta solo los tests
-# de ESE paquete: contra testutil solo correrian sus dos tests, que unicamente
-# llaman a Marker. Medirlo asi produce 11 supervivientes que no son riesgos, son
-# la contradiccion entre medir con todos los paquetes y ejecutar con uno solo.
+# MUTATE_EXCLUDE keeps out what is NOT module code: without it gremlins walks .worktrees/ (Worktrunk) and measures a full COPY of the repo in another commit, duplicating the report, inflating "not covered" and mixing old code; the pattern is anchored on the path, not the directory name.
+# internal/testutil is excluded for a different reason: it is test scaffolding exercised by EVERY suite in the module (which is why --coverpkg counts it as covered), but gremlins mutates package by package running only that package's tests, so against testutil only its two tests would run, giving 11 survivors that are the contradiction of measuring with all packages and executing with one.
 MUTATE_EXCLUDE ?= '(\.worktrees/|internal/testutil/)'
 
-# MUTATE_COVERPKG: sin esto gremlins mide SOLO el paquete bajo test, y aqui eso
-# miente: internal/testutil lo llaman los tests de otros paquetes, asi que sus
-# lineas salen "not covered" siendo codigo vivo. Con ./... el perfil mide todo
-# el modulo, que es lo que el gate necesita para ser cierto.
+# MUTATE_COVERPKG: without it gremlins measures only the package under test, which lies here (other packages' tests call internal/testutil, so its lines come out "not covered" while being live code).
 MUTATE_COVERPKG ?= ./...
 
-# El timeout por mutante es (duracion medida de la suite) x este coeficiente, no
-# el timeout por defecto de go test.
-#
-# OJO: este timeout lo aplica GREMLINS, no el watchdog. Es un
-# context.WithTimeout alrededor del go test de cada mutante (executor.go:194), mas
-# un -timeout propio pasado a go test (executor.go:227); si se dispara, el mutante
-# queda con status "TIMED OUT" y el run CONTINUA. Asi que un mutante colgado ya
-# estaba parado antes de que existiera el watchdog, y el watchdog no aporta nada
-# en ese caso: solo ve "el run entero no ha emitido nada en STALL".
-#
-# Y el coeficiente esta ACOPLADO a los workers, medido. Con la cache de `go test`
-# caliente la cobertura mide ~2s, asi que coef 2 da un techo de 6s por mutante
-# mientras la suite de internal/tui tarda 3s sola: en cuanto hay contencion, los
-# mutantes expiran. Medido sobre el scope del diff (48 mutantes):
-#
-#   workers  coef   wall  killed  TIMED OUT  killed/s
-#        4     2     30s      46           0      1.53
-#       10     2     20s      29          17      1.45
-#       16     2     20s      20          26      1.00   <- peor que 4 workers
-#       16    30     20s      46           0      2.30   <- el que hay que usar
-#
-# TIMED OUT es lo que no puede pasar: NO va a `mutants_total` (report.go:178 lo
-# excluye) y el gate de CI solo mira `LIVED`, asi que 15 mutantes sin testear
-# producen un run con "100% de eficacia".
-#
-# Estos defaults son los de CI (2 workers, coef 2, runner de 2-4 nucleos). Para
-# local NO son los buenos: usa `make mutate-all`, que mide la cobertura de la
-# maquina y elige el coeficiente que corresponde. O overridea:
-#   make mutate MUTATE_WORKERS=16 MUTATE_TIMEOUT_COEFFICIENT=30
+# The per-mutant timeout is (measured suite duration) x this coefficient, and it is applied by GREMLINS, not by the watchdog: a context.WithTimeout around each mutant's `go test` plus its own -timeout, and when it fires the mutant lands as "TIMED OUT" while the run CONTINUES.
+# TIMED OUT is what cannot happen: it does not go into mutants_total and the CI gate only looks at LIVED, so 15 untested mutants produce a run reporting 100% efficacy.
+# The coefficient is COUPLED to the workers (measured over the diff scope: 16 workers with coef 2 was worse than 4 with coef 2, and 16 with coef 30 was the best), and these defaults are CI's (2 workers, coef 2); for local use `make mutate-all`, which measures the machine and picks the coefficient.
 MUTATE_WORKERS ?= 2
 MUTATE_TIMEOUT_COEFFICIENT ?= 2
 
 MUTATE_FLAGS = --exclude-files $(MUTATE_EXCLUDE) --coverpkg $(MUTATE_COVERPKG) \
 	--workers $(MUTATE_WORKERS) --timeout-coefficient $(MUTATE_TIMEOUT_COEFFICIENT)
 
-# El coeficiente acota CADA mutante; esto acota el RUN entero, y ademas lo
-# corta si se QUEDA PARADO (sin progreso durante MUTATE_STALL_LIMIT), que es lo
-# que de verdad duele: un techo absoluto de 45m no acorta un atasco de 2m.
-#
-# NO hace falta restaurar nada al cortar. gremlins NO muta el repo: copia el
-# arbol fuente a un temporal por paquete (workdir.CachedDealer) y muta la copia
-# (TokenMutator.SetWorkdir). Medido: matando el proceso con SIGKILL en cinco
-# ventanas distintas, el md5 del fuente no cambia ni una vez. Lo que SI deja un
-# corte duro son temporales huerfanos en /tmp/gremlins-*, porque Clean() es un
-# defer y SIGKILL no lo ejecuta; no se limpian aqui a proposito, que podrian
-# ser de otro run de gremlins en marcha.
+# This bounds the WHOLE RUN and cuts it if it goes STALL (no progress during MUTATE_STALL_LIMIT), which is what really hurts: an absolute 45m ceiling does not shorten a 2m hang.
+# Nothing has to be restored on the cut because gremlins does NOT mutate the repo: it copies the source tree to a temp dir per package and mutates the copy (measured: SIGKILL in five windows never changed the source md5); what a hard cut does leave behind are orphan /tmp/gremlins-* dirs, deliberately not cleaned here since they may belong to another run in flight.
 MUTATE_HARD_LIMIT ?= 45m
 MUTATE_STALL_LIMIT ?= 5m
 
-# El supervisor vive en swe (~/.local/lib/swe, gestionado por chezmoi) y NO es un
-# verbo: how-to-mutate deja el motor y la invocacion en el llamador, y el watchdog
-# solo supervisa. Por eso el llamador es quien calcula el denominador y quien
-# prohibe los flags que lo rompen (§ MUTATE_FLAGS).
+# The supervisor lives in swe (~/.local/lib/swe, managed by chezmoi) and is NOT a verb: how-to-mutate keeps the engine and the invocation in the caller and the watchdog only supervises, which is why the caller computes the denominator and forbids the flags that break it.
 WATCHDOG ?= $(HOME)/.local/lib/swe/lib/watchdog.sh
 
-# Una linea de mutante de gremlins. El formato sale de report.go (Mutant imprime
-# "%s%s %s at %s\n"), asi que la cola de la linea es `at <file>:<linea>:<col>` y
-# los codigos de color van en el status, no al final: el patron aguanta aunque el
-# destino sea un TTY. El `[^[:space:]]` final tolera el CR que mete la disciplina
-# de linea de un terminal, para no depender de que la salida este redirigida.
-#
-# Este es el UNICO sitio donde se define que es "una unidad de progreso": el
-# watchdog la recibe y el numerador y el denominador salen de la MISMA expresion.
+# One gremlins mutant line: report.go prints "%s%s %s at %s\n", so the line ends in `at <file>:<line>:<col>` with the colors in the status, and the trailing `[^[:space:]]` tolerates the CR a terminal's line discipline adds so this does not depend on the output being redirected.
+# This is the ONLY place defining what "one unit of progress" is: the watchdog receives it and numerator and denominator come from the SAME expression.
 MUTATE_LINE_RE = at [^[:space:]]+:[[:digit:]]+:[[:digit:]]+[^[:space:]]*$$
 
-# El numerador cuenta lineas de MUTATE_LINE_RE; el denominador tambien, y por eso
-# el log del dry-run NO se cuenta con `wc -l`: ese fichero trae ademas Starting...,
-# Gathering coverage..., done in ..., y el pie (Runnable: N, ... / Killed: N, ...).
-# Medido: 13 lineas para 5 mutantes. Confundir los dos numeros hace que el
-# watchdog "alcanze el total" antes de tiempo y deje de vigilar el progreso.
-#
-# OJO: `mutants_total` de report.json NO es el denominador. Es
-# lived+killed+notViable (report.go), que excluye not-covered y timed-out; el
-# dry-run si los imprime. Son dos numeros distintos.
-#
-# La pre-pasada en dry-run no es gratis: coverage.Run() corre `go test -coverpkg`
-# entero ANTES de que el motor exista (y el motor es donde se mira dryRun), asi
-# que paga una suite instrumentada + la copia del arbol por trabajador, y corre
-# cero suites por mutante. Medido en este repo: segundos, contra las ~1027 suites
-# del run real. Y es la unica via: MutantsTotal solo se calcula al escribir el
-# informe, nunca durante el run (report.go:178), asi que no hay total en banda
-# queantagear.
+# Numerator and denominator both count MUTATE_LINE_RE lines, which is why the dry-run log is NOT counted with `wc -l`: that file also carries Starting..., Gathering coverage..., done in ... and the footer (measured: 13 lines for 5 mutants), and confusing the two makes the watchdog "reach the total" early and stop watching progress.
+# And `mutants_total` in report.json is NOT the denominator: it is lived+killed+notViable, excluding not-covered and timed-out, while the dry-run prints those.
+# The dry-run pre-pass is not free (coverage.Run() executes the whole `go test -coverpkg` before the engine exists, paying an instrumented suite plus the tree copy per worker, and runs zero suites per mutant), and it is the only way: MutantsTotal is only computed when the report is written, never during the run, so there is no total to read mid-flight.
 MUTATE_ENUM_FLAGS = $(MUTATE_FLAGS)
 
-# Flags que ROMPEN el contrato "exactamente una linea por mutante", y por tanto
-# el denominador. Se comprueban aqui y no en el watchdog porque son una restriccion
-# sobre la INVOCACION, y la invocacion es del llamador (how-to-mutate). Meter
-# flags de gremlins en el helper seria justo el acoplamiento que swe evita.
-#
-#   -S / --output-statuses : filtra las lineas por status (report/logger.go), asi
-#                            que con `-S k` el numerador deja de ser "mutantes
-#                            procesados". Medido: 0 lineas de 5 mutantes.
-#   -s / --silent          : suprime todo log.Infof (internal/log), o sea todas
-#                            las lineas de mutante. Ademas es flag PERSISTENT de
-#                            la raiz, asi que vale en cualquier posicion.
-#                            Medido: 39 bytes, 0 lineas.
-# Con cualquiera de los dos, el dry-run daria denominador 0 o el run real
-# congelaria el progreso: los dos fallos que el watchdog existe para ver.
+# These flags BREAK the "exactly one line per mutant" contract, and so the denominator; they are checked here and not in the watchdog because they are a restriction on the INVOCATION, which belongs to the caller (how-to-mutate).
+# -S/--output-statuses filters the lines by status, so with `-S k` the numerator stops meaning "mutants processed" (measured: 0 lines out of 5); -s/--silent suppresses every log.Infof, i.e. all mutant lines, and being a persistent root flag it counts anywhere (measured: 39 bytes, 0 lines).
+# With either one the dry-run denominator is 0 or the real run freezes the progress: the two failures the watchdog exists to see.
 MUTATE_FORBIDDEN = -S --output-statuses -s --silent
 
-# El bucle de local. `make mutate` usa los defaults de CI (2 workers, coef 2) y
-# por eso en una maquina con nucleos tarda ~25min y con workers altos produce
-# TIMED OUT sin querer. Este target es el que hay que usar aqui: mide la
-# cobertura de la maquina, elige el coeficiente que corresponde y va a 16 workers.
-# Ver scripts/mutate-all.sh y el comentario de MUTATE_TIMEOUT_COEFFICIENT.
-mutate-all: ## Mutation testing en local, con workers y timeout ajustados a esta maquina (~10min)
+# `make mutate` uses CI's defaults (2 workers, coef 2), which is why on a many-core machine it takes ~25min and with high workers produces TIMED OUT by accident; this target is the one to use locally because it measures the machine and goes to 16 workers.
+mutate-all: ## Mutation testing locally, with workers and timeout tuned to this machine (~10min)
 	@scripts/mutate-all.sh
 
-mutate-all-diff: ## Como mutate-all pero solo el diff vs main (bucle diario, <1min)
+mutate-all-diff: ## Like mutate-all but only the diff vs main (daily loop, <1min)
 	@scripts/mutate-all.sh --diff
 
 mutate: ## Mutation testing (gremlins) on the whole module — advisory, never blocks CI
@@ -250,17 +159,13 @@ mutate-diff: ## Mutation testing (gremlins) restricted to the diff vs main — a
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi
 
-# El check compara por token y no por subcadena, y cubre las tres formas en que
-# un flag prohibido puede colarse: exacto, con `=valor`, y agrupado con otro
-# shorthand (`-Sk`). Los shorthands prohibidos estan en dos sitios porque bash no
-# puede derivar una clase de caracteres de una lista; si anades uno a
-# MUTATE_FORBIDDEN, anadelo tambien al patron de la segunda case.
+# The check compares by token and not by substring, and covers the three ways a forbidden flag can slip in: exact, with `=value`, and grouped with another shorthand (`-Sk`); the forbidden shorthands live in two places because bash cannot derive a character class from a list, so adding one to MUTATE_FORBIDDEN means adding it to the second case's pattern too.
 _mutate_check:
 	@for p in $(MUTATE_FORBIDDEN); do \
 		for f in $(MUTATE_FLAGS); do \
 			case "$$f" in \
 				"$$p"|"$$p"=*) \
-					echo "mutate: '$$f' rompe el contrato una-linea-por-mutante (ver MUTATE_FORBIDDEN)" >&2; \
+					echo "mutate: '$$f' breaks the one-line-per-mutant contract (ver MUTATE_FORBIDDEN)" >&2; \
 					exit 2 ;; \
 			esac; \
 		done; \
@@ -270,18 +175,14 @@ _mutate_check:
 			--*) ;; \
 			-?*) case "$${f#-}" in \
 				s*|S*) \
-					echo "mutate: '$$f' lleva un shorthand prohibido agrupado (ver MUTATE_FORBIDDEN)" >&2; \
+					echo "mutate: '$$f' carries a grouped forbidden shorthand (ver MUTATE_FORBIDDEN)" >&2; \
 					exit 2 ;; \
 			esac ;; \
 		esac; \
 	done
 
-# El denominador: una pre-pasada en dry-run con LOS MISMOS flags de scope que el
-# run real. Se supervisea con el mismo watchdog pero sin total (TOTAL=0), porque
-# el total es justo lo que esta pre-pasada calcula; durante la fase de cobertura
-# gremlins no emite ninguna linea, asi que ahi solo puede vigilante el techo.
-# stderr NO se descarta: si la pre-pasada falla, el diagnostico del watchdog es lo
-# unico que dice por que. Un total de 0 degrada a modo lineas, que es lo correcto.
+# The denominator is a dry-run pre-pass with the SAME scope flags as the real run, supervised with the same watchdog but with no total (TOTAL=0) since the total is what that pre-pass computes; during the coverage phase gremlins emits no line at all, so only the ceiling can be watched there.
+# stderr is NOT discarded: if the pre-pass fails, the watchdog's diagnostic is the only thing saying why, and a total of 0 degrades to line mode, which is correct.
 _mutate_total:
 	@$(WATCHDOG) $(MUTATE_STALL_LIMIT) $(MUTATE_HARD_LIMIT) 0 '' -- \
 		go tool gremlins unleash --dry-run $(MUTATE_ENUM_FLAGS) \
@@ -292,5 +193,5 @@ _mutate_total_diff:
 		go tool gremlins unleash --dry-run --diff $(MUTATE_BASE) $(MUTATE_ENUM_FLAGS) \
 		| grep -cE '$(MUTATE_LINE_RE)'
 
-clean: ## Borra los artefactos de bin/
+clean: ## Deletes the artefacts in bin/
 	rm -rf bin

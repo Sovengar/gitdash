@@ -63,7 +63,7 @@ func TestLoadCorruptSilent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := Load(path, ".gitdash.toml"); got != nil {
-		t.Errorf("got = %+v, want nil sin crash", got)
+		t.Errorf("got = %+v, want nil without crashing", got)
 	}
 }
 
@@ -73,11 +73,10 @@ func TestLoadWrongVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := Load(path, ".gitdash.toml"); got != nil {
-		t.Errorf("versión futura aceptada: %+v", got)
+		t.Errorf("future version accepted: %+v", got)
 	}
 }
 
-// Cache v2 (con clave group) se ignora silenciosamente.
 func TestLoadV2Ignored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repos.json")
 	raw := `{"version":2,"repos":[{"path":"/x","name":"api","group":"vsocial","has_repo":true}]}`
@@ -97,17 +96,12 @@ func TestSaveValidJSON(t *testing.T) {
 	var f File
 	raw, _ := os.ReadFile(path)
 	if err := json.Unmarshal(raw, &f); err != nil || f.Version != version {
-		t.Errorf("json inválido: %v", err)
+		t.Errorf("invalid json: %v", err)
 	}
 }
 
-// --- Path: la puerta que decide dónde vive la cache ---
-
-// Todos los tests del paquete pasan un path a mano, así que la función que
-// resuelve $XDG_CACHE_HOME no se ejecutaba nunca. Es la que decide dónde está
-// repos.json, el fichero que hace que la app pinte al instante en vez de
-// quedarse vacía mientras escanea.
-func TestPathRespetaXDGCacheHome(t *testing.T) {
+// Every test of the package passes a path by hand, so the function resolving $XDG_CACHE_HOME never ran; that is the one deciding where repos.json lives, the file that makes the app paint instantly instead of staying empty while it scans.
+func TestPathRespectsXDGCacheHome(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", dir)
 
@@ -120,35 +114,27 @@ func TestPathRespetaXDGCacheHome(t *testing.T) {
 	}
 }
 
-// Sin XDG_CACHE_HOME ni HOME no hay directorio de usuario, y Path tiene que
-// decirlo. Devolver una ruta inventada haría que Save escribiera en un sitio
-// que nadie lee, en silencio.
-func TestPathSinDirectorioDeUsuarioDaError(t *testing.T) {
+// Without XDG_CACHE_HOME nor HOME there is no user directory and Path has to say so: returning an invented path would make Save write somewhere nobody reads, in silence.
+func TestPathWithoutDirectoryOfUserGivesError(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("HOME", "")
 	if got, err := Path(); err == nil {
-		t.Errorf("Path sin HOME ni XDG = %q, want error", got)
+		t.Errorf("Path without HOME nor XDG = %q, want error", got)
 	}
 }
 
-// Una entrada sin Path no se puede validar contra el marcador (.Stat sobre ""
-// es el directorio de trabajo del proceso, no un repo) y ademas no sirve para
-// navegar: se descarta ANTES de mirar el marcador, no despues. Si el filtro se
-// moviera detras, una entrada corrupta colada en el repos.json haria que el
-// dashboard arrancara con una fila que no existe en disco.
-func TestLoadDescartaEntradaSinPath(t *testing.T) {
+// An entry without Path cannot be validated against the marker (.Stat on "" is the process working directory, not a repo) and is useless for navigation, so it is dropped BEFORE the marker is looked at; moving the filter after would let a corrupt entry in repos.json start the dashboard with a row that does not exist on disk.
+func TestLoadDiscardsInputWithoutPath(t *testing.T) {
 	dir := t.TempDir()
 	vivo := t.TempDir()
-	// Load solo acepta un repo cuyo marcador exista en disco: sin el, la
-	// entrada se descarta por el filtro de estaleness, no por el de Path.
 	if err := os.WriteFile(filepath.Join(vivo, ".gitdash.toml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "repos.json")
 	raw := fmt.Sprintf(`{"version":%d,"repos":[
 		{"path":%q,"name":"vivo"},
-		{"path":"","name":"sin-path"},
-		{"name":"ni-campo"}
+		{"path":"","name":"no-path"},
+		{"name":"no-field"}
 	]}`, version, vivo)
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
@@ -158,29 +144,23 @@ func TestLoadDescartaEntradaSinPath(t *testing.T) {
 		t.Fatalf("Load devolvio %d repos, want 1: %+v", len(got), got)
 	}
 	if got[0].Name != "vivo" {
-		t.Errorf("se quedo %q, want el que tiene marcador", got[0].Name)
+		t.Errorf("it kept %q, want the one with a marker", got[0].Name)
 	}
 }
 
-// Save es best-effort pero no silencioso: si no puede crear el directorio ni
-// escribir, devuelve el error para que la UI lo diga. El caso que se comprueba es
-// el de un path cuyo directorio padre es un FICHERO, que hace fallar MkdirAll
-// sin permisos ni root.
-func TestSavePropagaErrorDeDirectorio(t *testing.T) {
-	bloque := filepath.Join(t.TempDir(), "soy-un-fichero")
-	if err := os.WriteFile(bloque, []byte("x"), 0o644); err != nil {
+// The checked case is a path whose parent directory is a FILE, which makes MkdirAll fail with no permissions and no root involved.
+func TestSavePropagatesErrorOfDirectory(t *testing.T) {
+	block := filepath.Join(t.TempDir(), "i-am-a-file")
+	if err := os.WriteFile(block, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// El directorio padre de `repos.json` es un fichero normal.
-	err := Save(filepath.Join(bloque, "repos.json"), nil)
+	err := Save(filepath.Join(block, "repos.json"), nil)
 	if err == nil {
-		t.Fatal("Save = nil, want error: no puede crear un directorio debajo de un fichero")
+		t.Fatal("Save = nil, want error: it cannot create a directory under a file")
 	}
 }
 
-// Y el camino feliz de crear un arbol de directorios que no existe todavia: es lo
-// que pasa en el primer arranque, cuando ~/.config/gitdash no existe.
-func TestSaveCreaLosDirectoriosQueFaltan(t *testing.T) {
+func TestSaveCreatesTheMissingDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a", "b", "c", "repos.json")
 	if err := Save(path, []discovery.Project{
 		{Path: "/x", Name: "x", HasRepo: true},
@@ -188,21 +168,19 @@ func TestSaveCreaLosDirectoriosQueFaltan(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 	got := Load(path, ".gitdash.toml")
-	// El marcador no existe todavia, asi que Load lo descarta: lo que importa
-	// aqui es que el fichero existe y es JSON valido con la version buena.
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("el fichero no se escribio: %v", err)
+		t.Fatalf("the file was not written: %v", err)
 	}
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatalf("el fichero no es JSON valido: %v", err)
+		t.Fatalf("the file is not valid JSON: %v", err)
 	}
 	if f.Version != version {
 		t.Errorf("version = %d, want %d", f.Version, version)
 	}
 	if len(f.Repos) != 1 || f.Repos[0].Name != "x" {
-		t.Errorf("repos = %+v, want el unico proyecto guardado", f.Repos)
+		t.Errorf("repos = %+v, want the only saved project", f.Repos)
 	}
 	_ = got
 }

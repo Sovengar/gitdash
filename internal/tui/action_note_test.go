@@ -1,5 +1,3 @@
-// Tests del texto de notificación de acciones terminadas (motivo real del
-// fallo + hint accionable + argv resuelto).
 package tui
 
 import (
@@ -13,17 +11,13 @@ func TestActionNoteOk(t *testing.T) {
 	}
 }
 
-// El argv resuelto viaja en la notificación: con la política de pull en el
-// gitconfig, "pull ok" no dice si reconcilió con merge, rebase o ff-only.
 func TestActionNoteOkShowsResolvedCommand(t *testing.T) {
 	got := actionNote("pull_rebase", "repo-a", "git pull --rebase --autostash", "", "", false)
 	if !strings.Contains(got, "git pull --rebase --autostash") {
-		t.Errorf("actionNote = %q, want el argv resuelto", got)
+		t.Errorf("actionNote = %q, want the resolved argv", got)
 	}
 }
 
-// Un pull divergido: el motivo real de git va en la notificación y se añade
-// el hint de rebase.
 func TestActionNotePullDiverged(t *testing.T) {
 	out := "hint: Diverging branches can't be fast-forwarded, you need to either:\n" +
 		"hint:\n" +
@@ -31,101 +25,88 @@ func TestActionNotePullDiverged(t *testing.T) {
 	got := actionNote("pull_ff", "repo-a", "git pull --ff-only", out,
 		"fatal: Not possible to fast-forward, aborting.", false)
 	if !strings.Contains(got, "pull_ff failed repo-a") {
-		t.Errorf("actionNote = %q, want prefijo de fallo", got)
+		t.Errorf("actionNote = %q, want the failure prefix", got)
 	}
 	if !strings.Contains(got, "Not possible to fast-forward") {
-		t.Errorf("actionNote = %q, want el motivo real", got)
+		t.Errorf("actionNote = %q, want the reason real", got)
 	}
-	if !strings.Contains(got, "divergió") {
-		t.Errorf("actionNote = %q, want el hint de divergencia", got)
+	if !strings.Contains(got, "diverged") {
+		t.Errorf("actionNote = %q, want the divergence hint", got)
 	}
 }
 
-// Sin upstream: el motivo se muestra y el hint apunta a la tecla que lo
-// resuelve (P publica la rama y configura el tracking).
-func TestActionNotePullNoUpstream(t *testing.T) {
+func TestActionNotePullNotUpstream(t *testing.T) {
 	got := actionNote("pull", "repo-b", "git pull",
 		"There is no tracking information for the current branch.\n",
 		"There is no tracking information for the current branch.", false)
 	if !strings.Contains(got, "no tracking information") {
-		t.Errorf("actionNote = %q, want el motivo", got)
+		t.Errorf("actionNote = %q, want the reason", got)
 	}
-	if !strings.Contains(got, "P la publica") {
-		t.Errorf("actionNote = %q, want el hint de upstream", got)
+	if !strings.Contains(got, "P publishes it") {
+		t.Errorf("actionNote = %q, want the upstream hint", got)
 	}
 }
 
-// El hint de divergencia solo aplica a las variantes de pull, no a push.
-func TestActionNotePushNoDivergedHint(t *testing.T) {
+func TestActionNotePushNotDivergedHint(t *testing.T) {
 	got := actionNote("push", "repo-c", "git push",
 		"fatal: Not possible to fast-forward, aborting.",
 		"fatal: Not possible to fast-forward, aborting.", false)
-	if strings.Contains(got, "divergió") {
-		t.Errorf("actionNote push = %q, no debe llevar hint de divergencia", got)
+	if strings.Contains(got, "diverged") {
+		t.Errorf("actionNote push = %q, it must not carry the divergence hint", got)
 	}
 }
 
-// Un pull --rebase que choca deja el repo a medias. El aviso tiene que decirlo
-// explícitamente: "falló" solo invita a reintentar, y reintentar sobre un rebase
-// sin resolver es peor que no hacer nada.
 func TestActionNoteRebaseInProgressWins(t *testing.T) {
 	out := "CONFLICT (content): Merge conflict in f.txt\n"
 	got := actionNote("pull_rebase", "repo-a", "git pull --rebase --autostash", out,
 		"error: could not apply 1234567... local", true)
-	if !strings.Contains(got, "rebase a medias") {
-		t.Errorf("actionNote = %q, want el aviso de rebase a medias", got)
+	if !strings.Contains(got, "mid-rebase") {
+		t.Errorf("actionNote = %q, want the mid-rebase warning", got)
 	}
 	if !strings.Contains(got, "rebase --continue") {
-		t.Errorf("actionNote = %q, want cómo continuar", got)
+		t.Errorf("actionNote = %q, want how to continue", got)
 	}
-	// El aviso de rebase a medias pisa los hints de divergencia/upstream: son
-	// diagnósticos de un estado que ya no aplica.
-	if strings.Contains(got, "divergió") || strings.Contains(got, "sin upstream") {
-		t.Errorf("actionNote = %q, los hints secundarios deben quedar fuera", got)
+	if strings.Contains(got, "diverged") || strings.Contains(got, "no upstream") {
+		t.Errorf("actionNote = %q, the secondary hints must be left out", got)
 	}
 }
 
-// El aviso de rebase a medias no aplica a push: un push fallido deja el repo
-// como estaba.
 func TestActionNotePushIgnoresRebaseFlag(t *testing.T) {
 	got := actionNote("push", "repo-c", "git push", "fatal: x", "fatal: x", true)
-	if strings.Contains(got, "rebase a medias") {
-		t.Errorf("actionNote push = %q, no debe mencionar rebase", got)
+	if strings.Contains(got, "mid-rebase") {
+		t.Errorf("actionNote push = %q, it must not mention rebase", got)
 	}
 }
 
-// El argv resuelto acompaña al veredicto cuando existe: es lo único que dice
-// qué política aplicó git (con `p` sin flags, eso lo decide el gitconfig). Y si
-// no hay argv, el mensaje no inventa uno.
-func TestActionNoteMuestraElArgvSoloSiExiste(t *testing.T) {
-	t.Run("con argv en éxito", func(t *testing.T) {
+func TestActionNoteShowsTheArgvOnlyIfExists(t *testing.T) {
+	t.Run("with argv on success", func(t *testing.T) {
 		got := actionNote("pull", "api", "git pull --rebase", "", "", false)
 		if !strings.Contains(got, "git pull --rebase") {
-			t.Errorf("nota = %q, want el argv", got)
+			t.Errorf("note = %q, want the argv", got)
 		}
 	})
-	t.Run("sin argv en éxito", func(t *testing.T) {
+	t.Run("without argv on success", func(t *testing.T) {
 		got := actionNote("pull", "api", "", "", "", false)
 		if strings.Contains(got, "git ") || strings.Contains(got, "()") {
-			t.Errorf("nota = %q, want sin argv ni paréntesis vacíos", got)
+			t.Errorf("note = %q, want no argv and no empty parentheses", got)
 		}
 	})
-	t.Run("con argv en fallo", func(t *testing.T) {
+	t.Run("with argv on failure", func(t *testing.T) {
 		got := actionNote("pull", "api", "git pull --rebase", "", "could not apply abc", false)
 		if !strings.Contains(got, "git pull --rebase") {
-			t.Errorf("nota = %q, want el argv y el motivo", got)
+			t.Errorf("note = %q, want the argv and the reason", got)
 		}
 		if !strings.Contains(got, "could not apply") {
-			t.Errorf("nota = %q, want el motivo de git", got)
+			t.Errorf("note = %q, want the reason de git", got)
 		}
 	})
-	t.Run("sin argv en fallo", func(t *testing.T) {
+	t.Run("without argv on failure", func(t *testing.T) {
 		got := actionNote("push", "api", "", "", "permission denied", false)
 		if strings.Contains(got, "—  ") {
-			t.Errorf("nota = %q, want sin un guion colgando", got)
+			t.Errorf("note = %q, want no dangling dash", got)
 		}
 		if !strings.Contains(got, "permission denied") {
-			t.Errorf("nota = %q, want el motivo", got)
+			t.Errorf("note = %q, want the reason", got)
 		}
 	})
 }

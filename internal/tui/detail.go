@@ -1,4 +1,3 @@
-// Vista de detalle de un repo.
 package tui
 
 import (
@@ -9,29 +8,16 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// detailHeadLines son las líneas fijas de la ficha antes de las listas: path,
-// branch, upstream, state y sync. Se reservan siempre, así que las listas
-// (worktrees, ficheros, commits) se reparten el resto del alto.
 const detailHeadLines = 5
 
-// minListBlockLines es lo que consume una lista antes de enseñar un solo
-// elemento: el hueco que la separa de la ficha y su cabecera. Por debajo no se
-// pinta la lista (ni la cabecera, que sin elementos no dice nada).
 const minListBlockLines = 2
 
-// listBudget reparte las líneas disponibles (avail) entre una lista de n
-// elementos, contando el hueco y la cabecera. Devuelve cuántos se pintan y si
-// hay que avisar de los que quedan fuera.
-//
-// El aviso se reserva una línea cuando la lista no cabe entera: sin él, un
-// corte al final de la caja parecería que la lista se acababa ahí. Cuando solo
-// hay sitio para un elemento, el elemento gana y el aviso se cae — la cabecera
-// de la lista ya dice cuántos hay.
+// The warning line is reserved when the list does not fit whole (a cut at the box edge would look like the list ended there), except when only one element fits, since the header already says how many there are.
 func listBudget(avail, n int) (shown int, rest bool) {
 	if avail < minListBlockLines {
 		return 0, false
 	}
-	room := avail - minListBlockLines // hueco + cabecera
+	room := avail - minListBlockLines
 	if n <= room {
 		return n, false
 	}
@@ -41,7 +27,6 @@ func listBudget(avail, n int) (shown int, rest bool) {
 	return room - 1, true
 }
 
-// asOrDash devuelve el texto o "-" si vacío.
 func asOrDash(s string) string {
 	if s == "" {
 		return "-"
@@ -49,18 +34,9 @@ func asOrDash(s string) string {
 	return s
 }
 
-// cmdInputLines es lo que ocupa el input de `!` al final de la ficha: el hueco
-// que lo separa y la línea del prompt. Se descuentan del presupuesto para que
-// escribir un comando no empuje la ficha fuera de la caja.
 const cmdInputLines = 2
 
-// fichaTail cierra la ficha con el input de `!` si está abierto. El input se
-// pinta SIEMPRE al final, aunque la ficha haya llenado la caja: escribir un
-// comando sin ver dónde se escribe es peor que no ver el resto de la ficha,
-// así que lo que sobra se recorta por arriba.
-//
-// Sin input no hay pie: las teclas de la fila ya están en la sección de
-// keybinds, y repetirlas aquí solo ocupaba una línea de la ficha.
+// The input is ALWAYS painted at the end, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top; without input there is no footer, the keys are already in keybinds.
 func (m *Model) fichaTail(body string, rows int) string {
 	if !m.cmdOpen {
 		return body
@@ -69,14 +45,7 @@ func (m *Model) fichaTail(body string, rows int) string {
 		"\n\n" + styleDetailKey.Render(m.cmdInput.Prompt) + m.cmdInput.View()
 }
 
-// renderDetail compone la ficha del repo bajo el cursor con datos vivos del
-// snapshot. rows es el alto de contenido que le da el layout: el presupuesto
-// interno (cuántos worktrees/ficheros/tails se listan) sale de ahí y no de la
-// altura de la terminal, porque un tope calculado con el alto completo pintaría
-// una lista entera que luego recorta la caja sin decir cuántas filas faltaron.
-//
-// El título (nombre, grupo, marca de worktree) NO se pinta aquí: lo lleva el
-// borde de la sección.
+// The internal budget derives from rows (the layout's height) and not from the terminal, or a full-height cap would paint a list the box then crops without saying how many rows are missing; the title lives in the border.
 func (m *Model) renderDetail(r row, rows int) string {
 	var b strings.Builder
 
@@ -85,9 +54,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 
 	key := styleDetailKey.Render
 
-	// El path es un campo más de la cabecera, no una línea suelta: en su propia
-	// línea (con el hueco que la separaba) se llevaba una altura que las listas
-	// necesitan. El valor va atenuado porque es contexto, no estado.
+	// The path is one more header field and not a loose line: on its own line (with the gap that separated it) it took a height the lists need, and its value is dimmed because it is context, not state.
 	b.WriteString(key("path    ") +
 		styleHint.Render(truncate(p.Path, max(20, m.width-13))) + "\n")
 
@@ -104,8 +71,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 	}
 	b.WriteString(key("branch  ") + branch + "\n")
 	b.WriteString(key("upstream") + " " + upstream + "\n")
-	// Working tree + deriva vs upstream. El detalle SÍ es
-	// verboso: "clean" explícito en vez de celda vacía.
+	// The detail IS verbose: an explicit "clean" instead of an empty cell.
 	wtText, wtStyle := m.wtCell(r)
 	if wtText == "" {
 		wtText, wtStyle = "clean", styleClean
@@ -116,11 +82,8 @@ func (m *Model) renderDetail(r row, rows int) string {
 	}
 	b.WriteString(key("state   ") + stateLine + "\n")
 
-	// sync branch vs HEAD: la rama resuelta siempre
-	// visible, con su desviación o el motivo de la falta.
-	syncLine := "— (sin sync branch)"
-	// El primer case no hacia nada: sin sync branch se queda el placeholder.
-	// Anidado queda mas claro que un switch con un brazo vacio.
+	syncLine := "— (no sync branch)"
+	// The first case did nothing (without a sync branch the placeholder stays); nested reads clearer than a switch with an empty arm.
 	if r.snap.SyncBranch != "" {
 		switch {
 		case !r.snap.SyncKnown:
@@ -133,25 +96,16 @@ func (m *Model) renderDetail(r row, rows int) string {
 	}
 	b.WriteString(key("sync    ") + syncLine + "\n")
 
-	// Cuántas filas de listas caben en lo que queda tras la cabecera de estado.
-	// Es lo que permite que el panel enseñe "… N más" en vez de cortar la lista
-	// a media: el presupuesto se reparte entre las listas que sí quepan.
 	avail := max(0, rows-detailHeadLines)
-	// Las tres listas COMPITEN por el mismo hueco: sin descontar, cada una se
-	// creería con el presupuesto entero y la ficha se saldría de la caja
-	// (luego la recorta fitLines por arriba, sin avisar, que es justo lo que la
-	// lista de "… N más" evita). Cada bloque gasta el hueco + la cabecera + sus
-	// elementos + el aviso.
+	// The three lists COMPETE for the same space: without deducting, each would believe it has the whole budget and the card would overflow the box (which fitLines then crops from the top without warning, exactly what the "… N more" line avoids).
 	consumido := func(shown int, rest bool) int {
-		n := minListBlockLines + shown // hueco + cabecera
+		n := minListBlockLines + shown
 		if rest {
-			n++ // el aviso "… N más"
+			n++
 		}
 		return n
 	}
 
-	// worktrees del repo: rama, sha y ruta (relativa al
-	// repo cuando sea posible, absoluta en caso contrario).
 	if n := len(r.snap.Worktrees); n > 0 && avail >= minListBlockLines {
 		shown, rest := listBudget(avail, n)
 		b.WriteString("\n" + key(fmt.Sprintf("worktrees (%d)", n)) + "\n")
@@ -165,7 +119,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 				truncate(rel, max(20, m.width-16)) + "\n")
 		}
 		if rest {
-			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
+			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
 		}
 		avail -= consumido(shown, rest)
 	}
@@ -184,7 +138,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 			b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) + truncate(f.Path, max(20, m.width-8)) + "\n")
 		}
 		if rest {
-			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d más", n-shown)) + "\n")
+			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
 		}
 		avail -= consumido(shown, rest)
 	}
@@ -199,7 +153,6 @@ func (m *Model) renderDetail(r row, rows int) string {
 				truncate(c.Subject, max(20, m.width-24)),
 			)
 		}
-		// Es la última lista: nobody lee ya el presupuesto.
 	}
 
 	if act, ok := m.lastAction[p.Path]; ok {
@@ -208,8 +161,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 			verdict = styleError.Render("failed")
 		}
 		b.WriteString("\n" + key("last "+pullVariantLabel(act.kind)) + " " + verdict + "\n")
-		// El argv resuelto es lo único que revela la política real: con
-		// `p` sin flags, lo que reconcilió fue el gitconfig, no gitdash.
+		// The resolved argv is the only thing that reveals the real policy: with `p` carrying no flags, what reconciled was the gitconfig, not gitdash.
 		if act.cmd != "" {
 			b.WriteString(styleHint.Render(indent(truncate(act.cmd, max(20, m.width-30)), "  ")) + "\n")
 		}
@@ -232,10 +184,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 	return m.fichaTail(b.String(), rows)
 }
 
-// renderWorktreeDetail compone el detalle de una sub-fila de worktree.
-// Si el worktree fue descubierto con marcador y tiene snapshot
-// vivo, se delega al detalle completo; si no, panel mínimo con los datos que
-// trae `worktree list` (path/rama/head) SIN inventar estado git derivado.
+// A worktree discovered with a marker and a live snapshot delegates to the full card; without one, a minimal panel with what `worktree list` gives (path/branch/head) and NO invented derived git state.
 func (m *Model) renderWorktreeDetail(e tableEntry, rows int) string {
 	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
@@ -245,10 +194,6 @@ func (m *Model) renderWorktreeDetail(e tableEntry, rows int) string {
 	return m.renderWorktreeMinimal(e.wt, e.parent, rows)
 }
 
-// renderWorktreeMinimal es el panel de detalle mínimo de un worktree sin
-// snapshot propio: path, rama (o `(detached)`), head. No muestra
-// dirty/ahead/behind/sync. El título lo lleva el borde de la sección, igual que
-// en la ficha completa.
 func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows int) string {
 	var b strings.Builder
 
@@ -269,21 +214,17 @@ func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows
 	return m.fichaTail(b.String(), rows)
 }
 
-// actionTail recorta la salida de una acción a sus últimas n líneas.
 func actionTail(out string, n int) string {
 	out = strings.TrimRight(out, "\n")
 	if out == "" {
 		return ""
 	}
 	lines := strings.Split(out, "\n")
-	// Las últimas n líneas, con los dos bordes resueltos sin guardas: con n <= 0
-	// no queda cola, y con n >= len(lines) se queda todo. El suelo en 0 evita el
-	// índice negativo que sí era un panic (un n negativo aquí reventaba).
-	desde := min(len(lines), max(0, len(lines)-n))
-	return strings.Join(lines[desde:], "\n")
+	// The last n lines with both borders resolved without guards: with n <= 0 nothing is left and with n >= len(lines) everything is; the 0 floor avoids the negative index that WAS a panic (a negative n here used to blow up).
+	since := min(len(lines), max(0, len(lines)-n))
+	return strings.Join(lines[since:], "\n")
 }
 
-// indent antepone prefix a cada línea.
 func indent(s, prefix string) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {

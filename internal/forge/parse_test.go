@@ -1,4 +1,3 @@
-// Tests de la normalización de un remote a RepoRef.
 package forge
 
 import (
@@ -6,7 +5,6 @@ import (
 	"testing"
 )
 
-// hosts de los tests: un GitHub y un GitLab self-managed.
 func testHosts() map[string]string {
 	return map[string]string{
 		"github.com":         ForgeGitHub,
@@ -14,8 +12,6 @@ func testHosts() map[string]string {
 	}
 }
 
-// refGL construye la referencia esperada de un proyecto GitLab del host de
-// pruebas, con el prefijo de subcarpeta ya aplicado.
 func refGL(project string) RepoRef {
 	parts := strings.Split(project, "/")
 	return RepoRef{
@@ -27,8 +23,6 @@ func refGL(project string) RepoRef {
 	}
 }
 
-// La tabla de formas de remote: scp, esquemas, sin .git, barra final, puerto,
-// subgrupos y los tres negativos (host desconocido, ruta local, vacío).
 func TestParseRemoteURL(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -45,17 +39,14 @@ func TestParseRemoteURL(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "scp sin .git",
+			name:   "scp without .git",
 			raw:    "git@github.com:acme/widget",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
 		},
 		{
-			// La @ en la posición 0: el usuario vacío es legal en scp (ssh
-			// toma el usuario actual) y es justo el borde de `at >= 0`. Con un
-			// `at > 0` esta remote cae al caso "sin usuario@host" y se pierde
-			// un repo que sí tiene forge.
-			name:   "scp con usuario vacío",
+			// An @ at position 0: an empty user is legal in scp (ssh takes the current user) and it is exactly the edge of `at >= 0`; with `at > 0` this remote falls into the "no user@host" case and a repo that does have a forge is lost.
+			name:   "scp with an empty user",
 			raw:    "@github.com:acme/widget.git",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
@@ -67,7 +58,7 @@ func TestParseRemoteURL(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "ssh sin .git",
+			name:   "ssh without .git",
 			raw:    "ssh://git@github.com/acme/widget",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
@@ -79,52 +70,52 @@ func TestParseRemoteURL(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "espacios alrededor",
+			name:   "spaces around",
 			raw:    "  https://github.com/acme/widget.git\n",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
 		},
 		{
-			name:   "host en minúsculas",
+			name:   "host lowercased",
 			raw:    "git@GitHub.com:acme/widget.git",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
 		},
 		{
-			name:   "puerto en la url se descarta",
+			name:   "the port in the url is dropped",
 			raw:    "ssh://git@github.com:2222/acme/widget.git",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
 		},
 		{
-			name:   "owner y name con puntos y guiones",
+			name:   "owner and name with dots and dashes",
 			raw:    "https://github.com/acme-corp/widget.js.git",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme-corp/widget.js", Owner: "acme-corp", Name: "widget.js"},
 			wantOK: true,
 		},
 		{
-			name:   "gitlab con subgrupo",
+			name:   "gitlab with a subgroup",
 			raw:    "https://gitlab.example.com/grupo/sub/proy.git",
 			want:   RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "grupo/sub/proy", Owner: "sub", Name: "proy"},
 			wantOK: true,
 		},
 		{
-			name:     "gitlab en subcarpeta de instancia",
+			name:     "gitlab in an instance subfolder",
 			raw:      "https://gitlab.example.com/git/grupo/sub/proy.git",
 			prefixes: map[string]string{"gitlab.example.com": "git"},
 			want:     refGL("grupo/sub/proy"),
 			wantOK:   true,
 		},
 		{name: "host desconocido", raw: "https://bitbucket.org/acme/widget.git", wantOK: false},
-		{name: "ruta local", raw: "/home/u/dev/widget", wantOK: false},
-		{name: "ruta local con esquema file", raw: "file:///home/u/dev/widget", wantOK: false},
-		{name: "vacío", raw: "", wantOK: false},
-		{name: "sin owner ni repo", raw: "https://github.com/acme.git", wantOK: false},
+		{name: "local path", raw: "/home/u/dev/widget", wantOK: false},
+		{name: "local path with the file scheme", raw: "file:///home/u/dev/widget", wantOK: false},
+		{name: "empty", raw: "", wantOK: false},
+		{name: "without owner nor repo", raw: "https://github.com/acme.git", wantOK: false},
 		{name: "solo owner", raw: "https://github.com/", wantOK: false},
-		{name: "esquema sin host", raw: "https:///acme/widget.git", wantOK: false},
-		{name: "scp sin path", raw: "git@github.com:", wantOK: false},
-		{name: "user sin host", raw: "git@", wantOK: false},
-		{name: "hosts vacío", raw: "https://github.com/acme/widget.git", hosts: map[string]string{}, wantOK: false},
+		{name: "scheme without host", raw: "https:///acme/widget.git", wantOK: false},
+		{name: "scp without path", raw: "git@github.com:", wantOK: false},
+		{name: "user without host", raw: "git@", wantOK: false},
+		{name: "hosts empty", raw: "https://github.com/acme/widget.git", hosts: map[string]string{}, wantOK: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,9 +134,6 @@ func TestParseRemoteURL(t *testing.T) {
 	}
 }
 
-// El prefijo de subcarpeta se quita del path: un remoto "en subcarpeta"
-// normaliza al mismo Project que uno en la raíz. Si no se quitara, la misma
-// instancia daría dos proyectos distintos según cómo se clonara.
 func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 	hosts := map[string]string{"gitlab.example.com": ForgeGitLab}
 	prefixes := map[string]string{"gitlab.example.com": "git"}
@@ -155,17 +143,17 @@ func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"sin prefijo", "https://gitlab.example.com/grupo/sub/proy.git"},
-		{"con prefijo", "https://gitlab.example.com/git/grupo/sub/proy.git"},
-		{"con prefijo y barra final", "https://gitlab.example.com/git/grupo/sub/proy/"},
-		{"scp con prefijo", "git@gitlab.example.com:git/grupo/sub/proy.git"},
-		{"scp con prefijo sin .git", "git@gitlab.example.com:git/grupo/sub/proy"},
+		{"without prefix", "https://gitlab.example.com/grupo/sub/proy.git"},
+		{"with prefix", "https://gitlab.example.com/git/grupo/sub/proy.git"},
+		{"with prefix y barra final", "https://gitlab.example.com/git/grupo/sub/proy/"},
+		{"scp with prefix", "git@gitlab.example.com:git/grupo/sub/proy.git"},
+		{"scp with prefix and no .git", "git@gitlab.example.com:git/grupo/sub/proy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := ParseRemoteURL(tc.raw, hosts, prefixes)
 			if !ok {
-				t.Fatalf("no parseó %q", tc.raw)
+				t.Fatalf("did not parse %q", tc.raw)
 			}
 			if got != want {
 				t.Fatalf("ref = %+v, quiero %+v", got, want)
@@ -174,42 +162,36 @@ func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 	}
 }
 
-// El prefijo configurado se guarda en la ref aunque el remoto no lo traiga: es
-// lo que hace falta para reconstruir la URL web de una instancia en
-// subcarpeta, y el prefijo de la URL web es el configurado, no el del remoto.
 func TestParseRemoteURLKeepsConfiguredPrefix(t *testing.T) {
 	hosts := map[string]string{"gitlab.example.com": ForgeGitLab}
 	prefixes := map[string]string{"gitlab.example.com": "/git/"}
 
 	got, ok := ParseRemoteURL("https://gitlab.example.com/grupo/proy.git", hosts, prefixes)
 	if !ok {
-		t.Fatal("no parseó")
+		t.Fatal("did not parse")
 	}
 	if got.Project != "grupo/proy" {
-		t.Fatalf("Project = %q, quiero %q (un path sin el prefijo no se toca)", got.Project, "grupo/proy")
+		t.Fatalf("Project = %q, want %q (a path without the prefix is not touched)", got.Project, "grupo/proy")
 	}
 	if got.Owner != "grupo" || got.Name != "proy" {
 		t.Fatalf("Owner/Name = %q/%q, quiero grupo/proy", got.Owner, got.Name)
 	}
 }
 
-// Derivación del relative URL root desde el api_base de GitLab. Un api_base con
-// forma inesperada devuelve raíz: adivinar el prefijo manda toda URL web a una
-// ruta que no existe.
 func TestPrefixFromAPIBase(t *testing.T) {
 	cases := []struct {
 		name    string
 		apiBase string
 		want    string
 	}{
-		{"instancia en subcarpeta", "/git/api/v4/", "git"},
-		{"instancia en raíz", "/api/v4/", ""},
-		{"instancia en subcarpeta sin barras", "git/api/v4", "git"},
-		{"subcarpeta con más niveles", "/custom/api/v4/", "custom"},
-		{"vacío", "", ""},
+		{"instance in a subfolder", "/git/api/v4/", "git"},
+		{"instance at the root", "/api/v4/", ""},
+		{"instance in a subfolder without slashes", "git/api/v4", "git"},
+		{"subfolder with more levels", "/custom/api/v4/", "custom"},
+		{"empty", "", ""},
 		{"api_base inesperado: v3", "/git/api/v3/", ""},
 		{"api_base inesperado: subruta", "/api/v4/projects", ""},
-		{"api_base inesperado: solo prefijo api", "/git/api/", ""},
+		{"unexpected api_base: only the api prefix", "/git/api/", ""},
 		{"api_base absoluto", "https://gitlab.example.com/api/v4/", ""},
 	}
 	for _, tc := range cases {
@@ -221,12 +203,7 @@ func TestPrefixFromAPIBase(t *testing.T) {
 	}
 }
 
-// Un remote de GitHub SIN path (`https://github.com/`) es un host conocido con
-// cero segmentos. ParseRemoteURL no puede devolver un RepoRef: no hay Owner ni
-// Name que deducir. El caso importa porque el filtro de segmentos vacios es lo
-// que evita que un Owner o un Name vacíos se cuelen en un PR creado contra el
-// repositorio equivocado.
-func TestParseRemoteSinPathNoEsRepo(t *testing.T) {
+func TestParseRemoteWithoutPathNotIsRepo(t *testing.T) {
 	hosts := map[string]string{"github.com": ForgeGitHub}
 	for _, raw := range []string{
 		"https://github.com/",
@@ -234,18 +211,13 @@ func TestParseRemoteSinPathNoEsRepo(t *testing.T) {
 		"git@github.com:",
 	} {
 		if ref, ok := ParseRemoteURL(raw, hosts, nil); ok {
-			t.Errorf("ParseRemoteURL(%q) = %+v, want no parseable (no hay Owner ni Name)", raw, ref)
+			t.Errorf("ParseRemoteURL(%q) = %+v, want unparseable (there is no Owner nor Name)", raw, ref)
 		}
 	}
 }
 
-// Una barra DOBLE dentro de la ruta no es un segmento vacío que "se pueda
-// normalizar": si se aceptara, Owner y Name dirían una cosa y el argv de
-// `gh pr create` iría a otra, así que el remote se rechaza entero en vez de
-// dejar un RepoRef a medias. Es distinto del caso sin ruta (este sí tiene
-// segmentos, pero uno está vacío), y por eso tiene su propio test: el filtro de
-// `len(parts) < 2` NO lo cazaría.
-func TestParseRemoteConSegmentoVacioNoEsRepo(t *testing.T) {
+// A DOUBLE slash inside the path is not an empty segment that can be normalized: accepting it would make Owner and Name say one thing and the `gh pr create` argv go to another, so the remote is rejected whole instead of leaving a half-built RepoRef. It differs from the no-path case (this one has segments but one is empty), which is why it has its own test: the `len(parts) < 2` filter would not catch it.
+func TestParseRemoteWithSegmentEmptyNotIsRepo(t *testing.T) {
 	hosts := testHosts()
 	for _, raw := range []string{
 		"git@github.com:acme//widget.git",
@@ -253,33 +225,21 @@ func TestParseRemoteConSegmentoVacioNoEsRepo(t *testing.T) {
 		"https://gitlab.example.com//widget.git",
 	} {
 		if ref, ok := ParseRemoteURL(raw, hosts, nil); ok {
-			t.Errorf("ParseRemoteURL(%q) = %+v, want no parseable (segmento vacío)", raw, ref)
+			t.Errorf("ParseRemoteURL(%q) = %+v, want unparseable (empty segment)", raw, ref)
 		}
 	}
 }
 
-// La forma SCP con el `:` JUSTO después del `@`: `git@:owner/repo`.
-//
-// La guarda es `if colon < 0` sobre el índice que devuelve strings.Index, y
-// ese índice es 0 (no negativo) cuando el `:` es el primer carácter del resto.
-// Solo ese caso distingue `colon < 0` de `colon <= 0`; con cualquier otro remote
-// el índice es 0 o mayor en los dos casos y el resultado es el mismo.
-//
-// Sin esto, un mutante de borde pasa: `host` vacío + `path` "owner/repo" se
-// normaliza a un host vacío, que no está en el mapa, así que el resultado
-// visible acaba siendo el mismo por otro camino.
-func TestParseRemoteConColonEnLaPosicionCero(t *testing.T) {
+// `colon < 0` and `colon <= 0` are only told apart by a remote starting with ":" (index 0); without this case a boundary mutant survives, since an empty host is not in the map anyway and the result is the same by another path.
+func TestParseRemoteWithColonInThePositionZero(t *testing.T) {
 	hosts := testHosts()
-	// Un host vacío NUNCA debe resolver a un repo: aunque el mapa lo contenga
-	// (que es lo que hace el mutante), un remote sin host no identifica nada.
 	conVacio := map[string]string{"": ForgeGitHub, "github.com": ForgeGitHub}
 	if ref, ok := ParseRemoteURL("git@:owner/repo", conVacio, nil); ok {
-		t.Errorf("ParseRemoteURL(host vacio) = %+v, want no parseable: un remote sin host no es un repo", ref)
+		t.Errorf("ParseRemoteURL(empty host) = %+v, want unparseable: a remote with no host is not a repo", ref)
 	}
 	if ref, ok := ParseRemoteURL("git@:owner/repo", hosts, nil); ok {
-		t.Errorf("ParseRemoteURL(host vacio) = %+v, want no parseable", ref)
+		t.Errorf("ParseRemoteURL(empty host) = %+v, want unparseable", ref)
 	}
-	// Y el SCP bien formado sigue resolviendo, que es lo que la guarda protege.
 	if ref, ok := ParseRemoteURL("git@github.com:acme/widget.git", hosts, nil); !ok {
 		t.Errorf("ParseRemoteURL(scp bien formado) = %+v, want parseable", ref)
 	}

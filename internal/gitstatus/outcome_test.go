@@ -2,16 +2,8 @@ package gitstatus
 
 import "testing"
 
-// Las salidas de estos casos están copiadas literalmente de git (con LC_ALL=C,
-// que es lo que gitdash fuerza): no son inventadas, y por eso el clasificador
-// puede quedarse con cadenas exactas en vez de heurísticas.
-//
-// Verificado también que los mensajes del reflog y del porcelain NO se
-// localizan (salen en inglés con LANG=es_ES), pero las salidas de `git pull` sí
-// se traducen — de ahí el LC_ALL=C forzado en gitEnv: sin él, un usuario en
-// locale español no matchearía ninguna firma y el panel diría "-" en vez de
-// "rebase".
-func TestClassifyPullYFetch(t *testing.T) {
+// Copied verbatim from git with the LC_ALL=C gitdash forces, so the classifier can use exact strings; `git pull` output IS localized, so without LC_ALL=C a Spanish-locale user matches no signature and the panel prints "-".
+func TestClassifyPullAndFetch(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -20,7 +12,7 @@ func TestClassifyPullYFetch(t *testing.T) {
 		want string
 	}{
 		{
-			name: "rebase con autostash (lo que hace pp con pull.rebase=true)",
+			name: "rebase with autostash (what pp does with pull.rebase=true)",
 			args: []string{"pull"},
 			out: "Created autostash: 1b2c3d4\n" +
 				"Rebasing (1/3)Rebasing (2/3)Rebasing (3/3)Applied autostash.\n" +
@@ -28,13 +20,13 @@ func TestClassifyPullYFetch(t *testing.T) {
 			want: "rebase+autostash",
 		},
 		{
-			name: "rebase sin autostash (árbol limpio)",
+			name: "rebase without autostash (clean tree)",
 			args: []string{"pull"},
 			out:  "Successfully rebased and updated refs/heads/main.\n",
 			want: "rebase",
 		},
 		{
-			name: "merge por defecto",
+			name: "merge by default",
 			args: []string{"pull"},
 			out:  "Merge made by the 'ort' strategy.\n a.txt | 1 +\n",
 			want: "merge",
@@ -46,19 +38,19 @@ func TestClassifyPullYFetch(t *testing.T) {
 			want: "fast-forward",
 		},
 		{
-			name: "nada que integrar (el caso donde el reflog no escribe nada)",
+			name: "nothing to integrate (the case where the reflog writes nothing)",
 			args: []string{"pull"},
 			out:  "Current branch main is up to date.\n",
 			want: "up-to-date",
 		},
 		{
-			name: "autostash creado pero sin nada que integrar",
+			name: "autostash created but nothing to integrate",
 			args: []string{"pull"},
 			out:  "Created autostash: 1b2c3d4\nCurrent branch main is up to date.\n",
 			want: "up-to-date",
 		},
 		{
-			name: "ff-only sobre ramas divergentes",
+			name: "ff-only over diverged branches",
 			args: []string{"pull", "--ff-only"},
 			out: "hint: Diverging branches can't be fast-forwarded, you need to either:\n" +
 				"fatal: Not possible to fast-forward, aborting.\n",
@@ -66,42 +58,42 @@ func TestClassifyPullYFetch(t *testing.T) {
 			want: "diverged",
 		},
 		{
-			name: "sin pull.rebase ni pull.default con ramas divergentes",
+			name: "neither pull.rebase nor pull.default with diverged branches",
 			args: []string{"pull"},
 			out:  "fatal: You have divergent branches and need to specify how to reconcile them.\n",
 			code: 128,
 			want: "diverged",
 		},
 		{
-			name: "conflicto en un rebase a medias",
+			name: "conflict in a mid-rebase",
 			args: []string{"pull", "--rebase"},
 			out:  "Auto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nerror: could not apply c6cdf09... # A\n",
 			code: 1,
 			want: "conflict",
 		},
 		{
-			name: "conflicto en un merge",
+			name: "conflict in a merge",
 			args: []string{"pull"},
 			out:  "Auto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nAutomatic merge failed; fix conflicts and then commit the result.\n",
 			code: 1,
 			want: "conflict",
 		},
 		{
-			name: "rama sin upstream",
+			name: "branch with no upstream",
 			args: []string{"pull"},
 			out:  "There is no tracking information for the current branch.\n",
 			code: 1,
 			want: "no-upstream",
 		},
 		{
-			name: "fallo genérico (red, auth, disco)",
+			name: "generic failure (network, auth, disk)",
 			args: []string{"pull"},
 			out:  "fatal: Could not read from remote repository.\n",
 			code: 128,
 			want: "failed",
 		},
 		{
-			name: "fetch al día",
+			name: "fetch up to date",
 			args: []string{"fetch", "--prune"},
 			want: "",
 		},
@@ -127,18 +119,18 @@ func TestClassifyPush(t *testing.T) {
 			want: "pushed",
 		},
 		{
-			name: "nada que publicar",
+			name: "nothing to push",
 			out:  "Everything up-to-date\n",
 			want: "up-to-date",
 		},
 		{
-			name: "rechazado por no fast-forward",
+			name: "rejected for not fast-forward",
 			out:  " ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs\n",
 			code: 1,
 			want: "rejected",
 		},
 		{
-			name: "fallo genérico",
+			name: "generic failure",
 			out:  "fatal: unable to access 'https://…': Could not resolve host\n",
 			code: 128,
 			want: "failed",
@@ -152,10 +144,7 @@ func TestClassifyPush(t *testing.T) {
 	}
 }
 
-// Solo los verbos cuya política se deduce de la salida se clasifican. El resto
-// (worktree, status, log…) devuelve "" y el panel se queda con el código de
-// salida: inventar un "resultado" para un `git worktree remove` sería mentir.
-func TestClassifyIgnoraVerbosSinPolitica(t *testing.T) {
+func TestClassifyIgnoresVerbsWithoutPolicy(t *testing.T) {
 	for _, args := range [][]string{
 		{"worktree", "remove", "/tmp/wt"},
 		{"status", "--porcelain=v2", "--branch"},
@@ -168,9 +157,7 @@ func TestClassifyIgnoraVerbosSinPolitica(t *testing.T) {
 	}
 }
 
-// La comparación es sobre el texto en minúsculas: git capitaliza según el
-// idioma y el caso ("Fast-forward" vs "fast-forward").
-func TestClassifyIgnoraMayusculas(t *testing.T) {
+func TestClassifyIgnoresUppercase(t *testing.T) {
 	if got := Classify([]string{"pull"}, "successfully REBASED and updated refs/heads/main.\n", 0); got != "rebase" {
 		t.Errorf("Classify = %q, want %q", got, "rebase")
 	}

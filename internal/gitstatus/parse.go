@@ -1,4 +1,4 @@
-// Parsing puro de la salida de git — sin I/O, testeable con salidas canned.
+// Pure parsing of git output: no I/O, so it is testable with canned output.
 package gitstatus
 
 import (
@@ -7,36 +7,31 @@ import (
 	"strings"
 )
 
-// Status es el estado git derivado de `git status --porcelain=v2 --branch`.
 type Status struct {
-	Branch         string // nombre de rama o sha corto si detached
-	Detached       bool   // HEAD detached
-	Upstream       string // p. ej. "origin/main"
-	HasUpstream    bool   // hay upstream trackeado
-	OID            string // sha completo de HEAD (branch.oid)
-	Ahead          int    // commits locales sin subir (↑)
-	Behind         int    // commits del upstream sin bajar (↓)
-	TrackedChanges int    // ficheros trackeados modificados (M/A/D/R/u)
-	Untracked      int    // ficheros sin trackear (?)
+	Branch         string
+	Detached       bool
+	Upstream       string
+	HasUpstream    bool
+	OID            string
+	Ahead          int
+	Behind         int
+	TrackedChanges int
+	Untracked      int
 }
 
-// Dirty es el total de cambios pendientes en el working tree.
 func (s Status) Dirty() int { return s.TrackedChanges + s.Untracked }
 
-// FileEntry es un fichero cambiado con su código porcelain.
 type FileEntry struct {
-	Code string // "M ", "A ", "D ", "R ", "MM", "??"-estilo: dos chars
+	Code string
 	Path string
 }
 
-// Commit es un commit reciente para el detalle.
 type Commit struct {
 	Sha     string
-	When    int64 // epoch
+	When    int64
 	Subject string
 }
 
-// State es el estado derivado del repo para UI/orden/filtros.
 type State int
 
 const (
@@ -51,7 +46,6 @@ const (
 	StateError
 )
 
-// String devuelve la etiqueta del estado para UI/modo print.
 func (st State) String() string {
 	switch st {
 	case StateClean:
@@ -75,12 +69,8 @@ func (st State) String() string {
 	}
 }
 
-// Derive deduce el estado del repo según precedencia: diverged > dirty >
-// ahead > behind > detached > no-upstream > clean. Dirty es independiente
-// del upstream: un repo dirty sin upstream se reporta dirty.
 func (s Status) Derive() State {
-	// if y no switch: asi el estado derivado es ORDEN DE PRECEDENCIA explicito
-	// (y el instrumento de cobertura puede medir cada condicion).
+	// if-chain instead of switch: precedence stays explicit and every condition is measurable for coverage.
 	if s.Ahead > 0 && s.Behind > 0 {
 		return StateDiverged
 	}
@@ -102,8 +92,6 @@ func (s Status) Derive() State {
 	return StateClean
 }
 
-// Score es la prioridad de atención para el orden del panel y el modo
-// print: error > diverged > dirty > ahead/behind > info > clean.
 func (st State) Score() int {
 	switch st {
 	case StateError:
@@ -121,10 +109,7 @@ func (st State) Score() int {
 	}
 }
 
-// ParsePorcelain interpreta la salida completa de
-// `git status --porcelain=v2 --branch` y devuelve el status más los
-// ficheros cambiados (hasta maxFiles). Ignora silenciosamente líneas
-// desconocidas para tolerar versiones futuras de git.
+// Unknown lines are ignored on purpose so a future git version cannot break parsing.
 func ParsePorcelain(out string) (Status, []FileEntry) {
 	var st Status
 	var files []FileEntry
@@ -138,7 +123,7 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 			case val == "(detached)":
 				st.Detached = true
 			case strings.HasPrefix(val, "(") && strings.HasSuffix(val, ")"):
-				// rama no nacida: "# branch.head (main)" en repos sin commits
+				// Unborn branch: "# branch.head (main)" in a repo with no commits.
 				st.Branch = strings.Trim(val, "()")
 			default:
 				st.Branch = val
@@ -156,13 +141,13 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 				files = appendFile(files, f)
 			}
 		case strings.HasPrefix(line, "2 "):
-			st.TrackedChanges++ // renames también cuentan
+			st.TrackedChanges++
 			if f, ok := parseEntry(line[2:], 8); ok {
 				f.Path, _, _ = strings.Cut(f.Path, "\t")
 				files = appendFile(files, f)
 			}
 		case strings.HasPrefix(line, "u "):
-			st.TrackedChanges++ // unmerged
+			st.TrackedChanges++
 			if f, ok := parseEntry(line[2:], 9); ok {
 				files = appendFile(files, f)
 			}
@@ -170,12 +155,10 @@ func ParsePorcelain(out string) (Status, []FileEntry) {
 			st.Untracked++
 			files = appendFile(files, FileEntry{Code: "??", Path: line[2:]})
 		}
-		// "#" restantes (branch.oid), "!" (ignored) y "": ignorados
 	}
 	return st, files
 }
 
-// appendFile añade una entrada respetando el tope maxFiles.
 func appendFile(files []FileEntry, f FileEntry) []FileEntry {
 	if len(files) >= maxFiles {
 		return files
@@ -183,13 +166,9 @@ func appendFile(files []FileEntry, f FileEntry) []FileEntry {
 	return append(files, f)
 }
 
-// maxFiles es el tope de ficheros mostrados en el detalle.
 const maxFiles = 100
 
-// parseEntry extrae código (XY) y ruta de una línea de entrada v2.
-// fieldsBeforePath es el número de campos fijos entre el código y la ruta
-// ("1 ": 7 — sub mH mI mW hH hI; "2 ": 8 — añade Xscore; "u ": 9).
-// La ruta es todo lo restante, espacios incluidos.
+// The path is everything after the fixed fields ("1 "=7, "2 "=8, "u "=9), spaces included.
 func parseEntry(body string, fieldsBeforePath int) (FileEntry, bool) {
 	fields := strings.SplitN(body, " ", fieldsBeforePath+1)
 	if len(fields) < fieldsBeforePath+1 {
@@ -201,7 +180,6 @@ func parseEntry(body string, fieldsBeforePath int) (FileEntry, bool) {
 	}, true
 }
 
-// parseAB interpreta "+2 -3" de la línea branch.ab.
 func parseAB(s string) (ahead, behind int) {
 	var sign byte
 	_, err := fmt.Sscanf(s, "%c%d %c%d", &sign, &ahead, &sign, &behind)
@@ -211,7 +189,6 @@ func parseAB(s string) (ahead, behind int) {
 	return ahead, behind
 }
 
-// ParseLog interpreta la salida de git log con formato %h<NUL>%ct<NUL>%s.
 func ParseLog(out string) []Commit {
 	var commits []Commit
 	for _, line := range strings.Split(out, "\n") {
@@ -232,10 +209,6 @@ func ParseLog(out string) []Commit {
 	return commits
 }
 
-// ParseWorktrees interpreta `git worktree list --porcelain` y devuelve los
-// worktrees aparte del repo principal (mainPath). Bloques
-// separados por línea en blanco; claves: worktree, HEAD, branch/bare/
-// detached. Líneas desconocidas/prunable se ignoran (tolerancia git futuro).
 func ParseWorktrees(out, mainPath string) []Worktree {
 	var out2 []Worktree
 	var cur Worktree
@@ -251,15 +224,13 @@ func ParseWorktrees(out, mainPath string) []Worktree {
 		case line == "":
 			flush()
 		case strings.HasPrefix(line, "worktree "):
-			flush() // los bloques pueden no venir separados por línea vacía
+			flush() // blocks may not be separated by a blank line
 			cur.Path = strings.TrimPrefix(line, "worktree ")
 		case strings.HasPrefix(line, "HEAD "):
 			sha := strings.TrimPrefix(line, "HEAD ")
-			// sha corto para UI compacta; recortar a 7 es identidad cuando ya
-			// mide 7 o menos, por eso el clamp sustituye a la guarda.
+			// Clamp instead of a length guard: truncating to 7 is a no-op when the sha is already 7 or shorter.
 			cur.Head = sha[:min(len(sha), 7)]
 		case strings.HasPrefix(line, "branch "):
-			// refs/heads/feat → feat
 			ref := strings.TrimPrefix(line, "branch ")
 			cur.Branch = strings.TrimPrefix(ref, "refs/heads/")
 		}

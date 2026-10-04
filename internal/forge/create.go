@@ -2,10 +2,7 @@ package forge
 
 import "strings"
 
-// Params son los datos con los que se crea un PR/MR. Todo lo que la CLI
-// aceptaría preguntar viaja aquí explícito: esa es la condición para que la
-// creación no necesite TTY y se pueda lanzar como un exec capturado, sin
-// handoff de terminal como el de `pull_ai` o `lazygit`.
+// Everything the CLI would otherwise ask travels here explicitly, which is what makes creation TTY-free and capturable as an exec instead of a terminal handoff.
 type Params struct {
 	Title  string
 	Body   string
@@ -15,9 +12,7 @@ type Params struct {
 	Labels []string
 }
 
-// CreateBin devuelve el binario que crea el PR/MR del ref, o "" para un forge
-// que no soportamos. El "" no es un caso raro: es lo que corta antes de
-// intentar ejecutar nada.
+// The "" is not a rare case: it is what stops the action before anything is executed.
 func CreateBin(ref RepoRef) string {
 	switch normalizeForge(ref.Forge) {
 	case ForgeGitHub:
@@ -29,16 +24,7 @@ func CreateBin(ref RepoRef) string {
 	}
 }
 
-// PromptEnv devuelve las variables que quitan cualquier pregunta de la CLI del
-// ref, y el host contra el que tiene que trabajar.
-//
-// El host va en el entorno y no en el argv a propósito: `glab mr create` no
-// tiene flag `--hostname` (sí lo tiene `auth login`, verificado contra glab
-// 1.119.0, que responde "Unknown flag: --hostname" y muere antes de hacer nada)
-// y su forma documentada de elegir instancia es GITLAB_HOST, que resuelve
-// contra qué api_base y qué token se habla. Para una instancia self-managed en
-// subcarpeta como la del usuario (host/git/) es lo que evita que glab hable con
-// gitlab.com.
+// The host travels in the environment, not the argv: `glab mr create` has no `--hostname` flag and GITLAB_HOST is its documented way to pick the instance (which api_base and token apply).
 func PromptEnv(ref RepoRef) []string {
 	switch normalizeForge(ref.Forge) {
 	case ForgeGitHub:
@@ -53,18 +39,7 @@ func PromptEnv(ref RepoRef) []string {
 	}
 }
 
-// BuildCreateArgv arma el argv completo —argv[0] incluido— para crear el PR/MR
-// del ref, o nil si el forge no está soportado. Un argv "best effort" para un
-// forge desconocido sería peor que ninguno: gh y glab no comparten ni un flag
-// con sentido, así que lo que saldría es la puerta de otro.
-//
-// -R va siempre, en las dos CLIs, para que la ref resuelta sea la única fuente
-// de verdad: si se deja que la CLI lo deduzca del remote, un PR puede acabar
-// creado contra otro repositorio del que la fila de la tabla afirma, sin que
-// nada falle visiblemente. gh lo formatea [HOST/]OWNER/REPO, así que en un host
-// distinto de github.com el host viaja delante; glab toma solo la ruta dentro de
-// la instancia, que ya viene sin el prefijo de subcarpeta porque lo quita
-// ParseRemoteURL.
+// A best-effort argv for an unknown forge would be worse than none (gh and glab share no meaningful flag), and -R always carries the resolved ref so the CLI cannot infer another repository from the remote.
 func BuildCreateArgv(ref RepoRef, p Params) []string {
 	switch normalizeForge(ref.Forge) {
 	case ForgeGitHub:
@@ -76,21 +51,12 @@ func BuildCreateArgv(ref RepoRef, p Params) []string {
 	}
 }
 
-// ghCreateArgv arma `gh pr create`.
-//
-// LA TRAMPA: en gh -b es el CUERPO y -B es la BASE, y se distinguen solo por el
-// tamaño. Cruzarlas no da error: manda el texto como base y el PR sale contra
-// una rama que no existe (o contra la que fuera por defecto). Los tests lo
-// comprueban sobre qué flag precede a cada valor, no sobre la forma del argv
-// entero.
+// The trap: in gh -b is the BODY and -B is the BASE, told apart only by case, and swapping them fails silently with a PR against a branch that does not exist.
 func ghCreateArgv(ref RepoRef, p Params) []string {
 	argv := []string{"gh", "pr", "create", "-t", p.Title}
-	// El cuerpo se emite siempre, incluso vacío: es el flag que quita la
-	// pregunta. Omitirlo dejaría a gh abrir editor o prompt, y gitdash no tiene
-	// TTY que ceder.
+	// The body is emitted even when empty: that flag is what removes the prompt, and omitting it would make gh open an editor with no TTY to lend.
 	argv = append(argv, "-b", p.Body)
-	// Base y head, en cambio, solo si vienen: sus CLIs tienen un default sano y
-	// un valor vacío ahí es un error, no una omisión.
+	// Base and head only when given: their CLIs have sane defaults and an empty value there is an error, not an omission.
 	if p.Base != "" {
 		argv = append(argv, "-B", p.Base)
 	}
@@ -100,18 +66,12 @@ func ghCreateArgv(ref RepoRef, p Params) []string {
 	if p.Draft {
 		argv = append(argv, "-d")
 	}
-	// -l se repite en vez de listar con comas: un label con coma es legal en
-	// ambos forges, y la lista con comas partiría ese label en dos.
+	// -l repeated instead of a comma list: a label containing a comma is legal on both forges and the list would split it in two.
 	argv = append(argv, labelArgs(p.Labels)...)
 	return append(argv, "-R", ghRepoArg(ref))
 }
 
-// glabCreateArgv arma `glab mr create`.
-//
-// LA MISMA TRAMPA, AL REVÉS: en glab -b es la BASE (--target-branch) y -d es
-// la DESCRIPCIÓN. El nombre del flag es el que dice lo contrario en cada CLI,
-// así que el mapa está uno al lado del otro a propósito: leerlos por analogía
-// con gh es justo el error que hace este comentario.
+// The same trap reversed: in glab -b is the BASE and -d is the DESCRIPTION, so the flag names say the opposite of gh and the two maps sit side by side on purpose.
 func glabCreateArgv(ref RepoRef, p Params) []string {
 	argv := []string{"glab", "mr", "create", "-t", p.Title}
 	argv = append(argv, "-d", p.Body)
@@ -122,15 +82,11 @@ func glabCreateArgv(ref RepoRef, p Params) []string {
 		argv = append(argv, "-s", p.Head)
 	}
 	if p.Draft {
-		// Largo a propósito: glab no tiene corto para draft (--wip sería otro
-		// flag con otro nombre para lo mismo).
+		// Long form on purpose: glab has no short flag for draft (--wip is a different flag for the same thing).
 		argv = append(argv, "--draft")
 	}
 	argv = append(argv, labelArgs(p.Labels)...)
-	// -y es el equivalente funcional del "todo explícito" de gh: salta la
-	// confirmación de envío, que glab pediría aunque título, descripción y base
-	// vengan dados. El repo vacío sale igual: `-R ""` no significaría nada, y un
-	// "-y" suelto es una invocación que ya no se puede atribuir a nada.
+	// -y is glab's equivalent of gh's all-explicit: it skips the submit confirmation glab would ask for even with title, description and base given.
 	if ref.Project != "" {
 		argv = append(argv, "-y", "-R", ref.Project)
 	} else {
@@ -139,9 +95,7 @@ func glabCreateArgv(ref RepoRef, p Params) []string {
 	return argv
 }
 
-// labelArgs repite `-l <label>` por cada label, en el orden en que vienen.
-// Los vacíos se descartan: un `-l ""` lo acepta la CLI y lo rechaza la API, que
-// es un fallo que se manifiesta mucho después y sin decir qué label era.
+// Empty labels are dropped: the CLI accepts `-l ""` and the API rejects it much later without saying which label it was.
 func labelArgs(labels []string) []string {
 	var out []string
 	for _, l := range labels {
@@ -152,9 +106,7 @@ func labelArgs(labels []string) []string {
 	return out
 }
 
-// ghRepoArg arma el valor de -R para gh: [HOST/]OWNER/REPO. El host solo hace
-// falta cuando no es github.com, porque ahí es lo que le dice a gh que no
-// interprete la ruta como del sitio público.
+// The host is spelled out only when it is not github.com, because that is what tells gh not to read the path as belonging to the public site.
 func ghRepoArg(ref RepoRef) string {
 	host := normalizeHost(ref.Host)
 	if host != "" && host != "github.com" {
@@ -163,10 +115,7 @@ func ghRepoArg(ref RepoRef) string {
 	return strings.Trim(ref.Project, "/")
 }
 
-// normalizeForge baja a minúsculas y recorta, igual que normalizeHost lo hace
-// con el host: el forge viene de un mapa de config que escribió una persona, y
-// un "GitHub" que no casara con la constante dejaría la acción sin puerta y sin
-// decir por qué.
+// Lowercased like the host: the forge name comes from a hand-written config map, and a "GitHub" that missed the constant would leave the action with no door.
 func normalizeForge(forge string) string {
 	return strings.ToLower(strings.TrimSpace(forge))
 }

@@ -1,8 +1,4 @@
-// Package group agrupa proyectos por primary_group/secondary_group del
-// marcador, extendiendo el patrón validado de vroom a dos
-// niveles: siempre agrupado si hay primarios, bloque de cada grupo contiguo
-// desde la posición de su primer miembro (también dentro del primario) y
-// sección (ungrouped) plegable al final.
+// Package group arranges rows in two levels, extending vroom's pattern: always grouped when primarys exist, each block contiguous from its first member, plus a foldable ungrouped section at the end.
 package group
 
 import (
@@ -10,14 +6,8 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// Ungrouped es el nombre de la sección pseudo-grupo para los proyectos sin
-// primary_group.
 const Ungrouped = "(ungrouped)"
 
-// Entry es una fila de la vista agrupada. Primary no vacío delimita el
-// bloque al que pertenece la entrada ("" solo en la vista plana);
-// Secondary solo es válido si Primary != "" (el secundario
-// únicamente existe dentro de un primario).
 type Entry struct {
 	Primary   string
 	Secondary string
@@ -26,16 +16,6 @@ type Entry struct {
 	State     gitstatus.State
 }
 
-// Arrange compone la vista agrupada a partir de filas ya ordenadas y
-// filtradas:
-//   - Sin ningún primario real → vista plana tal cual (Primary queda "").
-//   - El bloque de un primario se emite completo en la posición de su
-//     primer miembro tras el sort.
-//   - Dentro de un primario, el bloque de cada secundario se emite contiguo
-//     en la posición de su primer miembro; los miembros sin secundario
-//     conservan su posición de sort.
-//   - Los proyectos sin primario forman el bloque final Ungrouped (el
-//     secondary se ignora).
 func Arrange(rows []Entry) []Entry {
 	hasReal := false
 	for _, r := range rows {
@@ -48,10 +28,9 @@ func Arrange(rows []Entry) []Entry {
 		return rows
 	}
 
-	// normaliza: sin primario → sección Ungrouped sin secundario
-	members := make(map[string][]Entry)               // primario → miembros en orden de sort
-	secMembers := make(map[string]map[string][]Entry) // primario → secundario → miembros
-	var order []string                                // orden de primera aparición tras el sort
+	members := make(map[string][]Entry)
+	secMembers := make(map[string]map[string][]Entry)
+	var order []string
 	for _, r := range rows {
 		p, s := r.Primary, r.Secondary
 		if p == "" {
@@ -80,9 +59,6 @@ func Arrange(rows []Entry) []Entry {
 	return append(out, ungrouped...)
 }
 
-// assemble emite los miembros de un primario: los de cada secundario como
-// bloque contiguo en la posición de su primer miembro; los sin secundario
-// en su propia posición.
 func assemble(members []Entry, secs map[string][]Entry) []Entry {
 	emitted := make(map[string]bool)
 	var block []Entry
@@ -99,14 +75,10 @@ func assemble(members []Entry, secs map[string][]Entry) []Entry {
 	return block
 }
 
-// IsPrimaryHeader reporta si la entrada en i abre un primario nuevo y debe
-// renderizarse como header plegable de nivel 1 (los bloques son contiguos).
 func IsPrimaryHeader(entries []Entry, i int) bool {
 	return entries[i].Primary != "" && (i == 0 || entries[i-1].Primary != entries[i].Primary)
 }
 
-// IsSecondaryHeader reporta si la entrada en i abre un secundario nuevo
-// dentro de su primario (header plegable de nivel 2).
 func IsSecondaryHeader(entries []Entry, i int) bool {
 	if entries[i].Primary == "" || entries[i].Secondary == "" {
 		return false

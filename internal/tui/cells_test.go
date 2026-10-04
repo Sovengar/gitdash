@@ -1,5 +1,3 @@
-// Tests de celdas del rediseño: Work Tree solo working tree,
-// ↑↓up explícito, tabla quieta y FETCH transitorio.
 package tui
 
 import (
@@ -10,21 +8,20 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// Counts sin bola; limpio en silencio.
 func TestWtCellQuiet(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 
 	m := newTestModel(t, []discovery.Project{base},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
 	if text, _ := m.wtCell(m.rows()[0]); text != "" {
-		t.Errorf("wt limpio = %q, want vacío (tabla quieta)", text)
+		t.Errorf("wt clean = %q, want empty (quiet table)", text)
 	}
 
 	dirty := snapDirty(2, 1)
 	m = newTestModel(t, []discovery.Project{base},
 		map[string]gitstatus.Snapshot{"/tmp/api": dirty})
 	if text, _ := m.wtCell(m.rows()[0]); text != "2 ?1" {
-		t.Errorf("wt = %q, want '2 ?1' (sin ●)", text)
+		t.Errorf("wt = %q, want '2 ?1' (no dot)", text)
 	}
 
 	errSnap := snapClean()
@@ -43,7 +40,6 @@ func TestWtCellQuiet(t *testing.T) {
 	}
 }
 
-// Detached solo en BRANCH, y el dirty NO se suprime.
 func TestWtDetachedKeepsDirty(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 	s := snapClean()
@@ -54,19 +50,17 @@ func TestWtDetachedKeepsDirty(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{base},
 		map[string]gitstatus.Snapshot{"/tmp/api": s})
 	if text, _ := m.wtCell(m.rows()[0]); text != "3" {
-		t.Errorf("wt detached+dirty = %q, want '3' (dirty no suprimido)", text)
+		t.Errorf("wt detached+dirty = %q, want '3' (dirty not suppressed)", text)
 	}
 	branch, _ := m.branchCell(m.rows()[0])
 	if !strings.Contains(branch, "abc1234 (detached)") {
 		t.Errorf("branch = %q, want 'abc1234 (detached)'", branch)
 	}
-	// único sitio: la fila completa menciona detached una sola vez
 	if n := strings.Count(stripANSI(m.renderRow(m.rows()[0], false)), "detached"); n != 1 {
-		t.Errorf("detached aparece %d veces en la fila, want 1", n)
+		t.Errorf("detached appears %d times in the row, want 1", n)
 	}
 }
 
-// ↑↓up — diverged aquí, no-up explícito, vacío en sync.
 func TestUpDown(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 	cases := []struct {
@@ -89,7 +83,6 @@ func TestUpDown(t *testing.T) {
 	}
 }
 
-// FETCH transitorio — éxito vacío, ⟳ corriendo, ✗ persistente.
 func TestFetchCellTransient(t *testing.T) {
 	base := proj("api", "/tmp/api", true)
 	m := newTestModel(t, []discovery.Project{base},
@@ -102,13 +95,12 @@ func TestFetchCellTransient(t *testing.T) {
 			t.Errorf("fetch %q = %q, want %q", state, text, want)
 		}
 	}
-	check("ok", "") // sin ✓ permanente
+	check("ok", "") // no permanent check mark
 	check("fetching", "⟳ fetch")
 	check("failed", "✗ fetch")
 	check("", "")
 }
 
-// Headers separados — ningún título pegado al siguiente.
 func TestHeaderSpacing(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
@@ -121,10 +113,10 @@ func TestHeaderSpacing(t *testing.T) {
 	}
 	for _, want := range []string{"Work Tree", "↑↓up", "SYNC", "ACTIVITY", "FETCH"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("falta el header %q", want)
+			t.Errorf("missing header %q", want)
 		}
 	}
 	if strings.Contains(out, "GROUP") {
-		t.Errorf("la columna GROUP no debe estar en la TUI")
+		t.Errorf("the GROUP column must not be in the TUI")
 	}
 }

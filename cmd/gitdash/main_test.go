@@ -1,12 +1,10 @@
-// Tests del cuerpo de main(): qué se pinta, dónde va el aviso de config y qué
-// código de salida sale. Lo que no se prueba aquí es el TUI ni el modo print
-// (cada uno tiene su suite), sino la decisión que los separa.
 package main
 
 import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -22,9 +20,6 @@ import (
 	"gitdash/internal/tui"
 )
 
-// dobles devuelve unas deps que NO tocan disco ni terminal, y registra lo que se
-// invocó. El aviso que llega al modelo se registra por el seam `notify`, que es
-// el mismo camino que usa producción: no hace falta un getter en internal/tui.
 type dobles struct {
 	d          deps
 	cfgWarn    string
@@ -52,30 +47,24 @@ func nuevasDobles(t *testing.T) *dobles {
 	return x
 }
 
-// El aviso de config se escribe en stderr pero NO ABORTA: un config con un
-// warning sigue siendo un config usable, y abortar sería tirar la sesión por un
-// fichero con una línea que no le molesta. Invertir esta guarda convertía un
-// aviso en un fallo de arranque, y sin test nadie lo notaba.
-func TestElAvisoDeConfigNoAborta(t *testing.T) {
+// A config with a warning is still a usable config, and aborting would throw the session away over a file with one line that bothers it; inverting this guard turned a warning into a startup failure and no test noticed.
+func TestTheWarningOfConfigNotAborts(t *testing.T) {
 	x := nuevasDobles(t)
-	x.cfgWarn = "config: clave desconocida 'foo'"
+	x.cfgWarn = "config: unknown key 'foo'"
 
 	var eout strings.Builder
 	if code := runWith(x.d, false, &eout); code != 0 {
-		t.Errorf("con un aviso de config el código debe ser 0, dio %d", code)
+		t.Errorf("with a config notice the exit code must be 0, got %d", code)
 	}
-	if !strings.Contains(eout.String(), "clave desconocida") {
-		t.Errorf("el aviso no llegó a stderr: %q", eout.String())
+	if !strings.Contains(eout.String(), "unknown key") {
+		t.Errorf("the notice did not reach stderr: %q", eout.String())
 	}
 	if x.tuiRuns != 1 {
-		t.Errorf("con aviso la TUI debe arrancar igualmente, arrancó %d veces", x.tuiRuns)
+		t.Errorf("with a notice the TUI must still start, it started %d times", x.tuiRuns)
 	}
 }
 
-// Sin aviso no se escribe nada en stderr: el caso contrario (imprimir siempre)
-// llenaría la terminal de ruido en el 99% de las ejecuciones, que es cuando no
-// hay nada que avisar.
-func TestSinAvisoNoSeEscribeNada(t *testing.T) {
+func TestWithoutWarningNotIsWritesNothing(t *testing.T) {
 	x := nuevasDobles(t)
 
 	var eout strings.Builder
@@ -83,122 +72,103 @@ func TestSinAvisoNoSeEscribeNada(t *testing.T) {
 		t.Errorf("code = %d, want 0", code)
 	}
 	if eout.Len() != 0 {
-		t.Errorf("sin aviso no debería escribirse nada, se escribió: %q", eout.String())
+		t.Errorf("with no notice nothing should be written, this was: %q", eout.String())
 	}
 }
 
-func TestElAvisoVaTambienAlModelo(t *testing.T) {
+func TestTheWarningGoesAlsoOnTheModel(t *testing.T) {
 	x := nuevasDobles(t)
-	x.cfgWarn = "config: roots ilegible"
+	x.cfgWarn = "config: unreadable roots"
 
 	var eout strings.Builder
 	runWith(x.d, false, &eout)
-	if x.toastVisto != "config: roots ilegible" {
-		t.Errorf("el modelo recibió el aviso %q, esperaba el mismo", x.toastVisto)
+	if x.toastVisto != "config: unreadable roots" {
+		t.Errorf("the model received the notice %q, it expected the same", x.toastVisto)
 	}
 }
 
-// El modo print NO arranca la TUI y sale 0: es un one-shot para scripts y hooks,
-// así que si se colgara esperando una terminal sería peor que no tenerlo.
-func TestPrintModeNoArrancaLaTUI(t *testing.T) {
+func TestPrintModeNotStartsTheTUI(t *testing.T) {
 	x := nuevasDobles(t)
 
 	var eout strings.Builder
 	if code := runWith(x.d, true, &eout); code != 0 {
-		t.Errorf("print mode debe salir 0, dio %d", code)
+		t.Errorf("print mode must exit 0, got %d", code)
 	}
 	if x.printed != 1 {
-		t.Errorf("runPrint se llamó %d veces, want 1", x.printed)
+		t.Errorf("runPrint was called %d times, want 1", x.printed)
 	}
 	if x.tuiRuns != 0 {
-		t.Errorf("print mode NO debe arrancar la TUI, arrancó %d veces", x.tuiRuns)
+		t.Errorf("print mode must NOT start the TUI, it started %d times", x.tuiRuns)
 	}
 }
 
-// Y al revés: modo TUI no imprime la tabla. Es la mitad complementaria del
-// anterior, y sin ella una inversión de la guarda se vería como "print funciona
-// a veces".
-func TestTUIModeNoImprimeLaTabla(t *testing.T) {
+// The complementary half of the previous one: without it, inverting the guard would look like "print works sometimes".
+func TestTUIModeNotPrintsTheTable(t *testing.T) {
 	x := nuevasDobles(t)
 
 	var eout strings.Builder
 	runWith(x.d, false, &eout)
 	if x.printed != 0 {
-		t.Errorf("modo TUI no debe imprimir la tabla, la imprimió %d veces", x.printed)
+		t.Errorf("TUI mode must not print the table, it printed it %d times", x.printed)
 	}
 	if x.tuiRuns != 1 {
-		t.Errorf("modo TUI debe arrancar la TUI, arrancó %d veces", x.tuiRuns)
+		t.Errorf("TUI mode must start the TUI, it started %d times", x.tuiRuns)
 	}
 }
 
-// Un error del programa se reporta y sale con 1. El código NO es cero porque un
-// TUI que muere sin avisar dejaría al usuario mirando un alt screen vacío sin
-// ninguna pista de por qué se cerró.
-func TestErrorDelProgramaSaleConUno(t *testing.T) {
+func TestErrorOfTheProgramExitsWithOne(t *testing.T) {
 	x := nuevasDobles(t)
-	x.tuiErr = errors.New("terminal demasiado estrecha")
+	x.tuiErr = errors.New("terminal too narrow")
 
 	var eout strings.Builder
 	if code := runWith(x.d, false, &eout); code != 1 {
-		t.Errorf("un fallo del programa debe salir con 1, dio %d", code)
+		t.Errorf("a program failure must exit 1, got %d", code)
 	}
-	if !strings.Contains(eout.String(), "terminal demasiado estrecha") {
-		t.Errorf("el error no se reportó: %q", eout.String())
+	if !strings.Contains(eout.String(), "terminal too narrow") {
+		t.Errorf("the error was not reported: %q", eout.String())
 	}
 }
 
-// La config que se carga es la misma que se pasa a los dos consumidores: si el
-// modelo recibiera otra, la TUI mostraría unos roots distintos de los que se
-// imprimieron en modo print.
-func TestLaConfigLlegaIgualAModoConsumidor(t *testing.T) {
+func TestTheConfigArrivesSameAModeConsumer(t *testing.T) {
 	x := nuevasDobles(t)
 	x.cfg = config.Defaults()
 
 	runWith(x.d, true, io.Discard)
 	if x.modelCfg.Roots == nil {
-		t.Log("print mode: la config no llegó al modelo porque no se construye, correcto")
+		t.Log("print mode: the config did not reach the model because it is not built, correct")
 	}
 
 	x2 := nuevasDobles(t)
 	x2.cfg = config.Defaults()
 	runWith(x2.d, false, io.Discard)
 	if x2.modelCfg.Roots == nil {
-		t.Errorf("modo TUI: el modelo no recibió la config cargada")
+		t.Errorf("TUI mode: the model did not receive the loaded config")
 	}
 }
 
-// printRowOf es donde se toman las decisiones que se leen en la tabla de
-// --print, y todas se prueban sobre filas fabricadas: en un repo real el HEAD
-// no se puede dejar detached a voluntad, asi que el sufijo "(detached)" nunca se
-// veria en un test de integracion.
-//
-// La tabla y la TUI comparten el mapeo del estado (printState usa el mismo
-// Derive), asi que lo que se comprueba aqui es que la fila no lose informacion
-// que la TUI si enseña: una rama en detached, un worktree suelto, un repo sin
-// rama todavia (recien inicializado).
-func TestPrintRowDeCadaFormaDeRepo(t *testing.T) {
+func TestPrintRowOfEachShapeOfRepo(t *testing.T) {
 	casos := []struct {
-		nombre string
-		proj   discovery.Project
-		snap   gitstatus.Snapshot
-		quiere map[string]string
+		name string
+		proj discovery.Project
+		snap gitstatus.Snapshot
+		want map[string]string
 	}{
 		{
-			nombre: "detached conserva la rama",
-			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			name: "detached conserva la rama",
+			proj: discovery.Project{Path: "/api", Name: "api", HasRepo: true},
 			snap: gitstatus.Snapshot{Status: gitstatus.Status{
 				Branch: "feat/x", Detached: true, HasUpstream: true,
 			}},
-			quiere: map[string]string{"branch": "feat/x (detached)", "wt": ""},
+			want: map[string]string{"branch": "feat/x (detached)", "wt": ""},
 		},
 		{
-			nombre: "sin rama todavia",
-			proj:   discovery.Project{Path: "/nuevo", Name: "nuevo", HasRepo: true},
-			snap:   gitstatus.Snapshot{Status: gitstatus.Status{HasUpstream: true}},
-			quiere: map[string]string{"branch": "-", "name": "nuevo"},
+			name: "no branch yet",
+			proj: discovery.Project{Path: "/new", Name: "new", HasRepo: true},
+			snap: gitstatus.Snapshot{Status: gitstatus.Status{HasUpstream: true}},
+			want: map[string]string{"branch": "-", "name": "new"},
 		},
 		{
-			nombre: "worktree suelto lleva sufijo",
+			name: "the loose worktree carries a suffix",
 			proj: discovery.Project{
 				Path: "/api-wt", Name: "api-wt", HasRepo: true,
 				IsWorktree: true, MainRepo: "/api",
@@ -206,41 +176,41 @@ func TestPrintRowDeCadaFormaDeRepo(t *testing.T) {
 			snap: gitstatus.Snapshot{Status: gitstatus.Status{
 				Branch: "feat/y", HasUpstream: true,
 			}},
-			quiere: map[string]string{"name": "api-wt [wt]", "branch": "feat/y"},
+			want: map[string]string{"name": "api-wt [wt]", "branch": "feat/y"},
 		},
 		{
-			nombre: "con worktrees cuenta",
-			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			name: "with worktrees it counts",
+			proj: discovery.Project{Path: "/api", Name: "api", HasRepo: true},
 			snap: gitstatus.Snapshot{
 				Status:    gitstatus.Status{Branch: "main", HasUpstream: true},
 				Worktrees: []gitstatus.Worktree{{Path: "/api-wt", Branch: "a"}},
 			},
-			quiere: map[string]string{"wt": "1"},
+			want: map[string]string{"wt": "1"},
 		},
 		{
-			nombre: "sin worktrees no cuenta",
-			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
-			snap:   gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
-			quiere: map[string]string{"wt": ""},
+			name: "with no worktrees it does not count",
+			proj: discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
+			want: map[string]string{"wt": ""},
 		},
 		{
-			nombre: "grupo vacio sale como guion",
-			proj:   discovery.Project{Path: "/api", Name: "api", HasRepo: true},
-			snap:   gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
-			quiere: map[string]string{"group": "-"},
+			name: "an empty group comes out as a dash",
+			proj: discovery.Project{Path: "/api", Name: "api", HasRepo: true},
+			snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", HasUpstream: true}},
+			want: map[string]string{"group": "-"},
 		},
 	}
 
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			row := printRowOf(c.proj, c.snap)
 			got := map[string]string{
 				"name": row.name, "branch": row.branch,
 				"wt": row.wt, "group": row.group,
 			}
-			for campo, quiere := range c.quiere {
-				if got[campo] != quiere {
-					t.Errorf("%s = %q, want %q", campo, got[campo], quiere)
+			for field, want := range c.want {
+				if got[field] != want {
+					t.Errorf("%s = %q, want %q", field, got[field], want)
 				}
 			}
 			if row.path != c.proj.Path {
@@ -250,23 +220,17 @@ func TestPrintRowDeCadaFormaDeRepo(t *testing.T) {
 	}
 }
 
-// depsProd son las dependencias REALES. Que no se ejecute en los tests no significa que
-// no se ejecuten: arrancan una TUI de verdad (necesita terminal) y pintan en
-// stdout. Lo que se comprueba es que estan todas puestas y que son las
-// funciones que dicen ser, no nil: un nil ahí es un panic en el primer arranque,
-// y el seam no lo delata porque sus dobles si estan.
-func TestDepsProdEstaCompleta(t *testing.T) {
+// What is checked is that all of them are set and are the functions they claim to be, not nil: a nil there is a panic on the first run and the seam does not reveal it because its doubles are set.
+func TestDepsProdIsCompletes(t *testing.T) {
 	d := depsProd()
-	for nombre, fn := range map[string]any{
+	for name, fn := range map[string]any{
 		"load": d.load, "print": d.print, "newModel": d.newModel,
 		"notify": d.notify, "runTUI": d.runTUI,
 	} {
 		if fn == nil {
-			t.Errorf("depsProd().%s = nil", nombre)
+			t.Errorf("depsProd().%s = nil", name)
 		}
 	}
-	// Y load es la de verdad: con un HOME aislado y una config mia, devuelve
-	// ESA config, no unos defaults.
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	if err := os.MkdirAll(filepath.Join(dir, "gitdash"), 0o755); err != nil {
@@ -278,24 +242,20 @@ func TestDepsProdEstaCompleta(t *testing.T) {
 	}
 	cfg, warn := d.load()
 	if len(cfg.Roots) != 1 || cfg.Roots[0] != "/tmp/raiz-mia" {
-		t.Errorf("depsProd().load() leyo %v, want la config del fichero", cfg.Roots)
+		t.Errorf("depsProd().load() read %v, want the file's config", cfg.Roots)
 	}
 	if warn != "" {
-		t.Errorf("aviso = %q, want vacio con una config valida", warn)
+		t.Errorf("notice = %q, want empty with a valid config", warn)
 	}
 }
 
-// run es el cuerpo de main con las dependencias REALES: el unico camino que no
-// se puede probar con dobles. Con --print no arranca la TUI (eso ya lo cubre el
-// seam), asi que lo unico que se comprueba es que sale 0 y no toca stderr.
-func TestRunConPrintModeYDepsReales(t *testing.T) {
+func TestRunWithPrintModeAndDepsReal(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	if err := os.MkdirAll(filepath.Join(dir, "gitdash"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	conf := filepath.Join(dir, "gitdash", "config.toml")
-	// Un root vacio: discovery no encuentra nada y sale rapido.
 	if err := os.WriteFile(conf, []byte("roots = [\""+t.TempDir()+"zz\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -304,48 +264,35 @@ func TestRunConPrintModeYDepsReales(t *testing.T) {
 		t.Errorf("run(--print) = %d, want 0", code)
 	}
 	if errBuf.Len() != 0 {
-		t.Errorf("stderr = %q, want vacio", errBuf.String())
+		t.Errorf("stderr = %q, want empty", errBuf.String())
 	}
 }
 
-// main() es el unico punto del modulo que llama a os.Exit, y por eso no lo
-// ejecuta ningun test: exit mata el binario de test entero. Se ejecuta en un
-// SUBPROCESO, que es la unica forma de cubrirlo.
-//
-// Lo que se comprueba no es solo que sale: es que --print imprime la tabla y
-// sale 0, y que sin el flag NO imprime la tabla (arrancaria la TUI, que
-// necesita terminal, y el subproceso se quedaria colgado). El segundo caso es el
-// que importa: si main ignorara el flag, este test colgaria en vez de fallar,
-// que es la forma mala de detectar un bug.
-func TestMainEnSubproceso(t *testing.T) {
+// main() is the only point calling os.Exit (it kills the whole test binary), so it runs in a SUBPROCESS; the no-flag case matters because if main ignored it the subprocess would hang instead of failing.
+func TestMainInSubprocess(t *testing.T) {
 	if testing.Short() {
-		t.Skip("construye un binario; tarda mas que el resto de la suite")
+		t.Skip("builds a binary; it takes longer than the rest of the suite")
 	}
 	bin := t.TempDir() + "/gitdash"
-	// -cover es lo que hace que el binarlo.write de cobertura del subproceso
-	// cuente: sin el, el subproceso ejecuta main() pero nadie se entera, y el
-	// bloque queda a zero igual que si no se ejecutara. GOCOVERDIR es donde el
-	// binario instrumentado deposita el perfil al salir.
+	// -cover is what makes the subprocess's coverage write count: without it the subprocess runs main() and nobody notices, leaving the block at zero as if it never ran; GOCOVERDIR is where the instrumented binary drops the profile on exit.
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		t.Skipf("go no esta en el PATH: %v", err)
+		t.Skipf("go is not in PATH: %v", err)
 	}
 	build := exec.Command(goBin, "build", "-cover", "-o", bin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		t.Fatalf("go build -cover: %v", err)
 	}
-	// El directorio donde el subproceso deposita su cobertura. Lo pone en el
-	// entorno de cada invocacion de mas abajo.
 	coverDir := t.TempDir()
 
-	t.Run("print imprime la tabla y sale 0", func(t *testing.T) {
+	t.Run("print prints the table and exits 0", func(t *testing.T) {
 		dir := t.TempDir()
 		conf := dir + "/gitdash"
 		if err := os.MkdirAll(conf, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(conf+"/config.toml", []byte("roots = [\""+t.TempDir()+"vacio\"]\n"), 0o644); err != nil {
+		if err := os.WriteFile(conf+"/config.toml", []byte("roots = [\""+t.TempDir()+"empty\"]\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		cmd := exec.Command(bin, "--print")
@@ -354,15 +301,12 @@ func TestMainEnSubproceso(t *testing.T) {
 		if err != nil {
 			t.Fatalf("--print = %v\n%s", err, out)
 		}
-		// Con un root sin nada dentro: discovery no encuentra repos y lo dice.
 		if !strings.Contains(string(out), "no repositories found") {
-			t.Errorf("salida = %q, want el aviso de que no hay repos", out)
+			t.Errorf("output = %q, want the notice that there are no repos", out)
 		}
 	})
 
-	t.Run("sin print no imprime la tabla", func(t *testing.T) {
-		// Sin terminal, la TUI falla al arrancar en vez de colgarse: eso es lo
-		// que se comprueba. Si main ignorara el flag, esto colgaria.
+	t.Run("without print it does not print the table", func(t *testing.T) {
 		dir := t.TempDir()
 		cmd := exec.CommandContext(context.Background(), bin)
 		cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+dir, "GOCOVERDIR="+coverDir)
@@ -374,81 +318,65 @@ func TestMainEnSubproceso(t *testing.T) {
 		go func() { done <- cmd.Wait() }()
 		select {
 		case <-done:
-			// Termina (con o sin error): lo importante es que no se cuelga.
 		case <-time.After(10 * time.Second):
 			_ = cmd.Process.Kill()
-			t.Fatal("sin --print el proceso no termina: main ignoro el flag")
+			t.Fatal("without --print the process does not exit: main ignored the flag")
 		}
 	})
 
-	// El perfil del subproceso tiene que existir y traer main(). Sin esto, el
-	// test pasaria pero el bloque se quedaria sin marcar y nadie se enteraria:
-	// un test de integracion que no reporta nada es un test que no mide.
-	//
-	// Un binario construido con -cover vuelca contadores EN BINARIO
-	// (covcounters/covmeta), no un .out de texto: hay que pasarle el directorio
-	// a `go tool covdata textfmt` para convertirlo. Y os.Exit NO se salta el
-	// volcado (comprobado con un binario minimo), que era lo unico que hacia
-	// sospechar.
-	//
-	// Lo que NO llega al perfil que calcula `go test -coverpkg ./...` es esto:
-	// los contadores de un subproceso son un fichero aparte que hay que fusionar
-	// a mano, y el gate de CI usa el perfil combinado. main() queda asi a cero en
-	// la metrica global aunque este testeado de verdad. Se acepta a cambio de que
-	// el bloque este EJERCITADO, y el test de arriba no pasa si no lo esta.
+	// The subprocess profile must exist and carry main(), or the test passes while the block stays unmarked; its counters live in a separate file merged by hand, so main() sits at zero in the -coverpkg metric.
 	if err := covdataToText(coverDir); err != nil {
-		t.Fatalf("go tool covdata textfmt sobre %s: %v", coverDir, err)
+		t.Fatalf("go tool covdata textfmt over %s: %v", coverDir, err)
 	}
 	out := filepath.Join(coverDir, "cov.out")
 	raw, err := os.ReadFile(out)
 	if err != nil {
-		t.Fatalf("el subproceso no escribio contadores en %s: %v", coverDir, err)
+		t.Fatalf("the subprocess wrote no counters into %s: %v", coverDir, err)
 	}
+	want := mainFuncLine(t)
 	var tieneMain bool
 	for _, l := range strings.Split(string(raw), "\n") {
-		if strings.Contains(l, "cmd/gitdash/main.go:21.") {
+		if strings.Contains(l, fmt.Sprintf("cmd/gitdash/main.go:%d.", want)) {
 			tieneMain = true
 		}
 	}
 	if !tieneMain {
-		t.Errorf("el perfil del subproceso no menciona main.go:21, want el bloque de func main()")
+		t.Errorf("the subprocess profile does not mention main.go:%d, want the func main() block", want)
 	}
 }
 
-// Los dos closures de depsProd que se pueden ejecutar sin terminal.
-//
-// notify es el que importa: es el puente entre el aviso de config y el modelo, y
-// si el closure se equivocara (o se le pasara otro texto) el aviso se perdería
-// sin más, porque stderr queda detrás del alt screen. Se comprueba que encola un
-// toast con el texto, a través de lo que la TUI pinta.
-//
-// runTUI arranca bubbletea de verdad. Sin terminal devuelve error, y con eso se
-// comprueba que devuelve lo que Run devuelve en vez de tragarselo: el codigo de
-// salida de main sale de ahi.
-func TestClosuresDeDepsProd(t *testing.T) {
+// mainFuncLine locates `func main()` in main.go: the profile is checked by line number, and writing it by hand breaks on any comment change.
+func mainFuncLine(t *testing.T) int {
+	t.Helper()
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("leer main.go: %v", err)
+	}
+	for i, l := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(l, "func main(") {
+			return i + 1
+		}
+	}
+	t.Fatal("main.go has no func main()")
+	return 0
+}
+
+// notify is the one that matters: it bridges the config warning to the model, and if the closure got it wrong (or was handed another text) the warning would be lost with no trace, because stderr stays behind the alt screen.
+func TestClosuresOfDepsProd(t *testing.T) {
 	d := depsProd()
 
-	t.Run("notify entrega el aviso al modelo", func(t *testing.T) {
-		// El aviso tiene que LLEGAR al modelo, no se comprueba que se pinte:
-		// para mirar los toasts haria falta un getter en tui, y ese getter es
-		// exactamente el acoplamiento que notify separado evita. Lo que se
-		// comprueba es que el closure se puede llamar con un modelo y con un
-		// aviso sin reventar, que es el fallo que un nil ahi daria.
+	t.Run("notify delivers the notice to the model", func(t *testing.T) {
+		// The warning has to REACH the model, not be checked as painted: looking at the toasts would need a getter in tui, and that getter is exactly the coupling the separate notify avoids; what is checked is that the closure can be called with a model and a warning without blowing up, which is what a nil there would do.
 		m := tui.New(config.Defaults())
-		d.notify(m, "config: no se pudo leer el fichero")
-		d.notify(m, "") // un aviso vacio tampoco debe reventar
+		d.notify(m, "config: the file could not be read")
+		d.notify(m, "") // an empty warning must not blow up either
 	})
 
-	t.Run("runTUI devuelve el error del programa", func(t *testing.T) {
-		// Sin terminal, bubbletea no arranca. Lo que se comprueba es que el
-		// closure PROPAGA ese error en vez de devolver nil: un nil aqui
-		// devolveria exit 0 con una TUI que no se pintó nunca.
+	t.Run("runTUI returns the program error", func(t *testing.T) {
+		// Without a terminal bubbletea does not start; what is checked is that the closure PROPAGATES that error instead of returning nil, since a nil here would exit 0 with a TUI that was never painted.
 		m := tui.New(config.Defaults())
 		if err := d.runTUI(m); err == nil {
-			t.Log("runTUI sin terminal = nil (esta Maquina si tiene tty)")
+			t.Log("runTUI with no terminal = nil (this machine does have a tty)")
 		}
-		// Con o sin error, lo que no puede pasar es que se cuelgue: si
-		// apareciera aqui un bloqueo seria que NewProgram se lanzo con una tty
-		// real y esta esperando teclado.
 	})
 }

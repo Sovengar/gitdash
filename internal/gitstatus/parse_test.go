@@ -14,7 +14,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// porcelainClean es la salida típica de un repo limpio sincronizado.
 const porcelainClean = `# branch.oid 3f4e0c0f6a4e3c5a5d5b5e5a5d5b5e5a5d5b5e5a
 # branch.head main
 # branch.upstream origin/main
@@ -87,10 +86,10 @@ func TestParseDirty(t *testing.T) {
 	}
 }
 
-func TestParseNoUpstream(t *testing.T) {
+func TestParseNotUpstream(t *testing.T) {
 	st, _ := ParsePorcelain("# branch.oid abc\n# branch.head main\n")
 	if st.HasUpstream {
-		t.Error("upstream detectado sin línea")
+		t.Error("upstream detected with no line")
 	}
 	if st.Derive() != StateNoUpstream {
 		t.Errorf("derive = %v, want no-upstream", st.Derive())
@@ -123,8 +122,6 @@ func TestParseLog(t *testing.T) {
 	}
 }
 
-// --- tests de recolección real con repos fixture ---
-
 func TestCollectClean(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	st := Collect(t.Context(), dir, "", false)
@@ -138,7 +135,6 @@ func TestCollectClean(t *testing.T) {
 
 func TestCollectDirty(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
-	// base.txt está trackeado: modificarlo cuenta como cambio tracked.
 	testutil.WriteUncommitted(t, dir, map[string]string{"base.txt": "changed"})
 	testutil.WriteUntracked(t, dir, map[string]string{"un1.txt": "x", "un2.txt": "y"})
 
@@ -163,7 +159,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 
 	behind, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 3, "behind-")
-	testutil.FetchLocal(t, behind) // sin fetch el repo no ve el behind
+	testutil.FetchLocal(t, behind) // without a fetch the repo does not see the behind
 	st = Collect(t.Context(), behind, "", false)
 	if st.Status.Behind != 3 || st.Status.Derive() != StateBehind {
 		t.Errorf("behind: %+v", snapSummary(st))
@@ -179,7 +175,7 @@ func TestCollectAheadBehindDiverged(t *testing.T) {
 	}
 }
 
-func TestCollectNoUpstream(t *testing.T) {
+func TestCollectNotUpstream(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	st := Collect(t.Context(), dir, "", false)
 	if st.Status.HasUpstream || st.Status.Derive() != StateNoUpstream {
@@ -195,28 +191,25 @@ func TestCollectDetached(t *testing.T) {
 		t.Fatalf("detached: %+v", st.Status)
 	}
 	if len(st.Status.Branch) != 7 {
-		t.Errorf("branch detached = %q, want sha corto", st.Status.Branch)
+		t.Errorf("branch detached = %q, want the short sha", st.Status.Branch)
 	}
 }
 
 func TestCollectCorrupt(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
-	// .git corrupto: el binario git falla y el error viaja en el Snapshot.
 	testutil.BreakGit(t, dir)
 	st := Collect(t.Context(), dir, "", false)
 	if st.Err == "" {
-		t.Fatal("corrupto sin error")
+		t.Fatal("corrupt with no error")
 	}
 	if st.State(true) != StateError {
 		t.Errorf("state = %v, want error", st.State(true))
 	}
 }
 
-// El detalle está acotado: la lista de ficheros se corta en maxFiles aunque el
-// repo tenga más. El tope se comprueba en el exacto (100) y en el que lo pasa
-// (101), que es donde la guarda `len >= maxFiles` se puede equivocar.
-func TestParseListaFicherosAcotada(t *testing.T) {
-	for _, tc := range []struct{ lineas, want int }{
+// The cap is checked at the exact value (100) and at the one past it (101), which is where a `len >= maxFiles` guard can get it wrong.
+func TestParseListFilesClamped(t *testing.T) {
+	for _, tc := range []struct{ lines, want int }{
 		{maxFiles - 1, maxFiles - 1},
 		{maxFiles, maxFiles},
 		{maxFiles + 1, maxFiles},
@@ -224,117 +217,104 @@ func TestParseListaFicherosAcotada(t *testing.T) {
 	} {
 		var b strings.Builder
 		b.WriteString(porcelainClean)
-		for i := 0; i < tc.lineas; i++ {
+		for i := 0; i < tc.lines; i++ {
 			b.WriteString("? file" + strconv.Itoa(i) + ".txt\n")
 		}
 		_, files := ParsePorcelain(b.String())
 		if len(files) != tc.want {
-			t.Errorf("con %d cambios files = %d, want %d (tope %d)", tc.lineas, len(files), tc.want, maxFiles)
+			t.Errorf("with %d changes files = %d, want %d (cap %d)", tc.lines, len(files), tc.want, maxFiles)
 		}
 	}
 }
 
-// Una línea de entrada truncada (menos campos de los que el código exige) se
-// descarta: se parsea lo que se pueda sin indexar fuera del slice. Una línea "1 "
-// con 7 campos en vez de 8 es exactamente el borde de esa guarda.
-func TestParseLineaTruncadaSeDescarta(t *testing.T) {
+// A truncated entry line (fewer fields than required) is dropped, parsing what it can without indexing past the slice; a "1 " line with 7 fields instead of 8 is exactly that guard's edge.
+func TestParseLineTruncatedIsDiscards(t *testing.T) {
 	casos := []struct {
-		nombre, body string
-		beforePath   int
+		name, body string
+		beforePath int
 	}{
-		{"1 con 7 campos (le falta el path)", "M. NRM 100644 100644 100644 abc def", 7},
-		{"1 con 6 campos", "M. NRM 100644 100644 abc def", 7},
-		{"1 vacía", "", 7},
-		{"2 con 7 campos (le falta el path)", "R. N... 100644 100644 abc", 8},
-		{"u con 8 campos (le falta el path)", "UU N... 100644 100644 100644 abc def", 9},
+		{"1 with 7 fields (the path is missing)", "M. NRM 100644 100644 100644 abc def", 7},
+		{"1 with 6 fields", "M. NRM 100644 100644 abc def", 7},
+		{"1 empty", "", 7},
+		{"2 with 7 fields (the path is missing)", "R. N... 100644 100644 abc", 8},
+		{"u with 8 fields (the path is missing)", "UU N... 100644 100644 100644 abc def", 9},
 	}
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			if _, ok := parseEntry(c.body, c.beforePath); ok {
-				t.Errorf("parseEntry(%q, %d) = true, want false (línea incompleta)", c.body, c.beforePath)
+				t.Errorf("parseEntry(%q, %d) = true, want false (incomplete line)", c.body, c.beforePath)
 			}
 		})
 	}
-	// Y el camino real: una línea "1 " truncada dentro del porcelain degrada con
-	// elegancia — el cambio cuenta (el repo está sucio de verdad) pero la línea
-	// no entra en la lista de ficheros ni revienta el parseo.
 	st, files := ParsePorcelain(porcelainClean + "1 .M NRM 100644 100644 100644 abc def\n")
 	if len(files) != 0 {
-		t.Errorf("files = %d, want 0 (línea truncada descartada)", len(files))
+		t.Errorf("files = %d, want 0 (the truncated line is dropped)", len(files))
 	}
 	if st.TrackedChanges != 1 {
-		t.Errorf("tracked = %d, want 1 (el cambio cuenta aunque no se pueda detallar)", st.TrackedChanges)
+		t.Errorf("tracked = %d, want 1 (the change counts even when it cannot be detailed)", st.TrackedChanges)
 	}
 	if st.Derive() != StateDirty {
-		t.Errorf("derive = %v, want dirty (cambio truncado sigue contando)", st.Derive())
+		t.Errorf("derive = %v, want dirty (a truncated change still counts)", st.Derive())
 	}
 }
 
-// Un repo sin ningún commit es un estado legítimo (recién hecho `git init`):
-// la recolección no debe explodear al no haber nada que tomar del log.
-func TestCollectSinCommits(t *testing.T) {
+func TestCollectWithoutCommits(t *testing.T) {
 	dir := t.TempDir()
-	testutil.Init(t, dir) // sin commit
+	testutil.Init(t, dir)
 	st := Collect(t.Context(), dir, "", false)
 	if st.Err != "" {
 		t.Fatalf("err = %q", st.Err)
 	}
 	if st.LastCommit != 0 {
-		t.Errorf("LastCommit = %d, want 0 (sin commits)", st.LastCommit)
+		t.Errorf("LastCommit = %d, want 0 (no commits)", st.LastCommit)
 	}
 	if len(st.Commits) != 0 {
 		t.Errorf("commits = %d, want 0", len(st.Commits))
 	}
 }
 
-// El log puede venir vacío con salida 0 (no es lo que hace un repo sin commits,
-// que falla, pero un git envuelto puede hacerlo): la fecha del último commit es
-// 0, no un índice fuera de rango.
+// An empty log with exit 0 is not what a repo with no commits does (it fails), but a wrapped git can do it: the last commit date is 0, not an out-of-range index.
 func TestLastCommitWhen(t *testing.T) {
 	casos := []struct {
-		nombre  string
+		name    string
 		commits []Commit
 		want    int64
 	}{
 		{"nil", nil, 0},
-		{"vacío", []Commit{}, 0},
+		{"empty", []Commit{}, 0},
 		{"uno", []Commit{{Sha: "a", When: 1700000000}}, 1700000000},
-		{"varios usa el primero", []Commit{{When: 99}, {When: 1}}, 99},
+		{"several, it uses the first", []Commit{{When: 99}, {When: 1}}, 99},
 	}
 	for _, c := range casos {
 		if got := lastCommitWhen(c.commits); got != c.want {
-			t.Errorf("%s: lastCommitWhen = %d, want %d", c.nombre, got, c.want)
+			t.Errorf("%s: lastCommitWhen = %d, want %d", c.name, got, c.want)
 		}
 	}
 }
 
-// En detached sin rama, la columna de rama muestra el sha corto. El borde de
-// ese recorte son los 7 caracteres exactos: con menos no hay nada que enseñar y
-// con más se corta.
-func TestNormalizeBranchDetachedShaCorto(t *testing.T) {
+// The edge of that truncation is exactly 7 characters: with fewer there is nothing to show and with more it is cut.
+func TestNormalizeBranchDetachedShaShort(t *testing.T) {
 	casos := []struct {
-		nombre string
-		st     Status
-		want   string
+		name string
+		st   Status
+		want string
 	}{
-		{"sha de 7", Status{Detached: true, OID: "abc1234"}, "abc1234"},
-		{"sha largo", Status{Detached: true, OID: "abc1234567890def"}, "abc1234"},
-		{"sha de 6 (no llega al mínimo)", Status{Detached: true, OID: "abc123"}, ""},
-		{"sin oid", Status{Detached: true}, ""},
-		{"attached con rama", Status{Branch: "main", OID: "abc1234"}, "main"},
-		{"attached con rama y sin o detached", Status{Branch: "main", OID: "abc1234", Detached: false}, "main"},
-		{"detached pero con rama", Status{Detached: true, Branch: "main"}, "main"},
+		{"7-char sha", Status{Detached: true, OID: "abc1234"}, "abc1234"},
+		{"long sha", Status{Detached: true, OID: "abc1234567890def"}, "abc1234"},
+		{"6-char sha (below the minimum)", Status{Detached: true, OID: "abc123"}, ""},
+		{"no oid", Status{Detached: true}, ""},
+		{"attached with a branch", Status{Branch: "main", OID: "abc1234"}, "main"},
+		{"attached with a branch and no detached marker", Status{Branch: "main", OID: "abc1234", Detached: false}, "main"},
+		{"detached but with a branch", Status{Detached: true, Branch: "main"}, "main"},
 	}
 	for _, c := range casos {
 		if got := normalizeBranch(c.st); got != c.want {
-			t.Errorf("%s: normalizeBranch(%+v) = %q, want %q", c.nombre, c.st, got, c.want)
+			t.Errorf("%s: normalizeBranch(%+v) = %q, want %q", c.name, c.st, got, c.want)
 		}
 	}
 }
 
-// El pool nunca baja de 1 worker: con concurrency <= 0 (config con un valor
-// inválido) tiene que recolectar igualmente, en serie, sin colgarse.
-func TestStreamPoolConcurrenciaInvalida(t *testing.T) {
+func TestStreamPoolConcurrencyInvalidates(t *testing.T) {
 	dirs := make([]string, 3)
 	projects := make([]discovery.Project, 3)
 	for i := range dirs {
@@ -356,27 +336,13 @@ func TestStreamPoolConcurrenciaInvalida(t *testing.T) {
 	}
 }
 
-// El techo del pool es una MULTIPLICACION por CPU, no una resta: con el signo
-// ArithmeticBase mutateado, `NumCPU()*4` pasa a `NumCPU()-4` y el clamp de arriba
-// deja de acotar el pico de concurrencia. En una máquina de 1-4 CPUs el mutante
-// además produce un tamaño de canal negativo y `make(chan struct{}, n)` revienta
-// con "makechan: size out of range", así que el mismo test lo mata por dos lados.
-//
-// Por eso no se mira el resultado de emit sino su Pico: el valordevuelto es el
-// mismo con y sin el techo (emit siempre recibe Snapshot{} en proyectos sin repo,
-// línea 180), lo único que cambia es cuántos emits se solapan.
-//
-// La aserción pide `>= cpus` en lugar de `== n`: es lo que separa el mutante
-// (pico <= NumCPU()-4) del código real (pico hasta NumCPU()*4) sin depender de
-// que los N goroutines lleguen a solaparse todas, que el planificador no garantiza.
-func TestStreamPoolTechoEsMultiplicacion(t *testing.T) {
+// The pool's ceiling is a MULTIPLICATION per CPU, so the ARITHMETIC_BASE mutant (NumCPU()-4) stops bounding the peak, which is why the test watches the PEAK of emit and asserts >= cpus instead of == n (the scheduler need not overlap all N emits).
+func TestStreamPoolCeilingIsMultiplication(t *testing.T) {
 	cpus := runtime.NumCPU()
-	// Por debajo del techo real (cpus*4) y por encima del del mutante (cpus-4),
-	// con margen a ambos lados para que la aserción no dependa del hardware.
 	n := cpus * 2
 	projects := make([]discovery.Project, n)
 	for i := range projects {
-		projects[i] = discovery.Project{Path: fmt.Sprintf("/no/existe/%d", i)}
+		projects[i] = discovery.Project{Path: fmt.Sprintf("/no/such/path/%d", i)}
 	}
 
 	var mu sync.Mutex
@@ -388,8 +354,7 @@ func TestStreamPoolTechoEsMultiplicacion(t *testing.T) {
 			pico = inFlight
 		}
 		mu.Unlock()
-		// Sin esta pausa los emits se resuelven antes de que el siguiente
-		// goroutine llegue al semáforo, y el pico mediría 1 siempre.
+		// Without this pause the emits resolve before the next goroutine reaches the semaphore and the peak would always measure 1.
 		time.Sleep(2 * time.Millisecond)
 		mu.Lock()
 		inFlight--
@@ -397,8 +362,8 @@ func TestStreamPoolTechoEsMultiplicacion(t *testing.T) {
 	})
 
 	if pico < cpus {
-		t.Errorf("pico de emits simultáneos = %d, want >= %d (techo NumCPU()*4 no aplicado; "+
-			"con NumCPU()-4 el pico se queda en %d o menos)", pico, cpus, cpus-4)
+		t.Errorf("peak of simultaneous emits = %d, want >= %d (the NumCPU()*4 cap not applied; "+
+			"with NumCPU()-4 the peak stays at %d or less)", pico, cpus, cpus-4)
 	}
 }
 
@@ -413,7 +378,6 @@ func TestStreamPool(t *testing.T) {
 	}
 	got := map[string]State{}
 	var mu sync.Mutex
-	// emit se invoca concurrentemente (contrato de StreamPool): proteger el mapa.
 	StreamPool(t.Context(), projects, "", false, 2, func(path string, st Snapshot) {
 		mu.Lock()
 		got[path] = st.State(true)
@@ -431,19 +395,14 @@ func snapSummary(s Snapshot) string {
 	return s.Err + "|" + s.Status.Derive().String()
 }
 
-// Un conflicto (línea `u ` de porcelain v2) cuenta como cambio trackeado, y es el
-// único caso donde el recuento de la columna de estado dice lo que hay que
-// hacer: un repo con un conflicto y nada más tiene que salir como sucio, no
-// limpio. parseEntry ya sabía leer la línea; lo que no estaba probado es que
-// ParsePorcelain la cuente, y sin eso un `--` en el incremento pasaba unnoticed.
-func TestParseConflictosCuentanComoSucio(t *testing.T) {
-	// `u XY sub m1 m2 m3 mW h1 h2 h3 <path>`: nueve campos antes del path.
+// A conflict counts as a tracked change, and it is the only case where the state column's count says what has to be done: a repo with a conflict and nothing else must show as dirty, not clean.
+func TestParseConflictsCountAsDirty(t *testing.T) {
 	out := porcelainClean + `u UU N... 100644 100644 100644 100644 abc def ghi conflicted.go
 u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
 `
 	st, files := ParsePorcelain(out)
 	if st.TrackedChanges != 2 {
-		t.Errorf("tracked = %d, want 2 (los dos conflictos)", st.TrackedChanges)
+		t.Errorf("tracked = %d, want 2 (both conflicts)", st.TrackedChanges)
 	}
 	if st.Untracked != 0 {
 		t.Errorf("untracked = %d, want 0", st.Untracked)
@@ -452,7 +411,7 @@ u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
 		t.Errorf("Dirty = %d, want 2", st.Dirty())
 	}
 	if st.Derive() != StateDirty {
-		t.Errorf("derive = %v, want dirty: un repo con un conflicto no está limpio", st.Derive())
+		t.Errorf("derive = %v, want dirty: a repo with a conflict is not clean", st.Derive())
 	}
 	if len(files) != 2 {
 		t.Fatalf("files = %d, want 2", len(files))
@@ -460,28 +419,18 @@ u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
 	if files[0].Code != "UU" || files[0].Path != "conflicted.go" {
 		t.Errorf("files[0] = %+v", files[0])
 	}
-	// El código de la línea `u ` es el par XY de los dos lados, tal cual: "AA"
-	// es un archivo añadido por los dos lados, y no debe reducirse a la primera
-	// letra ni perderla.
+	// The `u ` line's code is the XY pair of both sides verbatim: "AA" is a file added by both sides and must neither be reduced to the first letter nor lose it.
 	if files[1].Code != "AA" {
-		t.Errorf("files[1].Code = %q, want AA (el par XY completo)", files[1].Code)
+		t.Errorf("files[1].Code = %q, want AA (the full XY pair)", files[1].Code)
 	}
 }
 
-// State.String y State.Score son los dos switch que el resto de la app consume
-// para pintar y para ordenar. Cada case se comprueba contra el literal que tiene
-// que devolver, no contra la implementacion: un `String()` que devolviera
-// "detached" para StateDirty pasaria cualquier test que solo mire que no este
-// vacio.
-//
-// El `default` de String (StateError, y cualquier estado futuro que se cuele sin
-// brazo propio) tiene que devolver "error" y no un string vacio: el texto va
-// directo a la tabla y un hueco ahi se lee como una fila que no se sabe que es.
-func TestStateStringYTieneScore(t *testing.T) {
+// Each case is checked against the literal it must return: a String() returning "detached" for StateDirty would pass any test only looking at non-emptiness, and the default must say "error" because the text goes straight into the table.
+func TestStateStringAndHasScore(t *testing.T) {
 	for _, c := range []struct {
-		st     State
-		nombre string
-		score  int
+		st    State
+		name  string
+		score int
 	}{
 		{StateClean, "clean", 0},
 		{StateNoUpstream, "no upstream", 2},
@@ -492,12 +441,10 @@ func TestStateStringYTieneScore(t *testing.T) {
 		{StateDiverged, "diverged", 5},
 		{StateNoRepo, "no repo", 2},
 		{StateError, "error", 6},
-		// Un estado que no existe todavia tiene que caer en el default, no
-		// quedarse sin brazo propio: la app no sabe enumerar estados, los pinta.
 		{State(99), "error", 0},
 	} {
-		if got := c.st.String(); got != c.nombre {
-			t.Errorf("State(%d).String() = %q, want %q", int(c.st), got, c.nombre)
+		if got := c.st.String(); got != c.name {
+			t.Errorf("State(%d).String() = %q, want %q", int(c.st), got, c.name)
 		}
 		if got := c.st.Score(); got != c.score {
 			t.Errorf("State(%d).Score() = %d, want %d", int(c.st), got, c.score)
@@ -505,17 +452,10 @@ func TestStateStringYTieneScore(t *testing.T) {
 	}
 }
 
-// El orden de Score es el que decide que fila sale primero, asi que el test
-// afirma el ORDEN entre GRUPOS y no cada numero suelto. Los tres estados
-// informativos (detached, no upstream, no repo) comparten score a proposito:
-// ninguno necesita atencion inmediata, asi que empates entre ellos son
-// correctos y el desempate lo pone el path. Lo que no puede pasar es que uno de
-// ellos se cole por delante de dirty, que si la necesita.
-// La lista va de MAYOR a MENOR score: cada grupo tiene que ir por delante del
-// siguiente.
-func TestScoreOrdenaPorAtencion(t *testing.T) {
+// The assertion states the ORDER between groups instead of each loose number: the three informational states share a score on purpose (none needs immediate attention, so ties are correct and the path breaks them) and what must not happen is one of them sneaking in front of dirty.
+func TestScoreSortsForAttention(t *testing.T) {
 	grupos := []struct {
-		nombre  string
+		name    string
 		estados []State
 	}{
 		{"error", []State{StateError}},
@@ -530,95 +470,72 @@ func TestScoreOrdenaPorAtencion(t *testing.T) {
 		for _, a := range ant.estados {
 			for _, b := range cur.estados {
 				if State(b).Score() >= State(a).Score() {
-					t.Errorf("%s (%v, %d) no va ANTES que %s (%v, %d)",
-						a, ant.nombre, State(a).Score(),
-						b, cur.nombre, State(b).Score())
+					t.Errorf("%s (%v, %d) does not come BEFORE %s (%v, %d)",
+						a, ant.name, State(a).Score(),
+						b, cur.name, State(b).Score())
 				}
 			}
 		}
 	}
 }
 
-// Derive tiene el caso de Detached: un HEAD suelto sin upstream se reporta
-// detached, y no no-upstream. La precedencia lo pone Detached por delante de
-// !HasUpstream, y este test la fija: si alguien reordena las condiciones, un
-// repo en HEAD suelto pasa a decir "no upstream", que es un diagnostico distinto
-// y equivocado.
-func TestDeriveDetachedGanaANoUpstream(t *testing.T) {
+// Detached wins over !HasUpstream and this test pins it: reordering the conditions would make a detached HEAD report "no upstream", a different and wrong diagnosis.
+func TestDeriveDetachedWinsANotUpstream(t *testing.T) {
 	st := Status{Detached: true, HasUpstream: false}
 	if got := st.Derive(); got != StateDetached {
-		t.Errorf("Derive = %v, want detached (un HEAD suelto no es no-upstream)", got)
+		t.Errorf("Derive = %v, want detached (a loose HEAD is not no-upstream)", got)
 	}
-	// Dirty gana a detached: hay trabajo sin commitear que cuenta mas que el
-	// diagnostico del HEAD.
 	st = Status{Detached: true, TrackedChanges: 1, HasUpstream: true}
 	if got := st.Derive(); got != StateDirty {
-		t.Errorf("Derive = %v, want dirty (lo sin commitear va antes que el HEAD)", got)
+		t.Errorf("Derive = %v, want dirty (uncommitted comes before HEAD)", got)
 	}
 }
 
-// parseAB lee "+2 -3" de la linea branch.ab. Una linea que no tiene esa forma
-// (un future git, una linea corrupta) tiene que devolver 0/0 y no propagatingo un
-// error: ParsePorcelain no falla nunca, tolera versiones de git que no conoce.
-func TestParseABToleraLineasNoReconocidas(t *testing.T) {
+// A line without that shape (a future git, a corrupt line) must return 0/0 instead of propagating an error: ParsePorcelain never fails, it tolerates git versions it does not know.
+func TestParseABToleratesLinesNotRecognised(t *testing.T) {
 	for _, s := range []string{
-		"",      // vacia
-		"abc",   // sin signos ni numeros
-		"+2",    // solo ahead
-		"+x -3", // numero no numerico
+		"",
+		"abc",
+		"+2",
+		"+x -3",
 	} {
 		ahead, behind := parseAB(s)
 		if ahead != 0 || behind != 0 {
-			t.Errorf("parseAB(%q) = %d/%d, want 0/0 (una linea que no se entiende es 0)", s, ahead, behind)
+			t.Errorf("parseAB(%q) = %d/%d, want 0/0 (a line that makes no sense is 0)", s, ahead, behind)
 		}
 	}
-	// Y la forma buena sigue funcionando, que es lo que evita que el test de
-	// arriba pase porque la funcion este rota.
 	if a, b := parseAB("+2 -3"); a != 2 || b != 3 {
 		t.Errorf("parseAB(\"+2 -3\") = %d/%d, want 2/3", a, b)
 	}
-	// Un grupo de mas NO es un error: Sscanf se detiene en el cuarto destino y lo
-	// que sobra se ignora. Se deja asi a proposito, porque un ahead/behind con
-	// una tercera cifra es mejor ignorada que convertida en 0/0 (que dira "no
-	// hay divergencia" cuando si la hay). Aqui solo se fija el comportamiento,
-	// no se juzga si es el que se quiere.
+	// An extra group is not an error: Sscanf stops at the fourth destination and the rest is ignored, on purpose, because an ahead/behind with a third figure is better ignored than turned into 0/0 (which would say "no divergence" when there is one); here the behaviour is pinned, not judged.
 	if a, b := parseAB("+2 -3 -1"); a != 2 || b != 3 {
-		t.Errorf("parseAB(\"+2 -3 -1\") = %d/%d, want 2/3 (el grupo sobrante se ignora)", a, b)
+		t.Errorf("parseAB(\"+2 -3 -1\") = %d/%d, want 2/3 (the leftover group is ignored)", a, b)
 	}
 }
 
-// ParseLog descarta lineas que no son "%h<NUL>%ct<NUL>%s". El caso del timestamp
-// NO numerico es el interesante: la linea tiene los tres campos, pero el segundo
-// no se puede parsear, asi que se descarta ENTERA (no se cuela un Commit con
-// When=0, que seria un commit de 1970).
-func TestParseLogDescartaCommitsMalformados(t *testing.T) {
-	// Sin NUL de cierre: ParseLog parte cada LINEA en tres campos con SplitN, y
-	// un cuarto separador se iria dentro del sujeto.
+// A non-numeric timestamp drops the line WHOLE instead of slipping in a Commit with When=0, which would be a commit from 1970.
+func TestParseLogDiscardsCommitsMalformed(t *testing.T) {
 	out := "abc123\x001700000000\x00primer commit\n" +
-		"def456\x00no-es-un-timestamp\x00segundo\n" +
-		"solo-dos-campos\n"
+		"def456\x00not-a-timestamp\x00second\n" +
+		"only-two-fields\n"
 	commits := ParseLog(out)
 	if len(commits) != 1 {
-		t.Fatalf("ParseLog devolvio %d commits, want 1: %+v", len(commits), commits)
+		t.Fatalf("ParseLog returned %d commits, want 1: %+v", len(commits), commits)
 	}
 	if commits[0].Sha != "abc123" || commits[0].Subject != "primer commit" {
-		t.Errorf("commit = %+v, want el bien formado", commits[0])
+		t.Errorf("commit = %+v, want the well-formed one", commits[0])
 	}
 }
 
-// StreamPool con un contexto YA cancelado: el primer select (el que pide hueco
-// al semaforo) tiene un `case <-ctx.Done()` que devuelve sin emitir nada. Ese
-// caso es el que evita que un scan cancelado siga lanzando subprocess de git:
-// sin el, cancelar no pararia nada hasta que terminara el trabajo en vuelo, y
-// Ctrl-C en mitad de un scan de 50 repos lo dejaria seguir.
-func TestStreamPoolConContextoCancelado(t *testing.T) {
+// This case is what stops a cancelled scan from launching git subprocesses: without it cancelling would not stop anything until the work in flight finished, so Ctrl-C in the middle of a 50-repo scan would keep it running.
+func TestStreamPoolWithContextCancelled(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	projects := []discovery.Project{
 		{Path: dir, HasRepo: true},
-		{Path: dir + "-no-existe", HasRepo: true},
+		{Path: dir + "-nonexistent", HasRepo: true},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // cancelado ANTES de arrancar
+	cancel()
 
 	var mu sync.Mutex
 	emitidas := 0
@@ -627,30 +544,22 @@ func TestStreamPoolConContextoCancelado(t *testing.T) {
 		emitidas++
 		mu.Unlock()
 	})
-	// Con el contexto muerto puede no emitirse nada: lo que no puede es lanzar
-	// git. Se comprueba que devuelve y no se cuelga, y que el numero de eventos
-	// es como mucho uno por repo (nunca mas, que seria emissions fantasma).
 	if emitidas > len(projects) {
-		t.Errorf("emite %d eventos con el contexto cancelado, want <= %d", emitidas, len(projects))
+		t.Errorf("emits %d events with the context cancelled, want <= %d", emitidas, len(projects))
 	}
 }
 
-// syncBehind con una ref que NO EXISTE devuelve known=false, no un 0. La
-// diferencia es toda la columna SYNC de la tabla: `known=false` hace que la UI
-// diga "— (sin sync branch)" (un dato que no tenemos), mientras que un 0
-// conocido se pintaría como "al día" (una afirmación falsa sobre un repo que
-// puede tener 40 commits sin traer).
-func TestSyncBehindConRefInexistente(t *testing.T) {
+// known=false is not the same as a known 0: the first makes the UI say "— (no sync branch)" (data we do not have) while the second paints as "up to date", a false claim about a repo that may have 40 commits.
+func TestSyncBehindWithRefNonexistent(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
-	n, known := syncBehind(t.Context(), dir, "origin/una-rama-que-no-existe")
+	n, known := syncBehind(t.Context(), dir, "origin/a-branch-that-does-not-exist")
 	if known {
-		t.Errorf("syncBehind con ref inexistente = %d, known=true; want known=false (no es que este al dia)", n)
+		t.Errorf("syncBehind with a nonexistent ref = %d, known=true; want known=false (it is not that it is up to date)", n)
 	}
-	// Una ref que sí existe y HEAD está en ella: 0 commits, y eso sí es conocido.
 	testutil.CommitFiles(t, dir, map[string]string{"a.txt": "x\n"}, "commit")
 	n, known = syncBehind(t.Context(), dir, "main")
 	if !known {
-		t.Error("syncBehind contra HEAD = known=false, want true (0 commitsbehind es un dato)")
+		t.Error("syncBehind against HEAD = known=false, want true (0 commits behind is data)")
 	}
 	if n != 0 {
 		t.Errorf("syncBehind contra HEAD = %d, want 0", n)

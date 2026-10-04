@@ -1,49 +1,51 @@
-# Issue — Preview visual de pull con `git-sim`
+# Issue — Visual pull preview with `git-sim`
 
-## Problema
+## Problem
 
-gitdash decide acciones de reconciliación (pull/merge/rebase) sin que el usuario
-pueda **ver antes** qué pasaría. Un `git pull` sobre una rama divergida puede
-integrar con rebase o merge según el gitconfig, y un rebase a medias deja el repo
-en un estado que invita a reintentar sobre algo sin resolver. No hay forma de
-previsualizar la operación sin ejecutarla de verdad.
+gitdash decides reconciliation actions (pull/merge/rebase) without the user being
+able to **see beforehand** what would happen. A `git pull` on a diverged branch may
+integrate with rebase or merge depending on the gitconfig, and a mid-rebase leaves
+the repo in a state that invites you to retry on top of something unresolved.
+There is no way to preview the operation without really running it.
 
-`git-sim` (initialcommit-com/git-sim, PyPI 0.3.5) dibuja un diagrama de lo que
-haría un comando git —`pull`, `merge`, `rebase`— **sin mutar el repo real** (las
-operaciones de red corren en un clon temporal bajo `/tmp/git_sim/<repo>`). Es
-puramente visual y efímero: genera una imagen y la abre con `xdg-open`.
+`git-sim` (initialcommit-com/git-sim, PyPI 0.3.5) draws a diagram of what a git
+command —`pull`, `merge`, `rebase`— **would do without mutating the real repo**
+(the network operations run in a temporary clone under `/tmp/git_sim/<repo>`). It
+is purely visual and ephemeral: it generates an image and opens it with
+`xdg-open`.
 
-## Propuesta
+## Proposal
 
-Añadir a gitdash un **preview visual** invocado como *handoff* de terminal:
+Add a **visual preview** to gitdash, invoked as a terminal *handoff*:
 
-- Tecla nueva `v` → acción configurable `visual`.
-- `v` **no ejecuta**: arma un selector prefix-key (hermano de `pullArmed`) con el
-  path del repo bajo el cursor y su upstream capturados.
-- La siguiente tecla elige variante:
-  - `p` → `git-sim pull` (sin argumentos; espejo del `p` pelado de gitdash).
+- New key `v` → configurable `visual` action.
+- `v` **does not run**: it arms a prefix-key selector (sibling of `pullArmed`) with
+  the repo path under the cursor and its upstream captured.
+- The next key picks the variant:
+  - `p` → `git-sim pull` (no arguments; mirror of gitdash's plain `p`).
   - `m` → `git-sim merge <upstream-ref>`
   - `r` → `git-sim rebase <upstream-ref>`
-  - Cualquier otra tecla cancela y sigue su curso normal.
-- Siempre se pasa `--media-dir <caché XDG de gitdash>/git-sim` para que git-sim
-  NO escriba `git-sim_media/` dentro del repo (gitdash usa `git status` real: lo
-  marcaría dirty tras cada preview).
-- `git-sim` se resuelve por PATH (`exec.LookPath`); si no está, solo toast. El
-  handoff cede la terminal al hijo, como lazygit/editor/`p a`, y al volver se
-  registra el exec en el command log (`Dur=0`) y se re-colecta el estado.
+  - Any other key cancels and carries on with its normal course.
+- `--media-dir <gitdash's XDG cache>/git-sim` is always passed so that git-sim does
+  NOT write `git-sim_media/` inside the repo (gitdash uses real `git status`: it
+  would mark it dirty after every preview).
+- `git-sim` is resolved through PATH (`exec.LookPath`); if it is not there, only a
+  toast. The handoff hands the terminal to the child, like lazygit/editor/`p a`,
+  and on return it records the exec in the command log (`Dur=0`) and re-collects
+  the state.
 
-## Fuera de alcance
+## Out of scope
 
-- La variante `s`/squash de git-sim: DESCARTADA.
-- No se toca la máquina de estados de `p`/`pullArmed`, ni `PullKinds`, ni
-  `commands.pull*`, ni `[ai.pull]`.
-- No se parsea ni se persigue la ruta de la imagen generada (timestamp no
-  determinista) ni el clon `/tmp/git_sim/<repo>`.
-- `git-sim` NO es git: no pasa por `runGit`/`runGitCombined`.
+- git-sim's `s`/squash variant: DISCARDED.
+- `p`/`pullArmed`'s state machine is not touched, nor `PullKinds`, nor
+  `commands.pull*`, nor `[ai.pull]`.
+- The path of the generated image (non-deterministic timestamp) and the
+  `/tmp/git_sim/<repo>` clone are neither parsed nor chased.
+- `git-sim` is NOT git: it does not go through `runGit`/`runGitCombined`.
 
-## Por qué ahora
+## Why now
 
-El repo ya tiene el patrón exacto que hace falta (selector prefix-key de `p`,
-handoff de terminal de lazygit/`p a`, command log con intención + argv) y
-`promptLine()` como punto único de avisos en keybinds. La feature es aditiva: un
-camino nuevo que reutiliza esos raíles sin modificar los existentes.
+The repo already has the exact pattern needed (p's prefix-key selector,
+lazygit/`p a`'s terminal handoff, command log with intent + argv) and
+`promptLine()` as the single place for warnings in keybinds. The feature is
+additive: a new path that reuses those rails without modifying the existing ones.

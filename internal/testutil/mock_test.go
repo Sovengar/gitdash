@@ -1,14 +1,4 @@
-// Tests de los caminos de error de los helpers.
-//
-// Los helpers de este paquete son lo que la suite entera usa para montar repos
-// git de verdad, y casi todas sus ramas son del mismo tipo: la llamada al
-// sistema falla. Contra un *testing.T de verdad no hay forma de llegar a ellas,
-// porque t.Fatal mata el test que las fuera a cubrir. Por eso los helpers toman
-// un TB y aqui se usa MockTB, que registra el fallo en vez de abortar.
-//
-// El fallo se provoca de verdad, no se falsea: se apunta a un path cuyo padre es
-// un FICHERO, y os.MkdirAll devuelve ENOTDIR. Si un dia dejara de fallar, estos
-// tests fallarian, que es justo lo que un test tiene que hacer.
+// These helpers' error branches are unreachable against a real *testing.T (t.Fatal kills the covering test), which is why they take a TB; the failure is provoked for real with a FILE where a directory should be (ENOTDIR).
 package testutil
 
 import (
@@ -18,179 +8,146 @@ import (
 	"testing"
 )
 
-// ficheroComoPadre crea un path cuyo padre inmediato es un fichero normal. Todo
-// lo que intente crear un directorio debajo falla con ENOTDIR.
 func ficheroComoPadre(t *testing.T) string {
 	t.Helper()
-	f := filepath.Join(t.TempDir(), "soy-un-fichero")
-	if err := os.WriteFile(f, []byte("contenido"), 0o644); err != nil {
+	f := filepath.Join(t.TempDir(), "i-am-a-file")
+	if err := os.WriteFile(f, []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return f
 }
 
-func TestInitFallaConDirectorioIlegible(t *testing.T) {
+func TestInitFailsWithDirectoryUnreadable(t *testing.T) {
 	tb := &MockTB{Temp: tptr(t)}
 	Init(tb, filepath.Join(ficheroComoPadre(t), "sub"))
 
 	if !tb.Failed() {
-		t.Fatal("Init = sin fallo, want el error de MkdirAll (el padre es un fichero)")
+		t.Fatal("Init without failure, want the MkdirAll error (the parent is a file)")
 	}
 	if !strings.Contains(tb.Failures[0], "not a directory") {
-		t.Errorf("fallo = %q, want el de ENOTDIR", tb.Failures[0])
+		t.Errorf("failure = %q, want the ENOTDIR one", tb.Failures[0])
 	}
-	// Y no se ha creado nada: el helper se detuvo en el mkdir, sin llegar a
-	// git init.
 	if entries, err := os.ReadDir(filepath.Dir(tb.Failures[0])); err == nil && len(entries) == 0 {
-		t.Error("Init creo el directorio pese a fallar el mkdir")
+		t.Error("Init created the directory even though mkdir failed")
 	}
 }
 
-func TestCommitFilesFallaConRutaImposible(t *testing.T) {
+func TestCommitFilesFailsWithPathImpossible(t *testing.T) {
 	dir := t.TempDir()
 
-	// Un fichero anidado cuyo directorio padre es un FICHERO: sin el bloque,
-	// `MkdirAll` lo crearía y el helper pasaría el mkdir para fallar mucho más
-	// tarde, en el `git commit` de un directorio que no es repo. El fallo
-	// seguiría siendo "un fallo", pero no el de esta línea, y el test
-	// aceptaría un helper que ni siquiera comprobara el mkdir.
-	bloque := filepath.Join(dir, "bloque")
-	if err := os.WriteFile(bloque, []byte("x"), 0o644); err != nil {
+	// A nested file whose parent directory is a FILE: without this block MkdirAll would create it and the helper would pass the mkdir to fail much later, in the `git commit` of a directory that is not a repo. The failure would still be "a failure", just not this line's, and the test would accept a helper that did not even check the mkdir.
+	block := filepath.Join(dir, "block")
+	if err := os.WriteFile(block, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tb2 := &MockTB{Temp: tptr(t)}
 	CommitFiles(tb2, dir, map[string]string{
-		filepath.Join("bloque", "hijo.txt"): "x",
-	}, "no deberia llegar aqui")
+		filepath.Join("block", "child.txt"): "x",
+	}, "should never get here")
 	if !tb2.Failed() {
-		t.Error("CommitFiles = sin fallo, want el error de MkdirAll del padre")
+		t.Error("CommitFiles without failure, want the parent's MkdirAll error")
 	} else if !strings.Contains(tb2.Failures[0], "mkdir ") || !strings.Contains(tb2.Failures[0], "not a directory") {
-		// El PRIMER fallo tiene que ser el del mkdir con ENOTDIR. MockTB no
-		// detiene el helper (para eso está: registra en vez de matar), así que
-		// después también falla el WriteFile y el git; lo que se comprueba es que
-		// el mkdir falló DE VERDAD y no que fuera el primero que se registró.
-		t.Errorf("primer fallo = %q, want el ENOTDIR del MkdirAll", tb2.Failures[0])
+		// The FIRST failure has to be the mkdir's ENOTDIR: MockTB does not stop the helper (that is what it is for, recording instead of killing), so the WriteFile and git fail afterwards too; what is checked is that the mkdir really failed and not that it was the first one recorded.
+		t.Errorf("first failure = %q, want MkdirAll's ENOTDIR", tb2.Failures[0])
 	}
 
-	// Y con un directorio ya existente pero sin permiso de escritura en el
-	// destino final: el fichero existe como DIRECTORIO, y WriteFile sobre un
-	// directorio falla con EISDIR.
 	tb3 := &MockTB{Temp: tptr(t)}
 	Init(tb3, dir)
 	if tb3.Failed() {
-		t.Fatalf("el repo base no se pudo crear: %v", tb3.Failures)
+		t.Fatalf("the base repo could not be created: %v", tb3.Failures)
 	}
-	destino := filepath.Join(dir, "sub", "archivo.txt")
+	destino := filepath.Join(dir, "sub", "file.txt")
 	if err := os.MkdirAll(destino, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	tb4 := &MockTB{Temp: tptr(t)}
-	CommitFiles(tb4, dir, map[string]string{"sub/archivo.txt": "contenido"}, "no deberia llegar")
+	CommitFiles(tb4, dir, map[string]string{"sub/file.txt": "content"}, "should never get here")
 	if !tb4.Failed() {
-		t.Error("CommitFiles sobre un directorio = sin fallo, want el error de WriteFile")
+		t.Error("CommitFiles over a directory without failure, want the WriteFile error")
 	}
 }
 
-func TestWriteUncommittedYUntrackedFallan(t *testing.T) {
+func TestWriteUncommittedAndUntrackedFail(t *testing.T) {
 	t.Run("uncommitted", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
 		WriteUncommitted(tb, ficheroComoPadre(t), map[string]string{"a.txt": "x"})
 		if !tb.Failed() {
-			t.Error("WriteUncommitted = sin fallo, want el error de escritura")
+			t.Error("WriteUncommitted without failure, want the write error")
 		}
 	})
 	t.Run("untracked", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
 		WriteUntracked(tb, ficheroComoPadre(t), map[string]string{"a.txt": "x"})
 		if !tb.Failed() {
-			t.Error("WriteUntracked = sin fallo, want el error de escritura")
+			t.Error("WriteUntracked without failure, want the write error")
 		}
 	})
 }
 
-func TestMarkerFallaConPathIlegible(t *testing.T) {
+func TestMarkerFailsWithPathUnreadable(t *testing.T) {
 	tb := &MockTB{Temp: tptr(t)}
 	Marker(tb, ficheroComoPadre(t), "n", "g", "s", false)
 	if !tb.Failed() {
-		t.Error("Marker = sin fallo, want el error de escritura del marcador")
+		t.Error("Marker without failure, want the marker's write error")
 	}
 }
 
-// git() falla cuando el comando no existe o devuelve error. Se provoca con un
-// argumento que git no entiende: no es un mock del sistema, es git diciendo que
-// no.
-func TestGitFallaConComandoInvalido(t *testing.T) {
+// git() fails when the command does not exist or returns an error, provoked with an argument git does not understand: this is not a system mock, it is git saying no.
+func TestGitFailsWithCommandInvalid(t *testing.T) {
 	tb := &MockTB{Temp: tptr(t)}
-	// `--no-existe-esta-opcion` hace que git salga con codigo 129.
-	git(tb, t.TempDir(), "no-existe-este-subcomando")
+	git(tb, t.TempDir(), "this-subcommand-does-not-exist")
 	if !tb.Failed() {
-		t.Fatal("git con un subcomando invalido = sin fallo, want el error del proceso")
+		t.Fatal("git with an invalid subcommand without failure, want the process error")
 	}
-	if !strings.Contains(tb.Failures[0], "no-existe-este-subcomando") {
-		t.Errorf("fallo = %q, want que nombre el comando que se ejecuto", tb.Failures[0])
+	if !strings.Contains(tb.Failures[0], "this-subcommand-does-not-exist") {
+		t.Errorf("failure = %q, want it to name the command that ran", tb.Failures[0])
 	}
 }
 
-// tptr: los dobles necesitan un testing.T real para TempDir, asi que se les pasa
-// el del test que los usa. *testing.T satisface el interface.
 func tptr(t *testing.T) testing.TB { return t }
 
-// El doble tiene que saber responder a las tres cosas que TB exige, y dos de
-// ellas no se ejercitan al usarlo para cubrir un fallo: TempDir sin Temp (el
-// guard), y Failed() de un doble limpio (que debe decir que no).
-func TestMockTBRespetaElContrato(t *testing.T) {
-	// Sin Temp: TempDir devuelve "" y no revienta. Sin esto, un doble
-	// construido a pelo (sin test que delegar) reventaria en NewRepo.
-	vacio := &MockTB{}
-	if got := vacio.TempDir(); got != "" {
-		t.Errorf("TempDir sin Temp = %q, want vacio", got)
+// The double has to answer the three things TB requires, and two of them are not exercised when using it to cover a failure: TempDir without Temp (the guard) and Failed() on a clean double (which must say no).
+func TestMockTBRespectsTheContract(t *testing.T) {
+	empty := &MockTB{}
+	if got := empty.TempDir(); got != "" {
+		t.Errorf("TempDir without Temp = %q, want empty", got)
 	}
-	if vacio.Failed() {
-		t.Error("un doble recien creado = con fallos, want ninguno")
+	if empty.Failed() {
+		t.Error("a freshly created double has failures, want none")
 	}
 
-	// Fatalf con formato: el mensaje sale formateado, con los args puestos.
-	vacio.Fatalf("fallo %d de %d", 3, 7)
-	if len(vacio.Failures) != 1 {
-		t.Fatalf("fallos = %d, want 1", len(vacio.Failures))
+	empty.Fatalf("failure %d de %d", 3, 7)
+	if len(empty.Failures) != 1 {
+		t.Fatalf("fallos = %d, want 1", len(empty.Failures))
 	}
-	if !strings.Contains(vacio.Failures[0], "fallo 3 de 7") {
-		t.Errorf("fallo = %q, want el mensaje formateado", vacio.Failures[0])
+	if !strings.Contains(empty.Failures[0], "failure 3 de 7") {
+		t.Errorf("failure = %q, want the formatted message", empty.Failures[0])
 	}
-	if !vacio.Failed() {
-		t.Error("Failed() = false tras un Fatalf, want true")
+	if !empty.Failed() {
+		t.Error("Failed() = false after a Fatalf, want true")
 	}
 
-	// Y Fatal a secas se acumula en vez de sobreescribir: dos fallos son dos
-	// fallos, y un helper que falla dos veces debe decir las dos.
-	vacio.Fatal("otro fallo")
-	if len(vacio.Failures) != 2 {
-		t.Errorf("fallos = %d, want 2 (Fatal no pisa el anterior)", len(vacio.Failures))
+	empty.Fatal("another failure")
+	if len(empty.Failures) != 2 {
+		t.Errorf("failures = %d, want 2 (Fatal does not overwrite the previous one)", len(empty.Failures))
 	}
 }
 
-// Los tres helpers que escriben en un sitio que no puede existir. Todos usan el
-// mismo patron que ya se prueba arriba (un fichero donde deberia ir el
-// directorio), pero cada uno con su llamada: MkdirAll, WriteFile y
-// WriteFile sobre un HEAD dentro de un .git que no existe.
-func TestHelpersQueEscribenFallan(t *testing.T) {
+func TestHelpersThatWriteFail(t *testing.T) {
 	t.Run("InitBare", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
 		InitBare(tb, filepath.Join(ficheroComoPadre(t), "origin.git"))
 		if !tb.Failed() {
-			t.Error("InitBare = sin fallo, want el error de MkdirAll")
+			t.Error("InitBare without failure, want the MkdirAll error")
 		}
 	})
 
 	t.Run("BreakGit", func(t *testing.T) {
-		// Un repo de verdad, y luego .git/HEAD es un DIRECTORIO: escribir
-		// encima falla con EISDIR. Sin tocar el HEAD real (que dejaria el repo
-		// inutilizable para el resto del test).
 		dir := t.TempDir()
 		tb := &MockTB{Temp: tptr(t)}
 		Init(tb, dir)
 		if tb.Failed() {
-			t.Fatalf("no se pudo crear el repo base: %v", tb.Failures)
+			t.Fatalf("the base repo could not be created: %v", tb.Failures)
 		}
 		head := filepath.Join(dir, ".git", "HEAD")
 		if err := os.Remove(head); err != nil {
@@ -202,28 +159,23 @@ func TestHelpersQueEscribenFallan(t *testing.T) {
 		tb2 := &MockTB{Temp: tptr(t)}
 		BreakGit(tb2, dir)
 		if !tb2.Failed() {
-			t.Error("BreakGit sobre un HEAD que es directorio = sin fallo, want el error")
+			t.Error("BreakGit over a HEAD that is a directory without failure, want the error")
 		}
 	})
 }
 
-// TempDir sin Temp es el unico camino de MockTB que los helpers de este paquete
-// no recorren: todos los que llaman a TempDir lo hacen sobre un doble con Temp
-// puesto. Se prueba aparte porque es el contrato del doble, no del helper: un
-// MockTB construido a pelo (sin test al que delegar) tiene que devolver "" y no
-// reventar, que es lo que haria si TempDir desreferenciara un nil.
-func TestMockTBTempDirSinTest(t *testing.T) {
-	vacio := &MockTB{}
-	if got := vacio.TempDir(); got != "" {
-		t.Errorf("TempDir sin Temp = %q, want cadena vacia", got)
+// TempDir without Temp is the only MockTB path the helpers of this package do not walk (all of them call TempDir on a double with Temp set); it is tested apart because it is the double's contract and not the helper's: a MockTB built by hand (with no test to delegate to) must return "" instead of panicking on a nil dereference.
+func TestMockTBTempDirWithoutTest(t *testing.T) {
+	empty := &MockTB{}
+	if got := empty.TempDir(); got != "" {
+		t.Errorf("TempDir without Temp = %q, want the empty string", got)
 	}
-	// Y con Temp, delega de verdad en el test.
 	conTest := &MockTB{Temp: tptr(t)}
 	got := conTest.TempDir()
 	if got == "" {
-		t.Error("TempDir con Temp = vacio, want un directorio temporal real")
+		t.Error("TempDir with Temp empty, want a real temp directory")
 	}
 	if _, err := os.Stat(got); err != nil {
-		t.Errorf("el directorio delegado no existe: %v", err)
+		t.Errorf("the delegated directory does not exist: %v", err)
 	}
 }

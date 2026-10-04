@@ -1,9 +1,4 @@
-// gitdash — panel de estados git en TUI (inspirado en bircni/git-statuses).
-//
-// Descubre proyectos por fichero marcador (.gitdash.toml) en los roots
-// configurados, recolecta el estado git de cada uno (branch, dirty,
-// ahead/behind) vía subprocess git, y lo muestra en un dashboard Bubbletea
-// con fetch automático en batches y acciones pull/push/editor.
+// gitdash — TUI git status dashboard for the repos discovered by marker file (.gitdash.toml), inspired by bircni/git-statuses.
 package main
 
 import (
@@ -24,31 +19,15 @@ func main() {
 	os.Exit(run(*printMode, os.Stderr))
 }
 
-// El modelo que se pinta es un seam, no el TUI real: la TUI necesita una
-// terminal y aquí lo que hay que probar es la DECISIÓN (aviso a stderr, elegir
-// print o TUI, código de salida), no el alt screen. Además main() no es
-// testeable por sí solo —llama a os.Exit— y sus dos guards (el aviso de config y
-// el error del programa) se quedaban sin cubrir sin importarlo.
-//
-// notify va aparte de newModel a propósito: el aviso que se encola al modelo es
-// una decisión de main (si se perdiera, el usuario no lo vería nunca, porque
-// stderr se queda detrás del alt screen), y para observarlo desde package main
-// haría falta un getter en tui. Con el aviso en el seam, main lo verifica sin
-// que tui exporte nada; qué hace el toast con el texto lo prueba tui.
+// The painted model is a seam, not the real TUI: what is testable is the decision (stderr warning, print vs TUI, exit code), and notify stays a separate seam so main can verify the warning without tui exporting a getter.
 type deps struct {
-	// load devuelve la config y su aviso. Es config.Load en producción.
-	load func() (config.Config, string)
-	// print es runPrint, que escribe en os.Stdout a propósito (ver print.go).
-	print func(config.Config)
-	// newModel construye el modelo a partir de la config.
+	load     func() (config.Config, string)
+	print    func(config.Config)
 	newModel func(config.Config) tui.Model
-	// notify entrega el aviso de config al modelo. Es Model.NotifyConfig.
-	notify func(tui.Model, string)
-	// runTUI arranca el programa y devuelve su error.
-	runTUI func(tui.Model) error
+	notify   func(tui.Model, string)
+	runTUI   func(tui.Model) error
 }
 
-// depsProd son las dependencias reales.
 func depsProd() deps {
 	return deps{
 		load:     config.Load,
@@ -59,9 +38,7 @@ func depsProd() deps {
 	}
 }
 
-// run es el cuerpo de main: decide qué pintar y devuelve el código de salida, sin
-// salir del proceso. Todo lo que hace falta para tapar los dos guards vive aquí
-// y es comprobable con dobles.
+// The body of main: it decides what to paint and returns the exit code without leaving the process, which is what makes both guards checkable with doubles.
 func run(printMode bool, eout io.Writer) int {
 	return runWith(depsProd(), printMode, eout)
 }
@@ -69,10 +46,8 @@ func run(printMode bool, eout io.Writer) int {
 func runWith(d deps, printMode bool, eout io.Writer) int {
 	cfg, warn := d.load()
 	if warn != "" {
-		// El error de escritura se descarta a proposito: `eout` es stderr y ya
-		// estamos avisando de un problema. Si stderr falla, no hay a quien
-		// avisarle, y abortar por ello dejaria al usuario sin dashboard.
-		_, _ = fmt.Fprintln(eout, "gitdash:", warn) // notificar sin abortar
+		// Write error dropped on purpose: eout is stderr and a problem is already being reported; if stderr fails there is nobody left to tell, and aborting would leave the user with no dashboard.
+		_, _ = fmt.Fprintln(eout, "gitdash:", warn)
 	}
 
 	if printMode {
@@ -81,7 +56,7 @@ func runWith(d deps, printMode bool, eout io.Writer) int {
 	}
 
 	model := d.newModel(cfg)
-	// El aviso va también a la TUI: stderr se queda detrás del alt screen.
+	// The warning also goes to the TUI, because stderr stays behind the alt screen.
 	d.notify(model, warn)
 	if err := d.runTUI(model); err != nil {
 		_, _ = fmt.Fprintln(eout, "gitdash:", err)

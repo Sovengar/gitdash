@@ -1,4 +1,3 @@
-// Update y View del modelo gitdash.
 package tui
 
 import (
@@ -13,14 +12,11 @@ import (
 	"gitdash/internal/cmdlog"
 )
 
-// Update procesa mensajes: eventos de fondo, teclas, tick y resize.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		// Un overlay que ya no cabe no se deja a medias: se cierra y se avisa.
-		// Quedarse con el teclado capturado y sin formulario visible sería
-		// escribir a ciegas.
+		// An overlay that no longer fits is closed with a warning: staying with the keyboard captured and no visible form means writing blind.
 		if m.pr != nil && !m.prFits() {
 			m.closePR()
 			m.toasts.showWarning("terminal too small — closed the PR form")
@@ -48,21 +44,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.states[msg.path] = msg.snap
 		delete(m.running, msg.path)
-		// La sub-fila de un worktree borrado desaparece: el cursor debe
-		// quedar en rango.
 		m.clampCursor()
 		return m.withPump(nil)
 
 	case collectDoneMsg:
 		m.scanning = false
-		// cache best-effort al final de cada rescan
 		if path, err := cache.Path(); err == nil {
 			projects := m.projects
 			go func() { _ = cache.Save(path, projects) }()
 		}
-		// fetch automático en batches. `fetchBatchCmd` publica por el canal y
-		// devuelve SIEMPRE nil, así que no hay nada que acumular aquí: lo que
-		// se rearma es solo la bomba de eventos.
 		if m.cfg.FetchAuto {
 			m.fetchBatchCmd(m.fetchTargets(), cmdlog.ClassAuto)
 		}
@@ -100,33 +90,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tok, inflight := m.removeTokens[msg.parent]
 		switch {
 		case inflight && msg.gen == tok:
-			// Intento vigente de este padre: se consume el token y se libera el
-			// running si sigue siendo el del borrado.
 			delete(m.removeTokens, msg.parent)
 			if m.running[msg.parent] == "worktree_remove" {
 				delete(m.running, msg.parent)
 			}
 		case !inflight:
-			// Sin intento registrado (cancelado con esc): se libera el running
-			// residual y se descarta el resultado sin tocar banner ni toast.
+			// No registered attempt (cancelled with esc): the residual running is released and the result dropped without touching banner or toast.
 			if m.running[msg.parent] == "worktree_remove" {
 				delete(m.running, msg.parent)
 			}
 			return m.withPump(nil)
 		default:
-			// Token distinto: el intento fue sustituido, así que el resultado
-			// es obsoleto. Ocurre cuando un statusMsg de fondo (scan/fetch)
-			// libera running[parent] con un borrado aún en vuelo: el usuario
-			// relanza (t2) y sobrescribe removeTokens[parent]; cuando llega el
-			// resultado de t1 hay que ignorarlo. NO se libera running[parent]
-			// porque ahora pertenece al intento nuevo (t2), ni se muta el
-			// banner.
+			// Different token: the attempt was superseded (a background statusMsg released running[parent] while a removal was in flight and the user relaunched, overwriting removeTokens[parent]), so running[parent] now belongs to the new attempt and must be neither released nor banner-touched.
 			return m.withPump(nil)
 		}
 		m.lastAction[msg.parent] = actionResult{kind: "worktree_remove", cmd: msg.cmd, output: msg.output, err: msg.err}
-		// La mutación del estado armado solo aplica si este sigue apuntando al
-		// mismo worktree (o está vacío): un armado posterior sobre otro
-		// worktree no se pisa con el resultado tardío.
+		// The armed state is only mutated if it still points at the same worktree (or is nil), so a later arming on another worktree is not overwritten by a late result.
 		targetsArmed := m.armed == nil || m.armed.matches(msg.parent, msg.wtPath)
 		if msg.err == "" {
 			if targetsArmed {
@@ -140,11 +119,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.withPump(nil)
 		}
 		if msg.force {
-			// El forzado también falló: se desarma para no entrar en bucle.
 			m.armed = nil
 		} else {
-			// Primer intento fallido (worktree sucio): se arma el forzado para
-			// la siguiente pulsación.
 			m.armed = &armedRemoval{
 				wtPath: msg.wtPath, parent: msg.parent,
 				name: msg.name, force: true,
@@ -154,9 +130,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		delete(m.running, msg.path)
-		// El handoff presta la terminal al hijo, así que no hay salida que
-		// registrar: en el command log quedan el argv y cómo terminó.
-		// Dur = 0 (medirlo exigiría guardar el arranque en el modelo).
+		// The handoff lends the terminal to the child, so there is no output to record: the log keeps the argv and how it ended, with Dur = 0 (measuring it would mean storing the start instant in the model).
 		cmdlog.RecordExec(cmdlog.Entry{
 			Repo:   m.nameOf(msg.path),
 			Dir:    msg.path,
@@ -165,7 +139,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Argv:   msg.argv,
 			Exit:   execExit(msg.err),
 		})
-		// el handoff pudo cambiar el estado del repo: siempre re-colecta
 		cmd := m.recollectCmd(msg.path)
 		if msg.err != nil {
 			m.toasts.showError(fmt.Sprintf("command: %v", msg.err))
@@ -186,20 +159,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toasts.show(msg.text, msg.level)
 		return m, nil
 
-	// Lanza lo que el overlay de PR aceptó. Va como mensaje propio (y no
-	// como efecto de la tecla de submit) para que aceptar y ejecutar sean dos
-	// pasos: el envío queda observable en m.prPending sin que haya salido
-	// ningún proceso.
+		// Its own message (and not an effect of the submit key) so accepting and executing stay two steps: the submission is observable in m.prPending with no process having left.
 	case prStartMsg:
 		return m, m.prCreateCmd()
 
-	// El desenlace. reject != "" significa que no se ejecutó nada, así que no
-	// hay exec que registrar ni estado que re-colectar: solo el aviso, que dice
-	// qué falta para poder hacerlo.
+		// reject != "" means nothing ran, so there is no exec to record and no state to recollect: only the warning, which says what is missing.
 	case prResultMsg:
 		delete(m.running, msg.path)
 		if msg.reject != "" {
-			// No hubo proceso: ni entrada en el command log ni recollect.
 			m.toasts.showWarning(msg.reject)
 			return m.withPump(nil)
 		}
@@ -209,9 +176,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.toasts.showError(note)
 		}
-		// La creación puede haber pusheado la rama (gh empuja si el head no
-		// tiene upstream), así que el ahead/behind del snapshot puede haber
-		// cambiado: re-colecta pase lo que pase, como con los handoffs.
+		// gh pushes the head branch when it has no upstream, so the snapshot's ahead/behind may have changed: recollect regardless, like after a handoff.
 		return m.withPump(m.recollectCmd(msg.path))
 
 	case tea.KeyPressMsg:
@@ -220,20 +185,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// withPump rearma la bomba de eventos después de procesar uno del canal
-// (los Cmds leen UN evento cada vez: sin esto los estados nunca llegan).
+// Rearms the event pump after consuming a channel event (each Cmd reads ONE event): without it no state ever arrives.
 func (m Model) withPump(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, waitForEvent(m.events))
 }
 
-// actionNote compone la notificación de una acción terminada (pull/push).
-// En el fallo incluye el motivo real de git (errStr, ya resumido) y, cuando se
-// reconoce, un hint accionable; la salida completa queda en el detalle.
-//
-// rebaseInProgress tiene prioridad sobre los demás hints: un pull --rebase que
-// choca no dejó el repo como estaba, lo dejó con la historia reescrita a medias
-// y el índice en conflicto. Decir solo "falló" invita a reintentar, y reintentar
-// sobre un rebase a medias es peor que no hacer nada.
+// On failure it adds git's real reason and an actionable hint, and rebaseInProgress wins over the others: a clashing pull --rebase left half-rewritten history, and saying only "failed" invites a retry that is worse than nothing.
 func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) string {
 	if errStr == "" {
 		if cmd == "" {
@@ -247,21 +204,20 @@ func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) s
 	}
 	switch {
 	case rebaseInProgress && IsPullKind(kind):
-		note += " — rebase a medias: resolvé los conflictos y `git rebase --continue` (o `--abort`)"
+		note += " — mid-rebase: resolve the conflicts and `git rebase --continue` (or `--abort`)"
 	case IsPullKind(kind):
 		switch {
 		case strings.Contains(output, "Not possible to fast-forward"),
 			strings.Contains(output, "divergent"):
-			note += " — divergió: probá el rebase del selector (p luego r)"
+			note += " — diverged: try the selector's rebase (p then r)"
 		case strings.Contains(errStr, "no tracking information"),
 			strings.Contains(errStr, "no upstream"):
-			note += " — sin upstream: P la publica y configura el tracking"
+			note += " — no upstream: P publishes it and sets up tracking"
 		}
 	}
 	return note
 }
 
-// fetchingAll reporta si hay algún fetch en curso (para el spinner).
 func (m *Model) fetchingAll() bool {
 	for _, st := range m.fetchStates {
 		if st == "fetching" {
@@ -271,7 +227,6 @@ func (m *Model) fetchingAll() bool {
 	return false
 }
 
-// clampCursor mantiene el cursor dentro de los límites visibles.
 func (m *Model) clampCursor() {
 	n := len(m.entries())
 	if m.cursor >= n {
@@ -279,39 +234,22 @@ func (m *Model) clampCursor() {
 	}
 }
 
-// handleKey enruta las teclas: input de búsqueda primero, luego el input
-// del modo comando (`!` en el detalle) y por último la tabla. Las teclas
-// se resuelven contra el mapa de keybindings configurado (config.toml).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// El overlay de creación de PR es un view mode y se lleva el teclado
-	// entero: se consulta AL PRINCIPIO del enrutado, antes que los selectores
-	// armados, los inputs y la tabla, porque el usuario está escribiendo y
-	// "p" o "f" son letras, no acciones. Es justo lo que lo separa de
-	// pullArmed y visualArmed, que son prefix-key de una sola pulsación. La
-	// única excepción es ctrl+c, que sigue su curso normal y cierra la app
-	// (igual que dentro del panel del log): tragar el abort del terminal
-	// dejaría al usuario sin salida.
+	// The PR overlay takes the whole keyboard and is consulted FIRST, before armed selectors, inputs and the table, because the user is typing and "p" or "f" are letters, not actions; the only exception is ctrl+c, which keeps its normal course and closes the app, since swallowing the terminal abort would leave the user without an exit.
 	if m.pr != nil {
 		if out, cmd, handled := m.handlePRKey(msg); handled {
 			return out, cmd
 		}
 	}
 
-	// esc cancela de forma definitiva TODOS los borrados en vuelo, no solo uno:
-	// limpia el mapa completo de tokens para que cualquier resultado tardío se
-	// descarte sin re-armar el forzado ni tocar el banner (su running residual
-	// se libera al llegar el resultado). El esc sigue su curso normal (cerrar
-	// detalle, etc.).
+	// esc cancels ALL in-flight removals, not just one: it clears the whole token map so any late result is discarded without re-arming the forced level or touching the banner.
 	if key == "esc" && len(m.removeTokens) > 0 {
 		clear(m.removeTokens)
 	}
 
-	// Confirmación armada de borrado de worktree: tiene prioridad sobre el
-	// resto (incluido el esc que cierra el detalle y los inputs de
-	// búsqueda/comando). Cualquier tecla distinta de la acción de borrado y de
-	// esc desarma y sigue su curso normal.
+	// An armed removal has priority over everything (including the esc that closes the detail and the search/command inputs); any other key disarms and continues on its normal course.
 	if m.armed != nil {
 		switch {
 		case m.actionForKey(key) == "worktree_remove":
@@ -324,19 +262,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Selector de variante de pull: la tecla de pull solo arma, la segunda
-	// tecla elige. Las opciones de git (p/r/f/m) están en concurrencia con
-	// acciones reales de la tabla (pull/rescan/fetch), así que el estado
-	// armado tiene que consumir la tecla antes de que llegue al resto del
-	// enrutado. La variante `a` (AI) lanza directamente, sin confirmación.
-	// Cualquier otra tecla cancela y sigue su curso normal: es lo que evita
-	// que la app quede pegada esperando una segunda pulsación.
+	// The pull key only arms and the second key chooses, because the git variants (p/r/f/m) collide with real table actions; any other key cancels and continues normally, which is what keeps the app from waiting forever for a second keystroke.
 	if m.pullArmed != nil {
 		armed := *m.pullArmed
 		m.pullArmed = nil
 		if kind, ok := PullKinds[key]; ok {
-			// La intención lleva la variante elegida, no "pull": es lo que
-			// explica el argv que se ve una línea más abajo en el log.
+			// The intent carries the chosen variant and not a bare "pull": that is what explains the argv shown a line below in the log.
 			cmdlog.RecordIntent(cmdlog.Entry{
 				Class:  cmdlog.ClassAction,
 				Repo:   m.nameOf(armed.path),
@@ -347,9 +278,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.startActionCmd(armed.path, kind)
 		}
 		if key == "a" {
-			// La variante AI no es un pull de git (PullKinds no la incluye):
-			// resuelve el prompt del marcador y lanza el handoff en el mismo
-			// acto.
 			cmdlog.RecordIntent(cmdlog.Entry{
 				Class:  cmdlog.ClassAction,
 				Repo:   m.nameOf(armed.path),
@@ -361,12 +289,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Selector de preview visual con git-sim: mismo contrato prefix-key que el
-	// de pull. Las teclas de variante (p/m/r) chocan con acciones reales de la
-	// tabla (pull/rescan), así que el estado armado consume la tecla antes del
-	// enrutado normal. Cualquier otra tecla desarma y NO se consume: sigue su
-	// curso normal para que la app no quede pegada esperando una segunda
-	// pulsación.
 	if m.visualArmed != nil {
 		armed := *m.visualArmed
 		m.visualArmed = nil
@@ -374,14 +296,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if o.needsUpstream && armed.upstream == "" {
 				return m, m.toastCmd(toastWarning, "no upstream")
 			}
-			// Nada que integrar: git-sim aborta con "Branch ... is already
-			// included in the history of active branch" (merge.py/rebase.py
-			// salen con 1) cuando el ref ya está en HEAD, que es exactamente
-			// lo que behind == 0 dice. Ceder la terminal para ver un error que
-			// ya sabemos es tirar el repo del dashboard. El dato viene del
-			// último fetch, así que el aviso nombra la tecla de fetch: si el
-			// remote-tracking está viejo, la simulación que se bloquea sí
-			// podía tener contenido.
+			// git-sim aborts when the ref is already in HEAD, which is exactly what behind == 0 says, so handing over the terminal to read that would throw the repo off the dashboard; the value comes from the last fetch, hence naming the fetch key.
 			if o.needsUpstream && armed.behind == 0 {
 				return m, m.toastCmd(toastWarning, fmt.Sprintf(
 					"%s already in HEAD — nothing to simulate (%s to fetch)",
@@ -398,18 +313,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// El panel del command log: sus teclas se consultan antes del enrutado
-	// normal (como los estados armados) porque j/k chocan con la navegación
-	// de la tabla. Las teclas que no son suyas siguen su curso normal: el
-	// panel es un view mode, no una modal, y así la app nunca queda
-	// encerrada aquí dentro.
+	// The panel's keys are consulted before the normal routing (like armed states) because j/k collide with table navigation; every other key continues normally, since the panel is a view mode and not a modal.
 	if m.logOpen {
 		if m.handleLogKey(key, m.layout().bodyLines) {
 			return m, nil
 		}
 	}
 
-	if m.cmdOpen { // modo comando del detalle: prioridad sobre todo
+	if m.cmdOpen {
 		switch key {
 		case "enter":
 			cmdStr := strings.TrimSpace(m.cmdInput.Value())
@@ -420,11 +331,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if !r.project.HasRepo {
 					return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 				}
-				// El comando tecleado viaja en la exec entry (con su argv
-				// `sh -c …`); la intención deja la tecla que lo lanzó.
 				m.logIntent(key, "cmd")
 				if cmdStr == "" {
-					return m, m.openShellCmd(r.project.Path) // shell interactiva
+					return m, m.openShellCmd(r.project.Path)
 				}
 				return m, m.openCmdCmd(r.project.Path, cmdStr)
 			}
@@ -445,35 +354,27 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.searchActive = false
 			m.searchInput.Blur()
-			m.search = strings.TrimSpace(m.searchInput.Value()) // confirmar
+			m.search = strings.TrimSpace(m.searchInput.Value())
 			m.clampCursor()
 			return m, nil
 		case "esc":
 			m.searchActive = false
 			m.searchInput.Blur()
 			if strings.TrimSpace(m.searchInput.Value()) == "" {
-				m.search = "" // esc en input vacío limpia el filtro
+				m.search = ""
 			}
 			m.clampCursor()
 			return m, nil
 		default:
 			in, cmd := m.searchInput.Update(msg)
 			m.searchInput = in
-			m.search = strings.TrimSpace(m.searchInput.Value()) // en vivo
+			m.search = strings.TrimSpace(m.searchInput.Value())
 			m.clampCursor()
 			return m, cmd
 		}
 	}
 
-	// El panel del log es un view mode y dentro `a` es su filtro: no se arman
-	// ahí los selectores (su aviso no se pintaría y la tecla quedaría
-	// shadowed). Abrir el panel ya suelta los estados armados; esto evita
-	// rearmarlos mientras siga abierto. `pr` va aquí aunque no sea un selector
-	// de variante: abrir el overlay con el panel delante no dibujaría el
-	// formulario (openPR lo rechaza), así que sin esta guarda la pulsación
-	// solo dejaría una intención de "pr" en el log por algo que no ocurrió.
-	// Va DESPUÉS de los inputs: con el filtro o el modo comando activos la
-	// tecla es texto, no una acción.
+	// `a` is the panel's own filter here and no selector is armed (its warning would not be painted and the key would be shadowed), and `pr` is guarded too because opening the form behind the panel would not draw it.
 	if m.logOpen {
 		switch m.actionForKey(key) {
 		case "pull", "visual", "pr":
@@ -481,14 +382,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Teclas fijas (universales, no configurables).
 	switch key {
 	case "q", "ctrl+c":
 		m.cancel()
 		return m, tea.Quit
 	case "esc":
-		// El dashboard no tiene vista que cerrar: esc cancela el aviso armado o
-		// el filtro, y el resto de estados se resuelven en sus propios handlers.
 		return m, nil
 	case "up", "k":
 		m.cursor = max(0, m.cursor-1)
@@ -504,15 +402,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Resolver acción desde keybindings configurados.
 	action := m.actionForKey(key)
 
-	// Un punto único de intención para las acciones que lanzan algo: la tecla
-	// y qué acción resolvió, sobre el repo del cursor. Las de navegación
-	// (filtro, plegado, detalle, el propio panel del log) no se registran:
-	// esto es un log de comandos, no de teclas. Las que necesitan más
-	// detalle (la variante de pull, el comando `!`, la ejecución del borrado)
-	// registran la suya donde lo saben.
+	// Single point of intent for the actions that launch something, while pure navigation (filter, fold, detail, the log panel itself) is not registered: this is a log of commands, not of keys.
 	if launchesCommand(action) {
 		m.logIntent(key, action)
 	}
@@ -539,9 +431,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetchBatchCmd(paths, cmdlog.ClassAction)
 	case "pull":
-		// La tecla de pull no ejecuta: arma el selector de variante. El
-		// guard de "no repo" se resuelve al armar, no al elegir, para no
-		// dejar un selector vivo sobre una fila donde no hay nada que hacer.
+		// The pull key does not execute, it arms: the "no repo" guard is resolved when arming, so no selector is left alive on a row with nothing to do.
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
@@ -549,9 +439,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "visual":
-		// La tecla visual tampoco ejecuta: arma el selector y captura path y
-		// upstream de la fila elegida. Sin fila o sin repo no hay nada que
-		// previsualizar: toast y no se arma.
+		// The visual key only arms too, capturing path and upstream from the chosen row; with no row or no repo there is nothing to preview, so it warns and does not arm.
 		r, ok := m.selected()
 		if !ok || !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -563,9 +451,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "pr":
-		// Abre el overlay de creación. Como `pull` y `visual`, no ejecuta: la
-		// tecla solo recoge los parámetros y es el submit del formulario quien
-		// lanza gh/glab (ver proverlay/prSubmit y prcreate.go).
+		// Like `pull` and `visual` it does not execute: the key only collects the parameters and the form's submit launches gh/glab.
 		return m.openPR()
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
@@ -581,7 +467,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.openEditorCmd(r.project.Path)
 		}
 	case "lazygit":
-		// G abre lazygit en el repo bajo el cursor.
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
 				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -602,33 +487,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "worktree_remove":
 		return m.handleWorktreeRemove()
 	case "command":
-		// `!` abre el input de comandos en el panel de la fila del cursor
-		// ($SHELL -c capturado; enter vacío = shell interactiva).
 		if r, ok := m.selected(); !ok || !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		}
 		m.cmdOpen = true
 		return m, m.cmdInput.Focus()
 	case "log":
-		// `l` abre/cierra el panel del command log. La tecla es de la
-		// sección log, así que el enrutado normal también la cierra: el
-		// panel se comprueba antes de llegar aquí.
+		// The normal routing also closes the panel (the key belongs to the log section), which is why the panel is checked before reaching here.
 		m.toggleLog()
 	}
 	return m, nil
 }
 
-// toggleFold pliega o despliega lo que haya bajo el cursor. Es la única tecla de
-// plegado (`enter`) y cubre los tres niveles, cada uno con lo que le toca:
-//
-//   - header primario o secundario → su bloque de repos.
-//   - fila de repo → sus sub-filas de worktree.
-//   - sub-fila de worktree, o repo sin worktrees → no-op: no hay nada que
-//     plegar, y plegar el grupo del padre desde la sub-fila sería una sorpresa.
-//
-// Los dos estados se persisten en el mismo `collapsed.json` (el de worktrees bajo
-// su propio prefijo), así que el plegado sobrevive entre sesiones igual que
-// antes.
+// A worktree sub-row is a deliberate no-op (folding the parent's group from there would be a surprise), and both states persist in the same collapsed.json (worktrees under their own prefix).
 func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 	e, ok := entryAt(m.entries(), m.cursor)
 	if !ok {
@@ -642,7 +513,7 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.expanded[e.r.project.Path] = !m.expanded[e.r.project.Path]
-	default: // sub-fila de worktree
+	default:
 		return m, nil
 	}
 	m.clampCursor()
@@ -650,33 +521,24 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// commandActions son las acciones que acaban en un proceso. El resto (filtro,
-// búsqueda, plegado, el panel del log, salir) solo mueven la vista, así que no
-// dejan entrada en el command log: registrar "pulsé enter para plegar" no aporta
-// nada sobre qué comandos se ejecutan.
+// Recording "I pressed enter to fold" says nothing about which commands ran, so pure view actions (filter, search, fold, the log panel, quit) leave no entry.
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true, "push": true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
 	"command": true, "worktree_remove": true, "visual": true, "pr": true,
 }
 
-// launchesCommand reporta si la acción acaba en un proceso.
 func launchesCommand(action string) bool { return commandActions[action] }
 
-// rowActions son las que además necesitan una fila: sin fila bajo el cursor no
-// se despachan, así que tampoco dejan intención (pulsar `p` sobre un header de
-// grupo no es un comando que alguien quisiera auditar).
+// Pressing `p` on a group header is not a command anybody would want audited, so actions needing a row leave no intent without one.
 var rowActions = map[string]bool{
 	"fetch": true, "pull": true, "push": true, "lazygit": true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
 	"visual": true, "pr": true,
 }
 
-// actionNeedsRow reporta si la acción requiere una fila seleccionada.
 func actionNeedsRow(action string) bool { return rowActions[action] }
 
-// actionForKey resuelve la acción para una tecla dada usando el mapa
-// de keybindings configurado. Si no hay match, devuelve "".
 func (m Model) actionForKey(key string) string {
 	for action, k := range m.cfg.Keybindings {
 		if k == key {
@@ -686,12 +548,6 @@ func (m Model) actionForKey(key string) string {
 	return ""
 }
 
-// handleWorktreeRemove gestiona la acción de borrado de worktree. Solo actúa
-// sobre una sub-fila de worktree con padre válido; si el cursor no está en una,
-// avisa y no arma nada. Sobre una sub-fila válida: si ya hay una confirmación
-// armada sobre esa misma sub-fila, ejecuta el borrado con el nivel de forzado
-// armado; si no, arma la confirmación normal. La rama del worktree nunca se
-// toca.
 func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 	e, ok := m.selectedEntry()
 	if !ok || e.kind != kindWorktree || e.parent == "" || e.wt.Path == "" {
@@ -699,11 +555,8 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		return m, m.toastCmd(toastInfo, "select a worktree")
 	}
 	if m.armed != nil && m.armed.matches(e.parent, e.wt.Path) {
-		// Segunda pulsación sobre la misma sub-fila: si el padre está libre, se
-		// lanza el borrado con el nivel de forzado armado; el banner se limpia
-		// mientras la acción está en vuelo y se marca el token del intento.
 		if cmd := m.busyActionCmd(m.armed.parent); cmd != nil {
-			return m, cmd // el armado no se rompe: no se toca
+			return m, cmd
 		}
 		armed := *m.armed
 		m.removeGen++
@@ -712,8 +565,7 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		}
 		m.removeTokens[armed.parent] = m.removeGen
 		m.armed = nil
-		// La intención del borrado: la pulsación que lo confirma, no la que
-		// lo arma (esa ya quedó registrada por el enrutado de la acción).
+		// The intent is the keystroke that confirms, not the one that armed it (that one was already logged by the action routing).
 		cmdlog.RecordIntent(cmdlog.Entry{
 			Class:  cmdlog.ClassAction,
 			Repo:   filepath.Base(armed.wtPath),
@@ -723,8 +575,7 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 		})
 		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
 	}
-	// Primera pulsación o re-armado sobre la sub-fila actual: nunca se borra
-	// un worktree distinto al que se armó.
+	// A worktree other than the armed one is never removed, neither on re-arming nor on a first press.
 	m.armed = &armedRemoval{
 		wtPath: e.wt.Path,
 		parent: e.parent,
@@ -733,18 +584,11 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// pullPrompt compone el aviso persistente del selector de variante de pull.
-// Su resolución es por tecla (p/r/f/m/a), no por flechas: el set es corto y
-// fijo, y una lista navegable obligaría a dos teclas extra para la variante que
-// se usa el 90% de las veces. El aviso sobrevive a los toasts porque es el
-// único sitio donde se anuncia qué hace cada tecla, y se pinta en keybinds
-// (sustituyendo las hints) porque comparte función con ellas.
+// Resolved by key (p/r/f/m/a) and not with arrows: the set is short and fixed, and a navigable list would cost two extra keystrokes for the variant used 90% of the time.
 func (m Model) pullPrompt() string {
 	if m.pullArmed == nil {
 		return ""
 	}
-	// Las variantes salen de pullOptions, la misma fuente que PullKinds y las
-	// etiquetas: añadir una variante no puede dejar el prompt mintiendo.
 	variants := make([]string, 0, len(pullOptions))
 	for _, o := range pullOptions {
 		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
@@ -752,7 +596,6 @@ func (m Model) pullPrompt() string {
 	return fmt.Sprintf("pull %s: %s · esc cancel", m.nameOf(m.pullArmed.path), strings.Join(variants, " · "))
 }
 
-// pullVariantLabel nombra una variante de pull para el prompt y los hints.
 func pullVariantLabel(kind string) string {
 	for _, o := range pullOptions {
 		if o.kind == kind {
@@ -762,9 +605,7 @@ func pullVariantLabel(kind string) string {
 	return kind
 }
 
-// visualPrompt compone el aviso persistente del selector visual. Las variantes
-// salen de visualOptions, la misma fuente que las etiquetas: añadir una no
-// puede dejar el prompt mintiendo.
+// Variants come from visualOptions, the same source as the labels, so a new one cannot leave the prompt lying.
 func (m Model) visualPrompt() string {
 	if m.visualArmed == nil {
 		return ""
@@ -776,8 +617,6 @@ func (m Model) visualPrompt() string {
 	return fmt.Sprintf("visual %s: %s · esc cancel", m.nameOf(m.visualArmed.path), strings.Join(variants, " · "))
 }
 
-// removePrompt compone el aviso persistente de la confirmación armada. La
-// tecla mostrada es la configurada para la acción.
 func (m Model) removePrompt() string {
 	if m.armed == nil {
 		return ""
@@ -789,29 +628,15 @@ func (m Model) removePrompt() string {
 	return fmt.Sprintf("remove worktree %s? %s to confirm, esc to cancel", m.armed.name, key)
 }
 
-// View compone la pantalla del dashboard con el overlay de toasts en la esquina
-// inferior derecha. La ficha del repo bajo el cursor va en su propia sección, así
-// que aquí no hay una vista alternativa que componer; el command log sí lo es
-// (toma el cuerpo entero) y lo resuelve renderDashboard.
 func (m Model) View() tea.View {
-	// Sin la guarda "if hay toasts": overlayToasts ya es un no-op con la lista
-	// vacía (devuelve la base intacta), y duplicar la comprobación era un sitio
-	// más donde un ">=" escondía la diferencia entre "no hay nada que pintar" y
-	// "pintar sobre la base sin cambios".
+	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
 	content := overlayToasts(m.renderDashboard(), m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
 
-// renderDashboard apila las secciones bordadas del dashboard: stats, filtro,
-// tabla, panel con la ficha del repo bajo el cursor y keybinds. Las entradas se
-// calculan una vez y se comparten entre la tabla y el panel.
-//
-// Con el command log o con el overlay de PR abiertos el cuerpo NO es la tabla:
-// es el log o el formulario, y la ficha no se dibuja (layout ya le devolvió su
-// alto). Los dos son vistas a las que se va a mirar, no información ambiente
-// como la ficha, así que no se reparten el espacio con la tabla: la sustituyen.
+// With the log or the PR overlay open the body is not the table but the log or the form (layout already gave back its height): both are views you go to look at, so they replace the table instead of sharing space with it.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
 	if m.logOpen {
@@ -824,8 +649,6 @@ func (m Model) renderDashboard() string {
 	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))
 }
 
-// toastReserve es el alto de la sección de keybinds visible, para que el
-// overlay de toasts no la tape.
 func (m Model) toastReserve() int {
 	lay := m.layout()
 	if !lay.showKeybinds {
@@ -834,15 +657,12 @@ func (m Model) toastReserve() int {
 	return keybindsChrome + lay.hintLines
 }
 
-// syncOffset ajusta el scroll para que el cursor siga visible.
 func (m *Model) syncOffset(total, window int) {
 	if total <= window {
 		m.offset = 0
 		return
 	}
-	// Dos clamps en vez de dos guardas: el cursor nunca por encima de la
-	// primera fila visible, ni por debajo de la última. El borde "cursor justo
-	// en la primera fila" reasignaría el mismo valor, así que la guarda sobra.
+	// Two clamps instead of two guards: the border case "cursor exactly on the first row" would reassign the same value, so the guard is redundant.
 	m.offset = min(m.offset, m.cursor)
 	m.offset = max(m.offset, m.cursor-window+1)
 }

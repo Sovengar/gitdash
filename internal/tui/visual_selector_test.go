@@ -1,6 +1,3 @@
-// Tests del selector de preview visual (git-sim): la tecla `v` arma, la segunda
-// tecla elige pull/merge/rebase, y cualquier otra cancela. Estilo del repo:
-// Model directo + Update, sin teatest.
 package tui
 
 import (
@@ -17,9 +14,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// withVisualEnv prepara un entorno determinista para los tests que llegan a
-// lanzar el handoff: un `git-sim` falso en PATH (nunca se ejecuta: solo se
-// comprueba el Cmd devuelto) y una caché XDG aislada donde crear el media-dir.
 func withVisualEnv(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
@@ -27,14 +21,12 @@ func withVisualEnv(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// El fake va primero para que gane al git-sim real de la máquina; el PATH
-	// original se conserva porque los fixtures necesitan `git`.
+	// The fake comes first so it beats the machine's real git-sim, and the original PATH is kept because the fixtures need `git`.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 }
 
-// La tecla `v` solo arma: captura path y upstream de la fila y no lanza nada.
-func TestVisualArmaSinEjecutar(t *testing.T) {
+func TestVisualArmsWithoutRun(t *testing.T) {
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
 	before := len(m.running)
@@ -42,110 +34,99 @@ func TestVisualArmaSinEjecutar(t *testing.T) {
 	m, _ = press(m, "v")
 
 	if m.visualArmed == nil {
-		t.Fatal("v no armó el selector visual")
+		t.Fatal("v did not arm the visual selector")
 	}
 	if m.visualArmed.path != "/tmp/old-clean" {
-		t.Errorf("path armado = %q, want /tmp/old-clean", m.visualArmed.path)
+		t.Errorf("armed path = %q, want /tmp/old-clean", m.visualArmed.path)
 	}
 	if m.visualArmed.upstream != "origin/main" {
-		t.Errorf("upstream armado = %q, want origin/main", m.visualArmed.upstream)
+		t.Errorf("armed upstream = %q, want origin/main", m.visualArmed.upstream)
 	}
 	if len(m.running) != before {
-		t.Errorf("v lanzó algo: running = %v, want sin cambios", m.running)
+		t.Errorf("v launched something: running = %v, want no changes", m.running)
 	}
 }
 
-// Sin fila bajo el cursor no hay nada que previsualizar: toast y sin armado.
-func TestVisualNoArmaSinFila(t *testing.T) {
+func TestVisualNotArmsWithoutRow(t *testing.T) {
 	m := newTestModel(t, nil, map[string]gitstatus.Snapshot{})
 	_, cmd := press(m, "v")
 	if m.visualArmed != nil {
-		t.Errorf("se armó el selector sin fila: %+v", m.visualArmed)
+		t.Errorf("the selector armed with no row: %+v", m.visualArmed)
 	}
 	if cmd == nil {
-		t.Fatal("sin fila debería avisar")
+		t.Fatal("with no row it should warn")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "no git repo") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
-// Sobre una fila sin repo git tampoco se arma.
-func TestVisualNoArmaSinRepo(t *testing.T) {
+func TestVisualNotArmsWithoutRepo(t *testing.T) {
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/no-repo-docs")
 	_, cmd := press(m, "v")
 	if m.visualArmed != nil {
-		t.Errorf("se armó el selector sobre una fila sin repo: %+v", m.visualArmed)
+		t.Errorf("the selector armed on a row without a repo: %+v", m.visualArmed)
 	}
 	if cmd == nil {
-		t.Fatal("sin repo debería avisar")
+		t.Fatal("with no repo it should warn")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "no git repo") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
-// Una tecla que no es variante desarma y sigue su curso normal: si se comiera,
-// la app quedaría pegada esperando una segunda pulsación que nunca llega.
-func TestVisualTeclaNoVarianteCancelaYSigue(t *testing.T) {
+func TestVisualKeyNotVariantCancelsAndFollows(t *testing.T) {
 	m := newPullModel(t)
 	start := m.cursor
 	m, _ = press(m, "v")
 	if m.visualArmed == nil {
-		t.Fatal("precondición: no se armó")
+		t.Fatal("precondition: it was not armed")
 	}
 	m, _ = press(m, "j")
 	if m.visualArmed != nil {
-		t.Error("el selector sigue armado tras una tecla no-variante")
+		t.Error("the selector stays armed after a non-variant key")
 	}
 	if m.cursor == start {
-		t.Error("la tecla no-variante no ejecutó su acción (cursor quieto)")
+		t.Error("the non-variant key did not run its action (cursor still)")
 	}
 	if len(m.running) != 0 {
-		t.Errorf("la cancelación lanzó algo: %v", m.running)
+		t.Errorf("the cancel launched something: %v", m.running)
 	}
 }
 
-// esc desarma sin lanzar nada.
-func TestVisualEscCancela(t *testing.T) {
+func TestVisualEscCancels(t *testing.T) {
 	m := newPullModel(t)
 	m, _ = press(m, "v")
 	m, _ = press(m, "esc")
 	if m.visualArmed != nil {
-		t.Error("esc no canceló el selector")
+		t.Error("esc did not cancel the selector")
 	}
 	if len(m.running) != 0 {
-		t.Errorf("esc lanzó algo: %v", m.running)
+		t.Errorf("esc launched something: %v", m.running)
 	}
 }
 
-// El armado fija el repo objetivo: aunque el cursor cambie, la variante resuelve
-// sobre el path y upstream capturados al armar.
-func TestVisualResuelveSobreElArmado(t *testing.T) {
+func TestVisualResolvesAboutTheArmed(t *testing.T) {
 	withVisualEnv(t)
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
 	m, _ = press(m, "v")
-	// Mover el cursor por detrás (p. ej. un rescan que reordena filas) no debe
-	// redirigir la variante.
 	m = cursorOn(t, m, "/tmp/dirty-api")
 
 	m, cmd := press(m, "p")
 	if cmd == nil {
-		t.Fatal("la variante no lanzó nada")
+		t.Fatal("the variant launched nothing")
 	}
 	if m.running["/tmp/old-clean"] != "visual" {
 		t.Errorf("running = %q, want visual en /tmp/old-clean", m.running["/tmp/old-clean"])
 	}
 	if _, ok := m.running["/tmp/dirty-api"]; ok {
-		t.Error("la variante resolvió sobre la fila bajo el cursor, no sobre la armada")
+		t.Error("the variant resolved on the row under the cursor, not on the armed one")
 	}
 }
 
-// Cada variante lanza el handoff, marca la acción en curso y desarma el
-// selector.
-func TestVisualDespachaCadaVariante(t *testing.T) {
+func TestVisualDispatchesEachVariant(t *testing.T) {
 	for _, key := range []string{"p", "m", "r"} {
 		withVisualEnv(t)
 		m := newPullModel(t)
@@ -154,20 +135,18 @@ func TestVisualDespachaCadaVariante(t *testing.T) {
 
 		m, cmd := press(m, key)
 		if m.visualArmed != nil {
-			t.Errorf("v%s dejó el selector armado", key)
+			t.Errorf("v%s left the selector armed", key)
 		}
 		if m.running["/tmp/behind-web"] != "visual" {
 			t.Errorf("v%s → running = %q, want visual", key, m.running["/tmp/behind-web"])
 		}
 		if cmd == nil {
-			t.Errorf("v%s no devolvió tea.Cmd", key)
+			t.Errorf("v%s returned no tea.Cmd", key)
 		}
 	}
 }
 
-// TestVisualArgvVariantes fija el argv exacto por variante: `pull` sin arg
-// posicional; `merge`/`rebase` con el ref del upstream.
-func TestVisualArgvVariantes(t *testing.T) {
+func TestVisualArgvVariants(t *testing.T) {
 	dir := filepath.Join("/cache", "gitdash", "git-sim")
 	cases := []struct {
 		sub      string
@@ -186,22 +165,18 @@ func TestVisualArgvVariantes(t *testing.T) {
 	}
 }
 
-// El auto-open de git-sim queda activo: ni `-d` ni `--animate` en ninguna
-// variante.
-func TestVisualArgvSinFlagsDePreview(r *testing.T) {
+func TestVisualArgvWithoutFlagsOfPreview(r *testing.T) {
 	dir := "/cache/gitdash/git-sim"
 	for _, o := range visualOptions {
 		for _, arg := range visualArgv(o.sub, "origin/main", dir) {
 			if arg == "-d" || arg == "--animate" || arg == "--output-only-path" {
-				r.Errorf("la variante %q incluye %q en el argv", o.sub, arg)
+				r.Errorf("the %q variant includes %q in the argv", o.sub, arg)
 			}
 		}
 	}
 }
 
-// El media-dir sale de la caché XDG de gitdash (nunca del repo) y se crea si
-// falta.
-func TestVisualMediaDirBajoCacheYSeCrea(t *testing.T) {
+func TestVisualHalfDirUnderCacheAndIsCreates(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 	dir, err := visualMediaDir()
@@ -213,51 +188,45 @@ func TestVisualMediaDirBajoCacheYSeCrea(t *testing.T) {
 		t.Errorf("dir = %q, want %q", dir, want)
 	}
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		t.Errorf("el media-dir no se creó: err=%v", err)
+		t.Errorf("the media-dir was not created: err=%v", err)
 	}
 }
 
-// Sin upstream, merge y rebase avisan y no lanzan nada; pull sí se permite.
-func TestVisualSinUpstream(t *testing.T) {
+func TestVisualWithoutUpstream(t *testing.T) {
 	for _, key := range []string{"m", "r"} {
 		withVisualEnv(t)
 		m := newPullModel(t)
 		m = cursorOn(t, m, "/tmp/no-up-cli")
 		m, _ = press(m, "v")
 		if m.visualArmed == nil || m.visualArmed.upstream != "" {
-			t.Fatalf("precondición: upstream armado = %+v", m.visualArmed)
+			t.Fatalf("precondition: armed upstream = %+v", m.visualArmed)
 		}
 		m, cmd := press(m, key)
 		if m.visualArmed != nil {
-			t.Errorf("%s dejó el selector armado", key)
+			t.Errorf("%s left the selector armed", key)
 		}
 		if _, busy := m.running["/tmp/no-up-cli"]; busy {
-			t.Errorf("%s lanzó sin upstream: running=%v", key, m.running)
+			t.Errorf("%s launched no-upstream: running=%v", key, m.running)
 		}
 		if cmd == nil {
-			t.Fatalf("%s sin upstream debería avisar", key)
+			t.Fatalf("%s no-upstream should warn", key)
 		}
 		if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "no upstream") {
-			t.Errorf("%s notificación = %v", key, cmd())
+			t.Errorf("%s notification = %v", key, cmd())
 		}
 	}
 
-	// pull no exige ref explícito: se lanza igual sin upstream.
 	withVisualEnv(t)
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/no-up-cli")
 	m, _ = press(m, "v")
 	m, cmd := press(m, "p")
 	if cmd == nil || m.running["/tmp/no-up-cli"] != "visual" {
-		t.Errorf("p sin upstream no lanzó: running=%v", m.running)
+		t.Errorf("p no-upstream did not launch: running=%v", m.running)
 	}
 }
 
-// Con el upstream ya integrado (behind == 0) merge y rebase avisan y NO ceden
-// la terminal: git-sim abortaría con "already included in the history", un error
-// que el snapshot ya anticipaba. Ahead > 0 sin behind también bloquea: el ref
-// sigue estando contenido en HEAD, que es la condición que comprueba git-sim.
-func TestVisualBloqueaNadaQueIntegrar(t *testing.T) {
+func TestVisualBlocksWhatIntegratesNothing(t *testing.T) {
 	for _, path := range []string{"/tmp/old-clean", "/tmp/ahead-lib"} {
 		for _, key := range []string{"m", "r"} {
 			withVisualEnv(t)
@@ -265,30 +234,28 @@ func TestVisualBloqueaNadaQueIntegrar(t *testing.T) {
 			m = cursorOn(t, m, path)
 			m, _ = press(m, "v")
 			if m.visualArmed == nil || m.visualArmed.behind != 0 {
-				t.Fatalf("precondición: armado = %+v", m.visualArmed)
+				t.Fatalf("precondition: armed = %+v", m.visualArmed)
 			}
 
 			m, cmd := press(m, key)
 			if m.visualArmed != nil {
-				t.Errorf("v%s dejó el selector armado", key)
+				t.Errorf("v%s left the selector armed", key)
 			}
 			if _, busy := m.running[path]; busy {
-				t.Errorf("v%s cedió la terminal sin nada que integrar: running=%v", key, m.running)
+				t.Errorf("v%s handed over the terminal with nothing to integrate: running=%v", key, m.running)
 			}
 			if cmd == nil {
-				t.Fatalf("v%s sin nada que integrar debería avisar", key)
+				t.Fatalf("v%s with nothing to integrate should warn", key)
 			}
 			nm, ok := cmd().(notifyMsg)
 			if !ok || !strings.Contains(nm.text, "nothing to simulate") {
-				t.Errorf("v%s notificación = %v", key, cmd())
+				t.Errorf("v%s notification = %v", key, cmd())
 			}
 		}
 	}
 }
 
-// El bloqueo es de merge/rebase, no del selector: `pull` de git-sim clona y
-// simula de verdad, sin ese chequeo, así que con behind == 0 sí se lanza.
-func TestVisualPullNoBloqueaConBehindCero(t *testing.T) {
+func TestVisualPullNotBlocksWithBehindZero(t *testing.T) {
 	withVisualEnv(t)
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
@@ -296,14 +263,11 @@ func TestVisualPullNoBloqueaConBehindCero(t *testing.T) {
 
 	m, cmd := press(m, "p")
 	if cmd == nil || m.running["/tmp/old-clean"] != "visual" {
-		t.Errorf("p con behind 0 no lanzó: running=%v", m.running)
+		t.Errorf("p with behind 0 did not launch: running=%v", m.running)
 	}
 }
 
-// El aviso nombra la tecla de fetch CONFIGURADA: el dato de behind viene del
-// último fetch, así que si el remote-tracking está viejo la simulación bloqueada
-// sí tenía contenido. Un "f" hardcodeado mentiría tras un rebind.
-func TestVisualAvisoNombraLaTeclaDeFetch(t *testing.T) {
+func TestVisualWarningNamesTheKeyOfFetch(t *testing.T) {
 	withVisualEnv(t)
 	m := newPullModel(t)
 	m.cfg.Keybindings["fetch"] = "F"
@@ -313,19 +277,18 @@ func TestVisualAvisoNombraLaTeclaDeFetch(t *testing.T) {
 
 	nm, ok := cmd().(notifyMsg)
 	if !ok {
-		t.Fatalf("notificación = %v", cmd())
+		t.Fatalf("notification = %v", cmd())
 	}
 	if !strings.Contains(nm.text, "F to fetch") {
-		t.Errorf("el aviso no nombra la tecla configurada: %q", nm.text)
+		t.Errorf("the warning does not name the configured key: %q", nm.text)
 	}
 	if strings.Contains(nm.text, "f to fetch") {
-		t.Errorf("el aviso hardcodeó la tecla por defecto: %q", nm.text)
+		t.Errorf("the warning hardcoded the default key: %q", nm.text)
 	}
 }
 
-// Sin el binario en PATH solo hay toast, sin handoff.
-func TestVisualSinBinario(t *testing.T) {
-	t.Setenv("PATH", t.TempDir()) // sin git-sim
+func TestVisualWithoutBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no git-sim
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
@@ -333,19 +296,17 @@ func TestVisualSinBinario(t *testing.T) {
 
 	m, cmd := press(m, "p")
 	if _, busy := m.running["/tmp/old-clean"]; busy {
-		t.Errorf("lanzó el handoff sin binario: running=%v", m.running)
+		t.Errorf("it launched the handoff without a binary: running=%v", m.running)
 	}
 	if cmd == nil {
-		t.Fatal("sin binario debería avisar")
+		t.Fatal("without a binary it should warn")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "git-sim not installed") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
-// Si el media-dir no se puede crear, se aborta con toast: lanzar igualmente
-// ensuciaría el repo con `git-sim_media/`.
-func TestVisualMediaDirNoCreable(t *testing.T) {
+func TestVisualHalfDirNotCreatable(t *testing.T) {
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -358,18 +319,17 @@ func TestVisualMediaDirNoCreable(t *testing.T) {
 
 	m, cmd := press(m, "p")
 	if _, busy := m.running["/tmp/old-clean"]; busy {
-		t.Errorf("lanzó el handoff con media-dir no creable: running=%v", m.running)
+		t.Errorf("it launched the handoff with an uncreatable media-dir: running=%v", m.running)
 	}
 	if cmd == nil {
-		t.Fatal("media-dir no creable debería avisar")
+		t.Fatal("an uncreatable media-dir should warn")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "media dir") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
-// Con una acción ya en curso en el repo, no se relanza.
-func TestVisualBloqueadoSiYaCorre(t *testing.T) {
+func TestVisualBlockedIfAlreadyRuns(t *testing.T) {
 	withVisualEnv(t)
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
@@ -378,22 +338,20 @@ func TestVisualBloqueadoSiYaCorre(t *testing.T) {
 
 	m, cmd := press(m, "p")
 	if m.running["/tmp/old-clean"] != "lazygit" {
-		t.Errorf("running = %q, want el original intacto", m.running["/tmp/old-clean"])
+		t.Errorf("running = %q, want the original untouched", m.running["/tmp/old-clean"])
 	}
 	if cmd == nil {
-		t.Fatal("con acción en curso debería avisar")
+		t.Fatal("with an action already running it should warn")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "already running") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
-// El aviso del selector sale por el punto único de keybinds y sustituye las
-// hints (una sola línea).
-func TestVisualPromptYKeybinds(t *testing.T) {
+func TestVisualPromptAndKeybinds(t *testing.T) {
 	m := newPullModel(t)
 	if got := m.promptLine(); got != "" {
-		t.Errorf("promptLine sin armado = %q, want vacío", got)
+		t.Errorf("promptLine with nothing armed = %q, want empty", got)
 	}
 	m = cursorOn(t, m, "/tmp/old-clean")
 	m, _ = press(m, "v")
@@ -401,39 +359,35 @@ func TestVisualPromptYKeybinds(t *testing.T) {
 	got := m.promptLine()
 	for _, want := range []string{"p pull", "m merge", "r rebase", "esc cancel", "old-clean"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("el aviso no menciona %q:\n%s", want, got)
+			t.Errorf("the warning does not mention %q:\n%s", want, got)
 		}
 	}
 	if m.keybindsLines() != 1 {
-		t.Errorf("keybindsLines = %d, want 1 (el aviso sustituye las hints)", m.keybindsLines())
+		t.Errorf("keybindsLines = %d, want 1 (the warning replaces the hints)", m.keybindsLines())
 	}
 	out := stripANSI(m.View().Content)
 	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "merge") {
-		t.Errorf("el aviso no está en keybinds:\n%s", kb)
+		t.Errorf("the warning is not in keybinds:\n%s", kb)
 	}
 }
 
-// El panel del log y el selector visual no conviven: abrirlo suelta el armado, y
-// con el panel abierto `v` no rearma (su aviso taparía la leyenda del panel).
-func TestVisualYPanelDelLog(t *testing.T) {
+func TestVisualAndPanelOfTheLog(t *testing.T) {
 	m := newPullModel(t)
 	m.visualArmed = &armedVisual{path: "/tmp/old-clean"}
 	m.toggleLog()
 	if m.visualArmed != nil {
-		t.Error("abrir el panel no soltó el selector visual")
+		t.Error("opening the panel did not drop the visual selector")
 	}
 
 	m2 := newPullModel(t)
 	m2.logOpen = true
 	m2, _ = press(m2, "v")
 	if m2.visualArmed != nil {
-		t.Error("v armó el selector con el panel del log abierto")
+		t.Error("v armed the selector with the log panel open")
 	}
 }
 
-// La vuelta del handoff registra el exec con el argv real (media-dir + ref) y
-// Dur=0, como los demás handoffs.
-func TestVisualExecDoneRegistra(t *testing.T) {
+func TestVisualExecDoneRecords(t *testing.T) {
 	m, rec := logModel(t)
 	path := "/tmp/old-clean"
 	argv := []string{"git-sim", "--media-dir", "/cache/gitdash/git-sim", "merge", "origin/main"}
@@ -450,7 +404,7 @@ func TestVisualExecDoneRegistra(t *testing.T) {
 		got = &cp
 	}
 	if got == nil {
-		t.Fatal("no se registró el exec de visual")
+		t.Fatal("the visual exec was not recorded")
 	}
 	if !reflect.DeepEqual(got.Argv, argv) {
 		t.Errorf("argv = %#v, want %#v", got.Argv, argv)
@@ -466,9 +420,7 @@ func TestVisualExecDoneRegistra(t *testing.T) {
 	}
 }
 
-// Elegir la variante deja la intención (tecla + acción + repo) al margen del
-// exec, que solo llega al volver del handoff.
-func TestVisualIntencionRegistrada(t *testing.T) {
+func TestVisualIntentRecorded(t *testing.T) {
 	withVisualEnv(t)
 	m, rec := logModel(t)
 	m = cursorOn(t, m, "/tmp/behind-web")
@@ -483,44 +435,36 @@ func TestVisualIntencionRegistrada(t *testing.T) {
 		}
 	}
 	if variantIntent == nil {
-		t.Fatal("no se registró la intención de la variante")
+		t.Fatal("the variant's intent was not recorded")
 	}
 	if variantIntent.Action != "visual" || variantIntent.Repo != "behind-web" {
-		t.Errorf("intención = %+v", variantIntent)
+		t.Errorf("intent = %+v", variantIntent)
 	}
 }
 
-// El selector visual no consulta ni bloquea por un rebase a medias: git-sim no
-// muta el repo real, así que previsualizar un rebase a medio resolver es útil.
-func TestVisualNoBloqueaPorRebaseEnCurso(t *testing.T) {
+// The visual selector neither consults nor blocks on a rebase in progress: git-sim does not mutate the real repo, so previewing a half-resolved rebase is useful.
+func TestVisualNotBlocksForRebaseInCourse(t *testing.T) {
 	withVisualEnv(t)
-	dir, _ := testutil.NewRepo(t, true) // con upstream origin/main
+	dir, _ := testutil.NewRepo(t, true) // with upstream origin/main
 	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if !gitstatus.RebaseInProgress(context.Background(), dir) {
-		t.Fatal("precondición: el repo no reporta rebase en curso")
+		t.Fatal("precondition: the repo does not report a rebase in progress")
 	}
 
-	// El snapshot va con behind > 0 a propósito: con behind == 0 el guard de
-	// no-op bloquea antes de llegar al rebase, y el test probaría el bloqueo
-	// equivocado.
 	p := proj("demo", dir, true)
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snapBehind(1)})
 	m = cursorOn(t, m, dir)
 	m, _ = press(m, "v")
 	m, cmd := press(m, "m")
 	if cmd == nil || m.running[dir] != "visual" {
-		t.Errorf("el rebase en curso bloqueó el preview: running=%v cmd=%v", m.running, cmd != nil)
+		t.Errorf("the rebase in progress blocked the preview: running=%v cmd=%v", m.running, cmd != nil)
 	}
 }
 
-// Un subcomando que no es de la tabla no puede tractarse como variante con ref:
-// `visualArgv` lo deja sin argumento posicional en vez de inventarle uno. El
-// camino no se alcanza desde la UI (la segunda tecla solo puede ser una
-// variante), asi que se fija aqui para que la tabla y el argv no se
-// desincronicen en silencio.
-func TestVisualArgvSubDesconocidoNoInventaRef(t *testing.T) {
+// The path is unreachable from the UI (the second key can only be a variant), so it is pinned here for the table and the argv not to desync silently.
+func TestVisualArgvSubUnknownNotInventsRef(t *testing.T) {
 	dir := "/cache/gitdash/git-sim"
 	got := visualArgv("squash", "origin/main", dir)
 	want := []string{"git-sim", "--media-dir", dir, "squash"}
@@ -529,13 +473,11 @@ func TestVisualArgvSubDesconocidoNoInventaRef(t *testing.T) {
 	}
 }
 
-// Sin un directorio de cache no hay media-dir, y sin media-dir git-sim escribe
-// `git-sim_media/` DENTRO del repo (y lo dejaria dirty). El fallo se propaga
-// para que quien llama avise y no lance.
-func TestVisualMediaDirSinCacheDirDaError(t *testing.T) {
+// Without a cache directory there is no media-dir, and without media-dir git-sim writes `git-sim_media/` INSIDE the repo (leaving it dirty); the failure propagates so the caller warns instead of launching.
+func TestVisualHalfDirWithoutCacheDirGivesError(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("HOME", "")
 	if dir, err := visualMediaDir(); err == nil {
-		t.Errorf("visualMediaDir = %q, want error sin directorio de cache", dir)
+		t.Errorf("visualMediaDir = %q, want an error with no cache directory", dir)
 	}
 }

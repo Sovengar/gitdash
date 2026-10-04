@@ -1,5 +1,3 @@
-// Tests del layout por secciones bordadas, el presupuesto de alto y la
-// migración del feedback de acciones a toasts.
 package tui
 
 import (
@@ -15,44 +13,38 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// layoutTest llama a computeLayout sin mínimo de formulario. Casi todos los
-// tests de layout son del dashboard normal, donde no hay overlay de PR abierto:
-// el mínimo solo existe para que el formulario no se dibuje a medias, así que
-// dejarlo explícito en 0 mantiene los tests hablando del reparto de siempre.
 func layoutTest(height int, hasFilter bool, keybinds int, keep bool) layout {
 	return computeLayout(height, hasFilter, keybinds, keep, 0)
 }
 
-func TestDashboardSeccionesBordeadas(t *testing.T) {
+func TestDashboardSectionsBordered(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	out := m.renderDashboard()
 	lines := strings.Split(out, "\n")
 	if len(lines) != m.height {
-		t.Errorf("líneas = %d, want %d (alto exacto de la terminal)", len(lines), m.height)
+		t.Errorf("lines = %d, want %d (the exact height of the terminal)", len(lines), m.height)
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != m.width {
-			t.Errorf("línea %d ancho = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
+			t.Errorf("line %d width = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
 		}
 	}
 	plano := stripANSI(out)
 	for _, title := range []string{"╭ gitdash ", "╭ repos ", "╭ keybinds "} {
 		if !strings.Contains(plano, title) {
-			t.Errorf("falta la sección %q:\n%s", title, plano)
+			t.Errorf("the section %q is missing:\n%s", title, plano)
 		}
 	}
 	for _, glyph := range []string{"╭", "╮", "╰", "╯"} {
 		if !strings.Contains(plano, glyph) {
-			t.Errorf("falta el glifo redondeado %q", glyph)
+			t.Errorf("the rounded glyph %q is missing", glyph)
 		}
 	}
 }
 
-// La tabla scrollea dentro de su sección: la fila bajo el cursor permanece
-// visible y las demás secciones siguen presentes.
-func TestTablaScrolleaEnSuSeccion(t *testing.T) {
+func TestTableScrollsInItsSection(t *testing.T) {
 	var projects []discovery.Project
 	states := map[string]gitstatus.Snapshot{}
 	for i := 0; i < 20; i++ {
@@ -66,21 +58,17 @@ func TestTablaScrolleaEnSuSeccion(t *testing.T) {
 
 	out := stripANSI(m.renderDashboard())
 	if !strings.Contains(out, "repo19") {
-		t.Errorf("la fila bajo el cursor no está visible:\n%s", out)
+		t.Errorf("the row under the cursor is not visible:\n%s", out)
 	}
 	if !strings.Contains(out, "╭ gitdash ") || !strings.Contains(out, "╭ keybinds ") {
-		t.Errorf("las demás secciones no siguen visibles:\n%s", out)
+		t.Errorf("the later sections are no longer visible:\n%s", out)
 	}
 }
 
-// Terminal baja degrada secciones en orden antes de romper el layout. El panel
-// de preview es lo primero que cede (se encoge hasta su share y después se va
-// entero), y mientras está la tabla no baja de minBodyLines.
-func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
-	// Altura amplia: todo visible y el panel con su share del alto libre.
+func TestLayoutDegradesInTerminalDrops(t *testing.T) {
 	wide := layoutTest(40, false, defaultHintLines, false)
 	if !wide.showStats || !wide.showKeybinds || wide.hintLines != defaultHintLines {
-		t.Errorf("altura amplia: %+v, want todo visible", wide)
+		t.Errorf("tall layout: %+v, want everything visible", wide)
 	}
 	if wide.previewLines < minPreviewLines {
 		t.Errorf("previewLines = %d, want >= %d", wide.previewLines, minPreviewLines)
@@ -90,110 +78,88 @@ func TestLayoutDegradaEnTerminalBaja(t *testing.T) {
 		t.Errorf("bodyLines = %d, want %d", wide.bodyLines, want)
 	}
 
-	// con menos hints configuradas, la reserva no sobra alto (LOW: reserva vs
-	// HintBarLines): el panel crece con el hueco que dejan.
-	pocas := layoutTest(40, false, 1, false)
-	if pocas.hintLines != 1 {
-		t.Errorf("keybindsLines=1: hintLines = %d, want 1", pocas.hintLines)
+	narrow := layoutTest(40, false, 1, false)
+	if narrow.hintLines != 1 {
+		t.Errorf("keybindsLines=1: hintLines = %d, want 1", narrow.hintLines)
 	}
-	if pocas.previewLines <= wide.previewLines {
-		t.Errorf("con 1 hint el panel = %d, want > %d (se lleva el hueco libre)",
-			pocas.previewLines, wide.previewLines)
+	if narrow.previewLines <= wide.previewLines {
+		t.Errorf("with 1 hint the panel = %d, want > %d (it takes the free room)",
+			narrow.previewLines, wide.previewLines)
 	}
 
-	// altura intermedia: se recortan las hints antes de ocultar secciones
 	mid := layoutTest(10, false, defaultHintLines, false)
 	if mid.hintLines != 1 || !mid.showKeybinds {
-		t.Errorf("h=10: %+v, want keybinds con 1 hint", mid)
+		t.Errorf("h=10: %+v, want keybinds with 1 hint", mid)
 	}
 
-	// más baja: keybinds fuera, stats aún visible
-	baja := layoutTest(9, false, defaultHintLines, false)
-	if baja.showKeybinds || !baja.showStats {
-		t.Errorf("h=9: %+v, want keybinds oculto y stats visible", baja)
+	short := layoutTest(9, false, defaultHintLines, false)
+	if short.showKeybinds || !short.showStats {
+		t.Errorf("h=9: %+v, want keybinds hidden and stats visible", short)
 	}
 
-	// muy baja: stats fuera; la tabla conserva al menos una fila
 	for h := 0; h <= 8; h++ {
 		l := layoutTest(h, false, defaultHintLines, false)
 		if l.bodyLines < 1 {
 			t.Errorf("h=%d: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
 		if h <= 6 && l.showStats {
-			t.Errorf("h=%d: stats visible en terminal demasiado baja: %+v", h, l)
+			t.Errorf("h=%d: stats visible on a terminal that is too short: %+v", h, l)
 		}
 	}
 
-	// con keepKeybinds (aviso armado), keybinds nunca se degrada: es la única
-	// fuente de las teclas que espera la app. Se recortan stats y panel antes.
 	for h := 0; h <= 8; h++ {
 		l := layoutTest(h, false, 1, true)
 		if !l.showKeybinds || l.hintLines != 1 {
-			t.Errorf("h=%d con keepKeybinds: keybinds degradada: %+v", h, l)
+			t.Errorf("h=%d with keepKeybinds: keybinds degraded: %+v", h, l)
 		}
 		if l.bodyLines < 1 {
-			t.Errorf("h=%d con keepKeybinds: bodyLines = %d, want >= 1", h, l.bodyLines)
+			t.Errorf("h=%d with keepKeybinds: bodyLines = %d, want >= 1", h, l.bodyLines)
 		}
 	}
-	// Y sin keepKeybinds se comporta como antes: degrada antes de crunchar.
 	for h := 0; h <= 8; h++ {
 		if l := layoutTest(h, false, 1, false); l.hintLines != 0 || l.showKeybinds {
-			t.Errorf("h=%d sin keepKeybinds: keybinds debería caerse: %+v", h, l)
+			t.Errorf("h=%d without keepKeybinds: keybinds should drop: %+v", h, l)
 		}
 	}
 }
 
-// El panel se va antes que las secciones que ya existían: por debajo del alto en
-// el que cabe sin costarle nada, el dashboard es exactamente el que había antes
-// de la feature.
-func TestPreviewPanelEsLoUltimoEnCaerse(t *testing.T) {
-	// Con room: panel + todo lo demás.
+func TestPreviewPanelIsItLastInFall(t *testing.T) {
 	if l := layoutTest(30, false, defaultHintLines, false); l.previewLines == 0 {
-		t.Errorf("h=30: sin panel: %+v", l)
+		t.Errorf("h=30: no panel: %+v", l)
 	}
-	// El panel más pequeño que entra es el de la cabecera de la ficha, y solo
-	// si a la tabla le quedan minBodyLines filas. La cabecera son detailHeadLines
-	// líneas, así que el alto mínimo se deriva de ella en vez de ir a fuego.
+	// The smallest panel that fits is the card's header, and only if minBodyLines rows are left for the table; the header is detailHeadLines lines, so the minimum derives from it instead of being hardcoded.
 	first := minPanelHeight(t)
 	if l := layoutTest(first, false, defaultHintLines, false); l.previewLines != detailHeadLines {
 		t.Errorf("h=%d: previewLines = %d, want %d", first, l.previewLines, detailHeadLines)
 	}
-	// Por debajo, nada de panel y el reparto de siempre: hints y stats intactos y
-	// la tabla con lo que sobra.
 	for h := 14; h < first; h++ {
 		l := layoutTest(h, false, defaultHintLines, false)
 		if l.previewLines != 0 {
-			t.Errorf("h=%d: previewLines = %d, want 0 (el panel no puede pedir más)", h, l.previewLines)
+			t.Errorf("h=%d: previewLines = %d, want 0 (the panel cannot ask for more)", h, l.previewLines)
 		}
 		if !l.showStats || !l.showKeybinds || l.hintLines != defaultHintLines {
-			t.Errorf("h=%d: el panel se llevó algo que ya existía: %+v", h, l)
+			t.Errorf("h=%d: the panel took something that already existed: %+v", h, l)
 		}
 		want := h - (statsSectionLines + tableChrome + keybindsChrome + defaultHintLines)
 		if l.bodyLines != want {
 			t.Errorf("h=%d: bodyLines = %d, want %d", h, l.bodyLines, want)
 		}
 	}
-	// Y con el panel presente nunca se recorta una hint ni se oculta una sección.
 	for h := first; h <= 80; h++ {
 		l := layoutTest(h, false, defaultHintLines, false)
 		if l.previewLines == 0 {
 			continue
 		}
 		if !l.showStats || !l.showKeybinds || l.hintLines != defaultHintLines {
-			t.Errorf("h=%d: panel con previewLines=%d pero el resto degradado: %+v", h, l.previewLines, l)
+			t.Errorf("h=%d: panel with previewLines=%d but the rest degraded: %+v", h, l.previewLines, l)
 		}
 		if l.bodyLines < minBodyLines {
-			t.Errorf("h=%d: panel con previewLines=%d y bodyLines=%d: %+v", h, l.previewLines, l.bodyLines, l)
+			t.Errorf("h=%d: panel with previewLines=%d and bodyLines=%d: %+v", h, l.previewLines, l.bodyLines, l)
 		}
 	}
 }
 
-// La suma de las secciones tiene que dar la altura de la terminal en cualquier
-// alto y combinación de flags: si no, alguna caja se sale de la pantalla (o
-// empuja los keybinds fuera). La única excepción es el suelo del cuerpo central
-// (una fila aunque no quede nada más), y por eso la exactitud se exige solo
-// cuando el cuerpo central no está en ese suelo.
-func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
+func TestLayoutHeightExactInAllTheHeights(t *testing.T) {
 	for h := 0; h <= 60; h++ {
 		for _, tc := range []struct {
 			name      string
@@ -203,9 +169,9 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 		}{
 			{"dashboard", false, defaultHintLines, false},
 			{"filtro", true, defaultHintLines, false},
-			{"armado", false, 1, true},
-			{"armado+filtro", true, 1, true},
-			{"sin hints", false, 0, false},
+			{"armed", false, 1, true},
+			{"armed+filter", true, 1, true},
+			{"no hints", false, 0, false},
 		} {
 			l := layoutTest(h, tc.hasFilter, tc.keybinds, tc.keep)
 			total := l.altoTotal(tc.hasFilter)
@@ -213,19 +179,17 @@ func TestLayoutAltoExactoEnTodasLasAlturas(t *testing.T) {
 				t.Errorf("%s h=%d: bodyLines = %d, want >= 1", tc.name, h, l.bodyLines)
 			}
 			if total < h {
-				t.Errorf("%s h=%d: alto total = %d < %d (hueco en la vista): %+v",
+				t.Errorf("%s h=%d: total height = %d < %d (a gap in the view): %+v",
 					tc.name, h, total, h, l)
 			}
 			if l.bodyLines > 1 && total != h {
-				t.Errorf("%s h=%d: alto total = %d, want %d: %+v", tc.name, h, total, h, l)
+				t.Errorf("%s h=%d: total height = %d, want %d: %+v", tc.name, h, total, h, l)
 			}
 		}
 	}
 }
 
-// minPanelHeight es el alto de terminal más bajo en el que el panel de preview
-// entra. Se busca en vez de estar a fuego porque depende de detailHeadLines: si
-// la cabecera de la ficha crece o encoge, el suelo se mueve solo.
+// Searched instead of hardcoded because it depends on detailHeadLines: if the card's header grows or shrinks, the floor moves on its own.
 func minPanelHeight(t *testing.T) int {
 	t.Helper()
 	for h := 0; h <= 120; h++ {
@@ -233,12 +197,10 @@ func minPanelHeight(t *testing.T) int {
 			return h
 		}
 	}
-	t.Fatal("el panel no entra a ninguna altura")
+	t.Fatal("the panel fits at no height")
 	return 0
 }
 
-// altoTotal suma todo lo que el layout reserva (cajas y bordes incluidos) más el
-// cuerpo central. Es la altura que la vista tiene que medir.
 func (l layout) altoTotal(hasFilter bool) int {
 	n := tableChrome
 	if hasFilter {
@@ -256,28 +218,20 @@ func (l layout) altoTotal(hasFilter bool) int {
 	return n + l.bodyLines
 }
 
-// El presupuesto en los altos degenerados es una cuenta justa: cada sección se
-// queda mientras quepa dejando al menos una línea de cuerpo. Los casos que
-// importan son los de encaje EXACTO, donde la sección cabe justo, porque ahí es
-// donde un "> " mal puesto esconde una sección que sí cabe.
-func TestLayoutEnElEncajeExacto(t *testing.T) {
-	// h=7: chrome de la tabla (3) + stats (3) = 6, y sobra exactamente una
-	// línea de cuerpo. Stats se quedan (caben justas); una línea menos ya no.
+// The cases that matter are the EXACT fits, where the section just fits, because that is where a `> ` in the wrong place hides a section that does fit.
+func TestLayoutInTheFitExact(t *testing.T) {
 	if l := layoutTest(7, false, defaultHintLines, false); !l.showStats {
-		t.Errorf("h=7: stats ocultas aunque caben justas: %+v", l)
+		t.Errorf("h=7: stats hidden even though they just fit: %+v", l)
 	}
 	if l := layoutTest(6, false, defaultHintLines, false); l.showStats {
-		t.Errorf("h=6: stats visibles sin sitio: %+v", l)
+		t.Errorf("h=6: stats visible with no room: %+v", l)
 	}
 
-	// El share del panel es 2/5 del alto LIBRE (el que no ocupan el chrome y las
-	// secciones), con minPreviewLines por abajo. A h=41 le quedan 28 líneas
-	// libres, así que el panel se lleva 28*2/5 = 11 y a la tabla le sobran 17.
-	// El 2/5 es el contrato: no un "casi la mitad" que qualquer cálculo dé.
+	// The 2/5 is the contract, not a "nearly half" that any calculation could produce.
 	const h = 41
 	free := h - (tableChrome + statsSectionLines + keybindsChrome + defaultHintLines + previewChrome)
 	if want := free * previewShare / 5; want <= minPreviewLines {
-		t.Fatalf("h=%d: free=%d da un share de %d, que no ejercita el 2/5 (caería al mínimo)", h, free, want)
+		t.Fatalf("h=%d: free=%d gives a share of %d, which does not exercise the 2/5 (it would fall to the minimum)", h, free, want)
 	}
 	l := layoutTest(h, false, defaultHintLines, false)
 	if l.previewLines != free*previewShare/5 {
@@ -287,12 +241,7 @@ func TestLayoutEnElEncajeExacto(t *testing.T) {
 		t.Errorf("h=%d: bodyLines = %d, want %d", h, l.bodyLines, want)
 	}
 
-	// El panel se queda con SU SHARE como tope (es aditivo: no se come el
-	// dashboard entero) y solo baja de ahí cuando el resto no lo permite. En
-	// este tramo es la tabla la que marca el techo: el panel crece hasta
-	// dejarle EXACTAMENTE minBodyLines filas, ni una menos. Una tabla más
-	// grande o más pequeña seguiría "cayendo bien" en cualquier test que solo
-	// compruebe que el panel cabe, así que el borde se mira de cerca.
+	// A bigger or smaller table would also "fall fine" in any test only checking that the panel fits, so the edge is looked at closely.
 	for h := 14; h <= 40; h++ {
 		got := layoutTest(h, false, defaultHintLines, false)
 		if got.previewLines == 0 {
@@ -300,25 +249,21 @@ func TestLayoutEnElEncajeExacto(t *testing.T) {
 		}
 		top := panelHeight(h, tableChrome, 0, defaultHintLines)
 		if got.previewLines > top {
-			t.Errorf("h=%d: previewLines = %d, want <= %d (el share manda)", h, got.previewLines, top)
+			t.Errorf("h=%d: previewLines = %d, want <= %d (the share rules)", h, got.previewLines, top)
 		}
-		// Con el panel en su tope no había nada más grande que buscar; si está
-		// por debajo, una línea más tiene que ser la que no cupiera.
-		if mas := fitLayout(h, tableChrome, 0, got.previewLines+1, defaultHintLines, false); got.previewLines < top &&
-			mas.bodyLines >= minBodyLines && mas.mismaChromeQue(got) {
-			t.Errorf("h=%d: el panel se quedó en %d pudiendo llegar a %d (bodyLines=%d, top=%d)",
-				h, got.previewLines, got.previewLines+1, mas.bodyLines, top)
+		if more := fitLayout(h, tableChrome, 0, got.previewLines+1, defaultHintLines, false); got.previewLines < top &&
+			more.bodyLines >= minBodyLines && more.mismaChromeQue(got) {
+			t.Errorf("h=%d: the panel stayed at %d when it could reach %d (bodyLines=%d, top=%d)",
+				h, got.previewLines, got.previewLines+1, more.bodyLines, top)
 		}
 		if got.previewLines < top && got.bodyLines != minBodyLines {
-			t.Errorf("h=%d: panel en %d por debajo de su share %d con bodyLines=%d, want exactamente %d",
+			t.Errorf("h=%d: panel at %d below its share %d with bodyLines=%d, want exactly %d",
 				h, got.previewLines, top, got.bodyLines, minBodyLines)
 		}
 	}
 }
 
-// Terminal estrecha: el contenido se recorta al interior, sin wrap ni cajas
-// más altas que el presupuesto.
-func TestTerminalEstrechaNoRompe(t *testing.T) {
+func TestTerminalNarrowNotBreaks(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.width = 24
@@ -326,51 +271,47 @@ func TestTerminalEstrechaNoRompe(t *testing.T) {
 	out := m.renderDashboard()
 	lines := strings.Split(out, "\n")
 	if len(lines) != m.height {
-		t.Errorf("líneas = %d, want %d (sin wrap)", len(lines), m.height)
+		t.Errorf("lines = %d, want %d (no wrap)", len(lines), m.height)
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != m.width {
-			t.Errorf("línea %d ancho = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
+			t.Errorf("line %d width = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
 		}
 	}
 }
 
-// La sección de filtro aparece solo con filtro activo o confirmado.
-func TestSeccionFiltroCondicional(t *testing.T) {
+func TestSectionFilterConditional(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	if strings.Contains(stripANSI(m.renderDashboard()), "╭ filter ") {
-		t.Error("la sección de filtro se ve sin filtro activo")
+		t.Error("the filter section shows with no active filter")
 	}
 
 	m, _ = press(m, "/")
 	out := stripANSI(m.renderDashboard())
 	if !strings.Contains(out, "╭ filter ") {
-		t.Errorf("no apareció la sección de filtro:\n%s", out)
+		t.Errorf("the filter section did not appear:\n%s", out)
 	}
 	if !strings.Contains(out, "[/") || !strings.Contains(out, "name/group") {
-		t.Errorf("el input en vivo no se muestra:\n%s", out)
+		t.Errorf("the live input is not shown:\n%s", out)
 	}
 
 	m, _ = press(m, "a")
 	m, _ = press(m, "enter")
 	if out := stripANSI(m.renderDashboard()); !strings.Contains(out, "[/a]") {
-		t.Errorf("el filtro confirmado no se muestra:\n%s", out)
+		t.Errorf("the confirmed filter is not shown:\n%s", out)
 	}
 
-	// limpiar el filtro oculta la sección y devuelve el alto a la tabla
 	m, _ = press(m, "/")
 	m, _ = press(m, "backspace")
 	m, _ = press(m, "esc")
 	if strings.Contains(stripANSI(m.renderDashboard()), "╭ filter ") {
-		t.Error("la sección de filtro no desapareció al limpiar")
+		t.Error("the filter section did not disappear when cleared")
 	}
 }
 
-// El indicador de actividad sobrevive a anchos estrechos (va primero en stats)
-// y nombra la acción en curso sin duplicarla.
-func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
+func TestIndicatorActivityWidthNarrow(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.width = 40
@@ -378,45 +319,39 @@ func TestIndicadorActividadAnchoEstrecho(t *testing.T) {
 
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(out, "pull old-clean") {
-		t.Errorf("el indicador de acción en curso no sobrevive a width=40:\n%s", out)
+		t.Errorf("the running-action indicator does not survive width=40:\n%s", out)
 	}
-	// "sin duplicar" se refiere al indicador: el hint bar menciona la tecla
-	// pull legítimamente, así que se cuenta la etiqueta del indicador, no la
-	// palabra suelta.
+	// "Without duplicating" refers to the indicator: the hint bar legitimately mentions the pull key, so the indicator's label is counted, not the bare word.
 	if n := strings.Count(out, "pull old-clean"); n != 1 {
-		t.Errorf("el indicador aparece %d veces, want 1 (sin duplicar):\n%s", n, out)
+		t.Errorf("the indicator appears %d times, want 1 (no duplication):\n%s", n, out)
 	}
 	for i, l := range strings.Split(m.View().Content, "\n") {
 		if w := ansi.StringWidth(l); w != m.width {
-			t.Errorf("línea %d ancho = %d, want %d", i, w, m.width)
+			t.Errorf("line %d width = %d, want %d", i, w, m.width)
 		}
 	}
 }
 
-// En anchos estrechos la tabla omite columnas por la derecha en vez de
-// truncarlas a medias (la cabecera nunca desborda el borde).
-func TestCabeceraOmiteColumnasEstrecho(t *testing.T) {
+func TestHeaderSkipsColumnsNarrow(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.width = 60
 	content := m.renderDashboard()
 	out := stripANSI(content)
 	if strings.Contains(out, "FETCH") {
-		t.Errorf("FETCH no debería caber a width=60:\n%s", out)
+		t.Errorf("FETCH should not fit at width=60:\n%s", out)
 	}
 	if !strings.Contains(out, "NAME") || !strings.Contains(out, "BRANCH") {
-		t.Errorf("faltan columnas básicas:\n%s", out)
+		t.Errorf("basic columns are missing:\n%s", out)
 	}
 	for i, l := range strings.Split(content, "\n") {
 		if w := ansi.StringWidth(l); w > m.width {
-			t.Errorf("línea %d ancho = %d > %d", i, w, m.width)
+			t.Errorf("line %d width = %d > %d", i, w, m.width)
 		}
 	}
 }
 
-// El fallo de una acción conserva el hint accionable en el toast renderizado,
-// incluso cuando el mensaje excede el ancho máximo del toast.
-func TestToastDeFalloConHintVisible(t *testing.T) {
+func TestToastOfFailureWithHintVisible(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	updated, _ := m.Update(actionMsg{
@@ -427,35 +362,32 @@ func TestToastDeFalloConHintVisible(t *testing.T) {
 	m = updated.(Model)
 
 	rendered := collapse(strings.Join(m.toasts.lines(), "\n"))
-	if !strings.Contains(rendered, "divergió") {
-		t.Errorf("el hint no queda visible en el toast renderizado:\n%s", rendered)
+	if !strings.Contains(rendered, "diverged") {
+		t.Errorf("the hint is not visible in the rendered toast:\n%s", rendered)
 	}
 }
 
-// La línea de notificación permanente ya no existe.
-func TestSinLineaPermanenteDeNotificacion(t *testing.T) {
+func TestWithoutLinePermanentOfNotification(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	out := stripANSI(m.renderDashboard())
 	if strings.Contains(out, strings.Repeat("─", m.width)) {
-		t.Errorf("se sigue dibujando el separador de la barra inferior:\n%s", out)
+		t.Errorf("the bottom bar's separator is still drawn:\n%s", out)
 	}
 
-	// una notificación no deja línea permanente: expira y desaparece
 	updated, _ := m.Update(notifyMsg{text: "boom", level: toastError})
 	m = updated.(Model)
 	if len(m.toasts.toasts) != 1 {
-		t.Fatalf("la notificación no se convirtió en toast")
+		t.Fatalf("the notification did not become a toast")
 	}
 	m.toasts.toasts[0].created = time.Now().Add(-toastDuration() - time.Second)
 	m.toasts.update()
 	if strings.Contains(stripANSI(m.View().Content), "boom") {
-		t.Error("la notificación quedó en pantalla de forma permanente")
+		t.Error("the notification stayed on screen permanently")
 	}
 }
 
-// Una acción terminada genera un toast con el nivel correcto.
-func TestAccionGeneraToast(t *testing.T) {
+func TestActionGeneratesToast(t *testing.T) {
 	projects, states := fixtureProjects()
 
 	ok, _ := newTestModel(t, projects, states).Update(actionMsg{
@@ -463,7 +395,7 @@ func TestAccionGeneraToast(t *testing.T) {
 	})
 	m := ok.(Model)
 	if len(m.toasts.toasts) != 1 || m.toasts.toasts[0].level != toastSuccess {
-		t.Fatalf("acción ok: %+v, want toast de éxito", m.toasts.toasts)
+		t.Fatalf("action ok: %+v, want a success toast", m.toasts.toasts)
 	}
 
 	ko, _ := newTestModel(t, projects, states).Update(actionMsg{
@@ -471,78 +403,73 @@ func TestAccionGeneraToast(t *testing.T) {
 	})
 	m = ko.(Model)
 	if len(m.toasts.toasts) != 1 || m.toasts.toasts[0].level != toastError {
-		t.Fatalf("acción ko: %+v, want toast de error", m.toasts.toasts)
+		t.Fatalf("action ko: %+v, want an error toast", m.toasts.toasts)
 	}
-	if txt := m.toasts.toasts[0].text; !strings.Contains(txt, "failed") || !strings.Contains(txt, "divergió") {
-		t.Errorf("el toast de error no trae motivo/hint: %q", txt)
+	if txt := m.toasts.toasts[0].text; !strings.Contains(txt, "failed") || !strings.Contains(txt, "diverged") {
+		t.Errorf("the error toast carries no reason/hint: %q", txt)
 	}
 }
 
-// Las acciones en curso siguen visibles dentro de la sección de stats.
-func TestAccionEnCursoVisibleEnStats(t *testing.T) {
+func TestActionInCourseVisibleInStats(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.running["/tmp/old-clean"] = "pull"
 
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(out, "pull old-clean") {
-		t.Errorf("la acción en curso no se muestra en stats:\n%s", out)
+		t.Errorf("the running action is not shown in stats:\n%s", out)
 	}
 }
 
-// Un fallo de fetch o un error de roots se reportan como toast, sin línea
-// permanente en el dashboard.
-func TestErroresComoToast(t *testing.T) {
+func TestErrorsAsToast(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	m2, _ := m.Update(fetchStateMsg{path: "/tmp/old-clean", state: "failed", err: "no route"})
 	m = m2.(Model)
 	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastError || !strings.Contains(last.text, "no route") {
-		t.Errorf("fetch failed no generó toast de error: %+v", last)
+		t.Errorf("fetch failed generated no error toast: %+v", last)
 	}
 
 	m3, _ := m.Update(scanProjectsMsg{projects: projects, note: "roots ilegibles"})
 	m = m3.(Model)
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastError || !strings.Contains(last.text, "roots ilegibles") {
-		t.Errorf("error de roots no generó toast de error: %+v", last)
+		t.Errorf("the roots error generated no error toast: %+v", last)
 	}
 	if strings.Contains(stripANSI(m.renderDashboard()), "roots ilegibles") {
-		t.Error("el error de roots quedó como línea permanente")
+		t.Error("the roots error stayed as a permanent line")
 	}
 }
 
-// Los toasts se apilan en overlay y no tapan la sección de keybinds.
-func TestToastsNoTapanKeybinds(t *testing.T) {
+func TestToastsNotCoverKeybinds(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	for i := 0; i < 3; i++ {
-		m.toasts.showInfo(fmt.Sprintf("evento %d", i))
+		m.toasts.showInfo(fmt.Sprintf("event %d", i))
 	}
 
 	out := stripANSI(m.View().Content)
 	lines := strings.Split(out, "\n")
 	if len(lines) != m.height {
-		t.Fatalf("líneas = %d, want %d", len(lines), m.height)
+		t.Fatalf("lines = %d, want %d", len(lines), m.height)
 	}
 	if !strings.Contains(out, "╭ keybinds ") || !strings.Contains(out, "╰") {
-		t.Errorf("la sección de keybinds se degradó:\n%s", out)
+		t.Errorf("the keybinds section degraded:\n%s", out)
 	}
 	for _, hint := range []string{"j/k move", "f fetch", "q quit"} {
 		if !strings.Contains(out, hint) {
-			t.Errorf("hint %q tapada por los toasts:\n%s", hint, out)
+			t.Errorf("hint %q covered by the toasts:\n%s", hint, out)
 		}
 	}
 	for i := 0; i < 3; i++ {
-		if !strings.Contains(out, fmt.Sprintf("evento %d", i)) {
-			t.Errorf("falta el toast %d apilado:\n%s", i, out)
+		if !strings.Contains(out, fmt.Sprintf("event %d", i)) {
+			t.Errorf("the stacked toast %d is missing:\n%s", i, out)
 		}
 	}
 }
 
-// Los toasts expiran solos en el tick de 1s, sin timers nuevos.
-func TestToastsExpiranConElTick(t *testing.T) {
+func TestToastsExpireWithTheTick(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.toasts.showInfo("hola")
@@ -550,142 +477,125 @@ func TestToastsExpiranConElTick(t *testing.T) {
 	updated, cmd := m.Update(tickMsg{})
 	m = updated.(Model)
 	if cmd == nil {
-		t.Fatal("el tick no se rearmó")
+		t.Fatal("the tick was not rearmed")
 	}
 	m.toasts.toasts[0].created = time.Now().Add(-toastDuration() - time.Second)
 	updated, _ = m.Update(tickMsg{})
 	m = updated.(Model)
 	if len(m.toasts.toasts) != 0 {
-		t.Errorf("el toast no expiró con el tick: %d vivos", len(m.toasts.toasts))
+		t.Errorf("the toast did not expire with the tick: %d alive", len(m.toasts.toasts))
 	}
 }
 
-// El trabajo en curso de borrado de worktree aparece en el indicador de
-// actividad de stats.
 func TestRemoveWorktreeRunningVisibleInStats(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.running[p.Path] = "worktree_remove"
 
 	if out := stripANSI(m.View().Content); !strings.Contains(out, "worktree_remove") {
-		t.Errorf("el borrado en curso no se muestra en stats:\n%s", out)
+		t.Errorf("the running deletion is not shown in stats:\n%s", out)
 	}
 }
 
-// En una terminal baja el aviso de borrado sigue visible: se degrada stats
-// antes que keybinds, porque keybinds es donde se anuncia la tecla.
 func TestRemoveWorktreePromptVisibleInShortTerminal(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m.height = 6 // sin el aviso armado, keybinds se oculta a esta altura
+	m.height = 6 // without the armed warning, keybinds hides at this height
 
 	if strings.Contains(stripANSI(m.View().Content), "remove worktree") {
-		t.Fatal("precondición: sin armado no debe verse el prompt")
+		t.Fatal("precondition: with nothing armed there should be no prompt")
 	}
 
 	m, _ = press(m, "D")
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm") {
-		t.Errorf("el prompt no es visible en terminal baja:\n%s", out)
+		t.Errorf("the prompt is not visible on a short terminal:\n%s", out)
 	}
 }
 
-// Con el aviso armado, keybinds se queda con una línea de contenido (la del
-// prompt) y el alto que sobraba vuelve a la tabla: ni caja inflada ni hints
-// compitiendo con el prompt.
-func TestPromptArmadoSustituyeLasHints(t *testing.T) {
+func TestPromptArmedReplacesTheHints(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	if m.keybindsLines() != defaultHintLines {
-		t.Fatalf("sin armado, keybindsLines = %d, want %d", m.keybindsLines(), defaultHintLines)
+		t.Fatalf("with nothing armed, keybindsLines = %d, want %d", m.keybindsLines(), defaultHintLines)
 	}
 	if m.promptLine() != "" {
-		t.Errorf("sin armado hay prompt: %q", m.promptLine())
+		t.Errorf("with nothing armed there is a prompt: %q", m.promptLine())
 	}
 
 	m, _ = press(m, "p")
 	if m.keybindsLines() != 1 {
-		t.Errorf("armado, keybindsLines = %d, want 1", m.keybindsLines())
+		t.Errorf("armed, keybindsLines = %d, want 1", m.keybindsLines())
 	}
 
 	out := m.View().Content
 	lines := strings.Split(stripANSI(out), "\n")
 	if len(lines) != m.height {
-		t.Errorf("líneas = %d, want %d (alto exacto de la terminal)", len(lines), m.height)
+		t.Errorf("lines = %d, want %d (the exact height of the terminal)", len(lines), m.height)
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != m.width {
-			t.Errorf("línea %d ancho = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
+			t.Errorf("line %d width = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
 		}
 	}
 
 	plano := stripANSI(out)
 	kb := sectionContent(t, plano, "keybinds")
 	if !strings.Contains(kb, "p default") {
-		t.Errorf("el prompt no está en keybinds:\n%s", kb)
+		t.Errorf("the prompt is not in keybinds:\n%s", kb)
 	}
 	for _, hint := range []string{"j/k move", "f fetch", "q quit"} {
 		if strings.Contains(kb, hint) {
-			t.Errorf("la hint %q sigue ahí tras armar el prompt:\n%s", hint, kb)
+			t.Errorf("the hint %q is still there after arming the prompt:\n%s", hint, kb)
 		}
 	}
 
-	// Resolver el selector devuelve las hints y con ellas el alto de la caja.
 	m, _ = press(m, "esc")
 	if m.promptLine() != "" {
-		t.Errorf("esc no limpió el prompt: %q", m.promptLine())
+		t.Errorf("esc did not clear the prompt: %q", m.promptLine())
 	}
 	if lines := strings.Split(stripANSI(m.View().Content), "\n"); len(lines) != m.height {
-		t.Errorf("tras cancelar, líneas = %d, want %d", len(lines), m.height)
+		t.Errorf("after cancelling, lines = %d, want %d", len(lines), m.height)
 	}
 }
 
-// --- indicador de actividad, resumen de grupo y presupuestos de sección ---
-
-// El indicador de actividad cuenta las acciones EN CURSO: una sola no lleva
-// sufijo (nada de "+0"), N acciones llevan "+(N-1)", y solo cuentan las que
-// lanzan git. El orden es por path para que el render sea determinista.
-func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
+func TestIndicatorActivityCountsTheActions(t *testing.T) {
 	projects, states := fixtureProjects()
 
-	t.Run("ninguna", func(t *testing.T) {
+	t.Run("none", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.scanning = false
 		if got := m.activityIndicator(); got != "" {
-			t.Errorf("indicador = %q, want vacío sin acciones", got)
+			t.Errorf("indicator = %q, want empty with no actions", got)
 		}
 	})
 
-	// El scan tiene su propia línea y su propia precedencia sobre las acciones:
-	// si el escaneo está en marcha lo que se muestra es el escaneo, no el
-	// contador. Los casos de abajo solo probaban las acciones, con lo que la
-	// rama del scanning no la ejecutaba nunca y su mutante de ARITHMETIC_BASE
-	// sobre el "+ " salia NOT COVERED.
-	t.Run("scanning tiene precedencia", func(t *testing.T) {
+	// The scan has its own line and its own precedence over the actions: while the scan is running what is shown is the scan and not the counter, and the cases below only exercised the actions, so the scanning branch never ran and its ARITHMETIC_BASE mutant on the "+ " stayed NOT COVERED.
+	t.Run("scanning takes precedence", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.scanning = true
 		m.running = map[string]string{"/tmp/dirty-api": "pull"}
 		got := m.activityIndicator()
 		if !strings.Contains(got, "scanning") {
-			t.Errorf("indicador = %q, want el escaneo por encima de la acción", got)
+			t.Errorf("indicator = %q, want the scan above the action", got)
 		}
 		if strings.Contains(got, "pull") {
-			t.Errorf("indicador = %q, want la acción oculta mientras se escanea", got)
+			t.Errorf("indicator = %q, want the action hidden while scanning", got)
 		}
 	})
 
-	t.Run("una sola sin sufijo", func(t *testing.T) {
+	t.Run("one alone with no suffix", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.running = map[string]string{"/tmp/dirty-api": "pull"}
 		got := m.activityIndicator()
 		if !strings.Contains(got, "pull dirty-api…") {
-			t.Errorf("indicador = %q, want la acción en curso", got)
+			t.Errorf("indicator = %q, want the running action", got)
 		}
 		if strings.Contains(got, "+") {
-			t.Errorf("indicador = %q, want sin sufijo con una sola acción", got)
+			t.Errorf("indicator = %q, want no suffix with a single action", got)
 		}
 	})
 
-	t.Run("tres con +2", func(t *testing.T) {
+	t.Run("three with +2", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.running = map[string]string{
 			"/tmp/dirty-api":     "pull",
@@ -694,14 +604,12 @@ func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
 		}
 		got := m.activityIndicator()
 		if !strings.Contains(got, "+2") {
-			t.Errorf("indicador = %q, want +2 con tres acciones", got)
+			t.Errorf("indicator = %q, want +2 with three actions", got)
 		}
 	})
 
-	t.Run("cada kind cuenta", func(t *testing.T) {
-		// push y worktree_remove no son pull, pero también son acciones que
-		// lanzan git: si se colaran fuera del indicador, el usuario vería la
-		// fila quieta mientras el push está en marcha.
+	t.Run("each kind counts", func(t *testing.T) {
+		// push and worktree_remove are not pulls but are still actions that launch git: if they slipped out of the indicator the user would see a quiet row while the push is in flight.
 		for _, kind := range []string{"pull", "pull_rebase", "pull_ff", "pull_merge", "push", "worktree_remove"} {
 			m := newTestModel(t, projects, states)
 			m.running = map[string]string{"/tmp/dirty-api": kind}
@@ -711,22 +619,20 @@ func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
 		}
 	})
 
-	t.Run("lo que no lanza git no se cuenta", func(t *testing.T) {
-		// fetch y el handoff de pull_ai ceden la terminal o son lecturas: no
-		// son una acción sobre un repo que el usuario pueda esperar.
+	t.Run("what does not launch git does not count", func(t *testing.T) {
 		for _, kind := range []string{"fetch", "fetch_all", "pull_ai", "scan", "rescan"} {
 			m := newTestModel(t, projects, states)
 			m.running = map[string]string{"/tmp/dirty-api": kind}
 			if got := m.runningActions(); len(got) != 0 {
-				t.Errorf("kind %q: runningActions = %v, want vacío", kind, got)
+				t.Errorf("kind %q: runningActions = %v, want empty", kind, got)
 			}
 			if got := m.activityIndicator(); got != "" {
-				t.Errorf("kind %q: indicador = %q, want vacío", kind, got)
+				t.Errorf("kind %q: indicator = %q, want empty", kind, got)
 			}
 		}
 	})
 
-	t.Run("orden por path", func(t *testing.T) {
+	t.Run("ordered by path", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.running = map[string]string{
 			"/tmp/worktree-host": "push",
@@ -736,35 +642,32 @@ func TestIndicadorActividadCuentaLasAcciones(t *testing.T) {
 		got := m.runningActions()
 		want := []string{"pull dirty-api…", "push old-clean…", "push worktree-host…"}
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("runningActions = %v, want %v (orden por path)", got, want)
+			t.Errorf("runningActions = %v, want %v (ordered by path)", got, want)
 		}
 	})
 }
 
-// El resumen de un grupo solo pinta los estados que HAY: un grupo limpio son
-// cuatro líneas a cero que no le dicen nada al usuario que está decidiendo si
-// abrirlo. Y con estados, cada uno aparece exactamente una vez.
-func TestResumenDeGrupoSoloPintaLoQueHay(t *testing.T) {
+func TestSummaryOfGroupOnlyPaintsWhatIsThere(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/a", Name: "a", PrimaryGroup: "backend", HasRepo: true},
 		{Path: "/b", Name: "b", PrimaryGroup: "backend", HasRepo: true},
 	}
 	clean := map[string]gitstatus.Snapshot{"/a": snapClean(), "/b": snapClean()}
 
-	t.Run("limpio solo repos", func(t *testing.T) {
+	t.Run("clean-only repos", func(t *testing.T) {
 		m := newTestModel(t, projects, clean)
 		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
 		if !strings.Contains(out, "repos    2") {
-			t.Errorf("falta el total de repos:\n%s", out)
+			t.Errorf("the repo total is missing:\n%s", out)
 		}
 		for _, cero := range []string{"errors", "dirty", "ahead", "behind", "wt "} {
 			if strings.Contains(out, cero) {
-				t.Errorf("pinta %q a cero:\n%s", cero, out)
+				t.Errorf("paints %q at zero:\n%s", cero, out)
 			}
 		}
 	})
 
-	t.Run("con cada estado", func(t *testing.T) {
+	t.Run("with each state", func(t *testing.T) {
 		states := map[string]gitstatus.Snapshot{
 			"/a": func() gitstatus.Snapshot {
 				s := snapDirty(1, 0)
@@ -779,24 +682,18 @@ func TestResumenDeGrupoSoloPintaLoQueHay(t *testing.T) {
 		}
 		m := newTestModel(t, projects, states)
 		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
-		for _, quiere := range []string{"dirty    1", "ahead    1", "behind   1"} {
-			if !strings.Contains(out, quiere) {
-				t.Errorf("falta %q en el resumen:\n%s", quiere, out)
+		for _, want := range []string{"dirty    1", "ahead    1", "behind   1"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%q is missing from the summary:\n%s", want, out)
 			}
 		}
 		if strings.Contains(out, "errors") {
-			t.Errorf("errors a cero en un grupo sin errores:\n%s", out)
+			t.Errorf("errors at zero in a group with no errors:\n%s", out)
 		}
 	})
 
-	// El caso anterior carga los cuatro estados que un repo puede tener sin
-	// fallar, pero se le escapan los dos que el resumen tambien pinta y que
-	// salen de una fuente distinta: `errors` viene del estado derivado
-	// StateError, y `wt` de Worktrees. Un grupo donde ninguno de los dos
-	// aparecia nunca ejecutaba esas dos lineas, asi que sus mutantes de
-	// ARITHMETIC_BASE estaban NOT COVERED sin que hubiera un hueco real detras:
-	// la rama existia y simplemente no la miraba nadie.
-	t.Run("con errores y worktrees", func(t *testing.T) {
+	// The previous case loads the four states a repo can have without failing but misses the two the summary also paints from a different source (`errors` from StateError, `wt` from Worktrees), so those lines never ran and their ARITHMETIC_BASE mutants were NOT COVERED with no real gap behind: the branch existed and simply nobody looked at it.
+	t.Run("with an errores y worktrees", func(t *testing.T) {
 		states := map[string]gitstatus.Snapshot{
 			"/a": func() gitstatus.Snapshot {
 				s := snapClean()
@@ -811,85 +708,75 @@ func TestResumenDeGrupoSoloPintaLoQueHay(t *testing.T) {
 		}
 		m := newTestModel(t, projects, states)
 		out := stripANSI(m.renderGroupSummary(groupHeader("backend"), 20))
-		for _, quiere := range []string{"repos    2", "errors   1", "wt       1"} {
-			if !strings.Contains(out, quiere) {
-				t.Errorf("falta %q en el resumen:\n%s", quiere, out)
+		for _, want := range []string{"repos    2", "errors   1", "wt       1"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%q is missing from the summary:\n%s", want, out)
 			}
 		}
 	})
 }
 
-// groupHeader construye la entrada de un header primario, que es lo que hay
-// bajo el cursor cuando se navega por la vista agrupada.
 func groupHeader(key string) tableEntry {
 	return tableEntry{kind: kindPrimary, group: key}
 }
 
-// Con el panel sin alto (terminal baja) no se dibuja ninguna caja: una ficha de
-// 0 líneas con el título vacío es un borde colgado en medio del dashboard.
-func TestPreviewSinAltoNoDibujaCaja(t *testing.T) {
+func TestPreviewWithoutHeightNotDrawsBox(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
-	m.height = 14 // por debajo del alto mínimo del panel
+	m.height = 14 // below the panel's minimum height
 	lay := layoutTest(m.height, false, defaultHintLines, false)
 	if lay.previewLines != 0 {
-		t.Fatalf("h=%d: el layout dio panel de %d; el test necesita un alto sin panel", m.height, lay.previewLines)
+		t.Fatalf("h=%d: the layout gave a panel of %d; the test needs a height with no panel", m.height, lay.previewLines)
 	}
 	if got := m.previewSection(lay, m.entries()); got != "" {
-		t.Errorf("previewSection con 0 líneas = %q, want vacío", got)
+		t.Errorf("previewSection with 0 lines = %q, want empty", got)
 	}
 	plano := stripANSI(m.renderDashboard())
 	if strings.Contains(plano, "╭ ") && strings.Count(plano, "╭ ") != 3 {
-		t.Errorf("se dibujó una sección de más sin panel:\n%s", plano)
+		t.Errorf("a \"more\" section was drawn with no panel:\n%s", plano)
 	}
 }
 
-// El presupuesto de hints manda sobre cuántas hints hay: si el layout deja
-// una línea, la caja tiene una línea, aunque haya tres hints que enseñar.
-func TestKeybindsRespetaElPresupuestoDeHints(t *testing.T) {
+func TestKeybindsRespectsTheBudgetOfHints(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	if len(m.cfg.HintBarLines()) < 2 {
-		t.Fatalf("el test necesita varias hints: %v", m.cfg.HintBarLines())
+		t.Fatalf("the test needs several hints: %v", m.cfg.HintBarLines())
 	}
 	for _, n := range []int{0, 1, 2} {
 		out := stripANSI(m.keybindsSection(n))
 		got := len(nonEmptyLines(strings.Split(sectionContent(t, out, "keybinds"), "\n")))
 		if got != n {
-			t.Errorf("n=%d: %d líneas de hints, want %d:\n%s", n, got, n, out)
+			t.Errorf("n=%d: %d hint lines, want %d:\n%s", n, got, n, out)
 		}
 	}
 }
 
-// Solo la fila bajo el cursor lleva la marca del cursor: si el marcado se
-// invirtiese, el usuario leería como seleccionada una fila en la que no está.
-func TestCursorMarcaUnaSolaFila(t *testing.T) {
+func TestCursorMarksAOnlyRow(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	entries := m.entries()
 	if len(entries) < 3 {
-		t.Fatalf("el test necesita 3 entradas, hay %d", len(entries))
+		t.Fatalf("the test needs 3 entries, there are %d", len(entries))
 	}
 	m.cursor = 1
 	out := stripANSI(m.tableSection(len(entries), entries))
-	lineas := strings.Split(out, "\n")
+	lines := strings.Split(out, "\n")
 	var marcadas []string
-	for i, l := range lineas {
+	for i, l := range lines {
 		if strings.Contains(l, "▸") {
 			marcadas = append(marcadas, strings.TrimSpace(l))
 		}
 		_ = i
 	}
 	if len(marcadas) != 1 {
-		t.Fatalf("filas marcadas = %d, want 1:\n%s", len(marcadas), out)
+		t.Fatalf("marked rows = %d, want 1:\n%s", len(marcadas), out)
 	}
 	if want := stripANSI(m.renderEntry(entries[1], true)); !strings.Contains(marcadas[0], strings.TrimSpace(want)) {
-		t.Errorf("la fila marcada = %q, want la del cursor %q", marcadas[0], strings.TrimSpace(want))
+		t.Errorf("the marked row = %q, want the cursor's %q", marcadas[0], strings.TrimSpace(want))
 	}
 }
 
-// nonEmptyLines cuenta las líneas con contenido real de una caja: los bordes
-// verticales y el relleno no cuentan como línea pintada.
 func nonEmptyLines(lines []string) []string {
 	var out []string
 	for _, l := range lines {
@@ -900,25 +787,22 @@ func nonEmptyLines(lines []string) []string {
 	return out
 }
 
-// syncOffset es pura y su contrato tiene tres bordes: la ventana entera cabe
-// (offset a 0), el cursor justo en la última fila visible (NO debe scrollear:
-// si no, la fila saltaría al moving) y el cursor fuera de la ventana.
-func TestSyncOffsetBordes(t *testing.T) {
+func TestSyncOffsetBorders(t *testing.T) {
 	casos := []struct {
-		nombre             string
+		name               string
 		total, window      int
 		cursor, offsetPrev int
 		want               int
 	}{
-		{"todo cabe", 3, 5, 2, 4, 0},
-		{"todo cabe justo", 5, 5, 4, 3, 0},
-		{"cursor en la primera fila visible", 10, 5, 3, 3, 3},
-		{"cursor en la última fila visible", 10, 5, 7, 3, 3},
-		{"una por debajo de la última", 10, 5, 8, 3, 4},
-		{"cursor por encima de la ventana", 10, 5, 1, 4, 1},
-		{"scrolleado al fondo, cursor al inicio", 10, 5, 0, 5, 0},
+		{"everything fits", 3, 5, 2, 4, 0},
+		{"everything just fits", 5, 5, 4, 3, 0},
+		{"cursor on the first visible row", 10, 5, 3, 3, 3},
+		{"cursor on the last visible row", 10, 5, 7, 3, 3},
+		{"one below the last", 10, 5, 8, 3, 4},
+		{"cursor above the window", 10, 5, 1, 4, 1},
+		{"scrolled to the bottom, cursor at the start", 10, 5, 0, 5, 0},
 		{"ventana de 1", 10, 1, 4, 3, 4},
-		{"sin filas", 0, 5, 0, 2, 0},
+		{"no rows", 0, 5, 0, 2, 0},
 	}
 	for _, c := range casos {
 		m := newTestModel(t, nil, nil)
@@ -926,146 +810,126 @@ func TestSyncOffsetBordes(t *testing.T) {
 		m.syncOffset(c.total, c.window)
 		if m.offset != c.want {
 			t.Errorf("%s: offset = %d, want %d (cursor %d, total %d, window %d)",
-				c.nombre, m.offset, c.want, c.cursor, c.total, c.window)
+				c.name, m.offset, c.want, c.cursor, c.total, c.window)
 		}
 	}
 }
 
-// `esc` cancela TODOS los borrados en vuelo, y SOLO esc: cualquier otra tecla
-// sigue su curso y deja el borrado en marcha. La guarda `len > 0` es solo el
-// atajo para no hacer un clear() vacío — como `&&` cortocircuita, no protege
-// nada más.
-func TestEscCancelaLosBorradosYOtrasTeclasNo(t *testing.T) {
+// The `len > 0` check is only a shortcut to avoid an empty clear(): since `&&` short-circuits it protects nothing else.
+func TestEscCancelsTheDeletedAndOtherKeysNot(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, "enter") // despliega los worktrees
+	m, _ = press(m, "enter") // expands the worktrees
 
-	// Armar y confirmar un borrado deja un token en vuelo.
-	m, _ = press(m, "down") // sub-fila
+	m, _ = press(m, "down") // sub-row
 	m, _ = press(m, "D")
 	if m.armed == nil {
-		t.Fatal("D no armó el borrado")
+		t.Fatal("D did not arm the deletion")
 	}
 	m, _ = press(m, "D")
 	if len(m.removeTokens) == 0 {
-		t.Fatal("la confirmación no dejó token en vuelo")
+		t.Fatal("the confirmation left no token in flight")
 	}
 	token := m.removeTokens["/tmp/multi"]
 
-	// Una tecla que no sea esc no toca los tokens.
 	m, _ = press(m, "j")
 	if m.removeTokens["/tmp/multi"] != token {
-		t.Errorf("una tecla normal canceló el borrado en vuelo: %v", m.removeTokens)
+		t.Errorf("a normal key cancelled the deletion in flight: %v", m.removeTokens)
 	}
 
-	// esc sí los limpia todos.
 	m, _ = press(m, "esc")
 	if len(m.removeTokens) != 0 {
-		t.Errorf("esc no canceló los borrados en vuelo: %v", m.removeTokens)
+		t.Errorf("esc did not cancel the deletions in flight: %v", m.removeTokens)
 	}
 }
 
-// El token de cada intento de borrado sale de un contador MONOTÓNICO y es el
-// propio valor del contador: es lo que descarta el resultado tardío de un
-// intento anterior. Si el contador no avanzara (o retrocediera), dos intentos
-// podrían compartir token y el segundo aceptaría el resultado del primero.
-func TestTokenDeBorradoSaleDeUnContadorMonotonico(t *testing.T) {
+// The token comes from a MONOTONIC counter and IS the counter's value, which is what discards a late result from a previous attempt; if the counter did not advance (or went backwards), two attempts could share a token and the second would accept the first's result.
+func TestTokenOfDeletedExitsOfACounterMonotonic(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
 	m, _ = press(m, "enter")
-	m, _ = press(m, "down") // sub-fila del worktree
+	m, _ = press(m, "down") // worktree sub-row
 
 	antes := m.removeGen
 	m, _ = press(m, "D")
 	if m.armed == nil {
-		t.Fatal("D no armó el borrado")
+		t.Fatal("D did not arm the deletion")
 	}
 	m, _ = press(m, "D")
 	if m.removeGen <= antes {
-		t.Errorf("removeGen = %d, want > %d (contador monotónico)", m.removeGen, antes)
+		t.Errorf("removeGen = %d, want > %d (monotonic counter)", m.removeGen, antes)
 	}
 	if tok := m.removeTokens["/tmp/multi"]; tok != m.removeGen {
-		t.Errorf("token = %d, want el contador %d", tok, m.removeGen)
+		t.Errorf("token = %d, want the counter %d", tok, m.removeGen)
 	}
 }
 
-// El filtro se limpia con esc SOLO si el input está vacío: esc con texto
-// escrito es "cancelo la edición, no el filtro". El input de `/` se siembra con
-// el filtro actual (para poder editarlo), así que "vacío" hay que provocarlo.
-func TestEscLimpiaElFiltroSoloConElInputVacio(t *testing.T) {
+func TestEscCleansTheFilterOnlyWithTheInputEmpty(t *testing.T) {
 	nuevoModelo := func() (Model, discovery.Project, map[string]gitstatus.Snapshot) {
 		projects, states := fixtureProjects()
 		m := newTestModel(t, projects, states)
-		m.search = "viejo"
+		m.search = "old"
 		return m, projects[0], states
 	}
 
-	t.Run("input vacío, esc limpia el filtro", func(t *testing.T) {
+	t.Run("empty input, esc clears the filter", func(t *testing.T) {
 		m, _, _ := nuevoModelo()
 		m, _ = press(m, "/")
-		for range len("viejo") {
+		for range len("old") {
 			m, _ = press(m, "backspace")
 		}
 		m, _ = press(m, "esc")
 		if m.search != "" {
-			t.Errorf("esc con el input vacío dejó el filtro %q", m.search)
+			t.Errorf("esc with an empty input left the filter %q", m.search)
 		}
 	})
 
-	t.Run("input con texto, esc conserva el filtro", func(t *testing.T) {
+	t.Run("input with text, esc keeps the filter", func(t *testing.T) {
 		m, _, _ := nuevoModelo()
 		m, _ = press(m, "/")
-		if m.search != "viejo" {
-			t.Fatalf("el input no se sembró con el filtro actual: %q", m.search)
+		if m.search != "old" {
+			t.Fatalf("the input was not seeded with the current filter: %q", m.search)
 		}
 		m, _ = press(m, "esc")
-		if m.search != "viejo" {
-			t.Errorf("esc con texto en el input tiró el filtro: %q", m.search)
+		if m.search != "old" {
+			t.Errorf("esc with text in the input threw the filter away: %q", m.search)
 		}
 		if m.searchActive {
-			t.Error("esc con texto en el input dejó la edición activa")
+			t.Error("esc with text in the input left the editing active")
 		}
 	})
 }
 
-// `e` sobre un repo con el marcador roto avisa en vez de abrir el editor: abrir
-// el editor no arregla un TOML inválido y se pierde lo que el usuario iba a
-// cambiar.
-func TestEditorConMarcadorRotoAvisa(t *testing.T) {
-	bueno := proj("ok", "/tmp/ok", true)
+// Opening the editor does not fix an invalid TOML and the user would lose what they were about to change.
+func TestEditorWithMarkerBrokenWarns(t *testing.T) {
+	good := proj("ok", "/tmp/ok", true)
 	roto := proj("roto", "/tmp/roto", true)
-	roto.MarkerErr = "línea 3: valor inválido"
+	roto.MarkerErr = "line 3: invalid value"
 	states := map[string]gitstatus.Snapshot{"/tmp/ok": snapClean(), "/tmp/roto": snapClean()}
-	m := newTestModel(t, []discovery.Project{bueno, roto}, states)
+	m := newTestModel(t, []discovery.Project{good, roto}, states)
 
-	// En el repo sano sí abre el editor (el comando no es nil).
 	m = cursorOn(t, m, "/tmp/ok")
 	if _, cmd := press(m, "e"); cmd == nil {
-		t.Error("e en un repo sano no lanzó el editor")
+		t.Error("e on a healthy repo did not launch the editor")
 	}
 
-	// En el roto: toast de aviso, y el launcher del editor no se llama.
 	m = cursorOn(t, m, "/tmp/roto")
 	_, cmd := press(m, "e")
 	if cmd == nil {
-		t.Fatal("e con marcador roto no devolvió comando (debería ser el toast)")
+		t.Fatal("e with a broken marker returned no command (it should be the toast)")
 	}
-	// El aviso viaja como notifyMsg en el comando devuelto (los toasts se
-	// pintan en el overlay de View, no en el cuerpo del dashboard).
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "marker error") {
-		t.Errorf("e con marcador roto no avisó: %#v", cmd())
+		t.Errorf("e with a broken marker did not warn: %#v", cmd())
 	}
 }
 
-// El estado del fetch se resuelve por su valor: "fetching" es el único que
-// mantiene el spinner, "failed" muestra el fallo y "ok" limpia la columna. Si la
-// guarda se invirtiera, el spinner se quedaría pegado con un fetch ya terminado.
-func TestFetchStatePorSuValor(t *testing.T) {
+// With the guard inverted the spinner would stay stuck with an already finished fetch.
+func TestFetchStateForItsValue(t *testing.T) {
 	projects, states := fixtureProjects()
 	path := "/tmp/old-clean"
 
 	for _, c := range []struct {
-		estado       string
+		state        string
 		quiereGiro   bool
 		quiereFallo  bool
 		quiereQuieto bool
@@ -1075,126 +939,95 @@ func TestFetchStatePorSuValor(t *testing.T) {
 		{"ok", false, false, true},
 	} {
 		m := newTestModel(t, projects, states)
-		out, _ := m.Update(fetchStateMsg{path: path, state: c.estado, err: "sin red"})
+		out, _ := m.Update(fetchStateMsg{path: path, state: c.state, err: "no network"})
 		plano := stripANSI(out.(Model).renderDashboard())
 		if got := strings.Contains(plano, "fetching"); got != c.quiereGiro {
-			t.Errorf("%s: 'fetching' presente = %v, want %v", c.estado, got, c.quiereGiro)
+			t.Errorf("%s: 'fetching' presente = %v, want %v", c.state, got, c.quiereGiro)
 		}
 		if got := strings.Contains(plano, "✗ fetch"); got != c.quiereFallo {
-			t.Errorf("%s: fallo presente = %v, want %v", c.estado, got, c.quiereFallo)
+			t.Errorf("%s: failure present = %v, want %v", c.state, got, c.quiereFallo)
 		}
 		if got := strings.Contains(plano, "⟳ fetch"); got != c.quiereGiro {
-			t.Errorf("%s: giro presente = %v, want %v", c.estado, got, c.quiereGiro)
+			t.Errorf("%s: giro presente = %v, want %v", c.state, got, c.quiereGiro)
 		}
 		_ = c.quiereQuieto
 	}
 }
 
-// El panel de preview también se reparte cuando hay un filtro activo, y ahí su
-// alto sale del hueco libre una vez descontada la sección de filtro.
-//
-// Y su tamaño es el SHARE de ese hueco, no "el mayor que quepa": la búsqueda
-// arranca en el share y solo baja cuando el mínimo de filas de tabla no deja
-// otro sitio. Eso es exactamente lo que ata este test: con holgura de sobra el
-// panel tiene que medir el share (contar la sección de filtro dos veces, o no
-// contarla, lo deja más alto o más bajo), y sin holgura no puede pasar del hueco.
-func TestPreviewConFiltroRespetaElShareDelHueco(t *testing.T) {
+// Its size is the SHARE of that gap and not "the biggest that fits": the search starts at the share and only goes down when the minimum of table rows leaves no other spot.
+func TestPreviewWithFilterRespectsTheShareOfTheGap(t *testing.T) {
 	for _, h := range []int{24, 30, 40, 50, 60, 80, 100, 140} {
 		lay := computeLayout(h, true, defaultHintLines, false, 0)
 		libre := h - (tableChrome + filterSectionLines + statsSectionLines +
 			keybindsChrome + defaultHintLines + previewChrome)
 		if libre < 1 {
-			t.Fatalf("h=%d: el hueco con filtro es negativo", h)
+			t.Fatalf("h=%d: the gap with a filter is negative", h)
 		}
 		share := min(max(minPreviewLines, libre*previewShare/5), libre)
 
 		if lay.previewLines > share {
-			t.Errorf("h=%d con filtro: el panel mide %d y el share del hueco es %d",
+			t.Errorf("h=%d with a filter: the panel measures %d and the gap's share is %d",
 				h, lay.previewLines, share)
 		}
-		// Con sitio de sobra para el mínimo de filas, el share es el alto entero
-		// del panel: la búsqueda no tiene por qué bajar.
 		if h-share-reservedConFiltro >= minBodyLines {
 			if lay.previewLines != share {
-				t.Errorf("h=%d con filtro: el panel mide %d, want el share %d "+
-					"(con %d líneas libres para la tabla no hacía falta bajar)",
+				t.Errorf("h=%d with a filter: the panel measures %d, want the share %d "+
+					"(with %d free lines for the table there was no need to go lower)",
 					h, lay.previewLines, share, h-share-reservedConFiltro)
 			}
 		}
-		// Y lo que ocupa cada sección más el cuerpo llena la terminal exacta.
-		// El chrome del panel solo se gasta si el panel se pinta, que es lo que
-		// hace el layout (reserved() solo lo suma con preview > 0).
-		usado := reservedConFiltro + lay.previewLines
+		used := reservedConFiltro + lay.previewLines
 		if lay.previewLines > 0 {
-			usado += previewChrome
+			used += previewChrome
 		}
 		if !lay.showStats {
-			usado -= statsSectionLines
+			used -= statsSectionLines
 		}
-		if total := usado + lay.bodyLines; total != h {
-			t.Errorf("h=%d con filtro: las secciones suman %d, want %d", h, total, h)
+		if total := used + lay.bodyLines; total != h {
+			t.Errorf("h=%d with a filter: the sections add up to %d, want %d", h, total, h)
 		}
 	}
 }
 
-// reservedConFiltro es lo que el layout gasta SIN el panel y con la sección de
-// filtro presente: el chrome de la tabla, el de la sección de filtro, el de
-// stats, el de keybinds y sus hints. El panel se suma aparte.
 const reservedConFiltro = tableChrome + filterSectionLines + statsSectionLines +
 	keybindsChrome + defaultHintLines
 
-// Los tres plazos del TUI se afirman aqui, en UNIDADES y no contra su propia
-// fuente: comparar `actionTimeout()` con `actionTimeout()` no puede fallar,
-// porque los dos lados llevan el mismo error.
-//
-// El valor vive en una funcion y no en una const de paquete por una razon que no
-// es de estilo: Go no instrumenta las expresiones de constante, asi que una const
-// no genera bloque de cobertura y el mutante de ARITHMETIC_BASE de `120 *
-// time.Second` sale NOT COVERED para siempre, con este test o sin el. Dentro de
-// una funcion si se instrumenta, y el mutante se ejecuta. Con `3 / time.Second`
-// el toast dura 0 y caduca en el instante; con `120 / time.Second` el plazo de
-// git es 0 y cada gitstatus.Run falla al instante, en bucle, sobre todos los
-// repos: el cuelgue que este test existe para que no vuelva colado.
-func TestPlazosEnUnidades(t *testing.T) {
+// The three deadlines are asserted in UNITS and not against their own source (comparing actionTimeout() with itself cannot fail), and they live in functions because Go does not instrument constant expressions, leaving their ARITHMETIC_BASE mutant NOT COVERED forever.
+func TestDeadlinesInUnits(t *testing.T) {
 	if d := actionTimeout(); d != 120*time.Second {
-		t.Errorf("actionTimeout() = %v, want 2m (un %v hace fallar cada git al instante)", d, d)
+		t.Errorf("actionTimeout() = %v, want 2m (a %v makes every git fail instantly)", d, d)
 	}
 	if d := commandTimeout(); d != 5*time.Minute {
-		t.Errorf("commandTimeout() = %v, want 5m (un %v mata un comando lento de verdad)", d, d)
+		t.Errorf("commandTimeout() = %v, want 5m (a %v really kills a slow command)", d, d)
 	}
 	if d := toastDuration(); d != 3*time.Second {
-		t.Errorf("toastDuration() = %v, want 3s (un %v se leeria demasiado rapido)", d, d)
+		t.Errorf("toastDuration() = %v, want 3s (a %v would be read too fast)", d, d)
 	}
 }
 
-// El filtro "solo dirty" se dice en el banner de stats, no solo en la tabla: es
-// el estado del filtro activo y sin el aviso parece que no hay filtro puesto.
-func TestStatsAnunciaElFiltroSoloDirty(t *testing.T) {
+func TestStatsAnnouncesTheFilterOnlyDirty(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.onlyDirty = true
 
 	if sec := m.statsSection(); !strings.Contains(sec, "[dirty]") {
-		t.Errorf("stats con onlyDirty = %q, want que lo anuncie", sec)
+		t.Errorf("stats with onlyDirty = %q, want it to advertise it", sec)
 	}
 }
 
-// El título del borde de la ficha marca el worktree. Es la misma marca que usa
-// la tabla, y sin ella una sub-fila de worktree se lee como un repo mas.
-func TestDetailTitleMarcaElWorktree(t *testing.T) {
+func TestDetailTitleMarksTheWorktree(t *testing.T) {
 	r := row{project: discovery.Project{Name: "feature", IsWorktree: true}}
 	if got := detailTitle(r); !strings.Contains(got, "feature") || !strings.Contains(got, "[worktree]") {
-		t.Errorf("detailTitle = %q, want el nombre y la marca de worktree", got)
+		t.Errorf("detailTitle = %q, want the name and the worktree mark", got)
 	}
 }
 
-// Y el grupo también compone el titulo, para que worktree + grupo no se pisen.
-func TestDetailTitleJuntaGrupoYWorktree(t *testing.T) {
+func TestDetailTitleJoinsGroupAndWorktree(t *testing.T) {
 	r := row{project: discovery.Project{Name: "feature", PrimaryGroup: "vroom", IsWorktree: true}}
 	got := detailTitle(r)
 	for _, want := range []string{"feature", "vroom", "[worktree]"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("detailTitle = %q, want que contenga %q", got, want)
+			t.Errorf("detailTitle = %q, want it to contain %q", got, want)
 		}
 	}
 }

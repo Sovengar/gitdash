@@ -1,5 +1,3 @@
-// Tests del modelo TUI con datos sintéticos (patrón de vroom): sin teatest,
-// se construye el Model, se le envían mensajes y se inspecciona el estado.
 package tui
 
 import (
@@ -25,7 +23,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// newTestModel construye un modelo con proyectos y snapshots dados.
 func newTestModel(t *testing.T, projects []discovery.Project, states map[string]gitstatus.Snapshot) Model {
 	t.Helper()
 	m := New(config.Defaults())
@@ -33,14 +30,10 @@ func newTestModel(t *testing.T, projects []discovery.Project, states map[string]
 	m.projects = projects
 	m.states = states
 	m.scanning = false
-	// Usar directorio temporal para tests (aislar del estado real)
 	m.store = state.NewStoreAt(t.TempDir())
 	m.collapsed = map[string]bool{}
 	m.expanded = map[string]bool{}
-	// Cancelar el contexto al terminar el test mata el trabajo en vuelo (fetch
-	// por repo, acciones, handoffs) ANTES de que el siguiente test instale su
-	// recorder: si no, una goroutine suelta registra sus lecturas de git en el
-	// log del test siguiente y lo hace fallar por lo que hizo otro.
+	// Cancelling the context at test end kills the work in flight (per-repo fetch, actions, handoffs) BEFORE the next test installs its recorder: otherwise a stray goroutine logs its git reads into the next test's log and fails it for what another test did.
 	t.Cleanup(m.cancel)
 	return m
 }
@@ -89,9 +82,7 @@ func snapNoUpstream() gitstatus.Snapshot {
 	return s
 }
 
-// sectionContent devuelve el interior de la sección bordada con ese título. Los
-// avisos armados se pintan en una sección concreta (keybinds): para comprobar
-// dónde acaba cada cosa hay que mirar dentro de la caja, no en el texto plano.
+// Armed warnings are painted inside a specific section (keybinds), so checking where something landed means looking inside the box and not in the plain text.
 func sectionContent(t *testing.T, view, title string) string {
 	t.Helper()
 	lines := strings.Split(view, "\n")
@@ -103,21 +94,18 @@ func sectionContent(t *testing.T, view, title string) string {
 		}
 	}
 	if start < 0 {
-		t.Fatalf("no está la sección %q en la vista:\n%s", title, view)
+		t.Fatalf("the section %q is not in the view:\n%s", title, view)
 	}
 	for i := start + 1; i < len(lines); i++ {
 		if strings.Contains(lines[i], "╰") {
 			return strings.Join(lines[start+1:i], "\n")
 		}
 	}
-	t.Fatalf("la sección %q no se cierra:\n%s", title, view)
+	t.Fatalf("the section %q does not close:\n%s", title, view)
 	return ""
 }
 
-// namedKeys son las teclas sintéticas que no son un único rune. Los
-// modificadores no se deducen del texto (gotcha 6: el input necesita Code, y
-// el Mod aparte), así que una "ctrl+s" sin Mod sería una "s" y "shift+tab" un
-// "tab".
+// Modifiers are not deduced from the text (the input needs Code and the Mod separately), so a "ctrl+s" without Mod would be an "s" and "shift+tab" a "tab".
 var namedKeys = map[string]tea.KeyPressMsg{
 	"enter":     {Code: tea.KeyEnter},
 	"esc":       {Code: tea.KeyEsc},
@@ -169,17 +157,15 @@ func TestSortAttentionFirst(t *testing.T) {
 	if len(rows) != 6 {
 		t.Fatalf("rows = %d, want 6", len(rows))
 	}
-	// score 4 (dirty) > 3 (ahead/behind) > 2 (no-up/no-repo) > 0 (clean)
 	if rows[0].project.Name != "dirty-api" {
 		t.Errorf("rows[0] = %s, want dirty-api", rows[0].project.Name)
 	}
 	if rows[len(rows)-1].project.Name != "old-clean" {
-		t.Errorf("último = %s, want old-clean", rows[len(rows)-1].project.Name)
+		t.Errorf("last = %s, want old-clean", rows[len(rows)-1].project.Name)
 	}
 }
 
 func TestSortActivityTie(t *testing.T) {
-	// mismo score (clean): gana el más reciente
 	recent := gitstatus.Snapshot{Status: snapClean().Status, LastCommit: time.Now().Unix()}
 	old := snapClean()
 	projects := []discovery.Project{proj("aaa", "/a", true), proj("bbb", "/b", true)}
@@ -187,7 +173,7 @@ func TestSortActivityTie(t *testing.T) {
 	m := newTestModel(t, projects, states)
 	rows := m.rows()
 	if rows[0].project.Name != "bbb" {
-		t.Errorf("rows[0] = %s, want bbb (más reciente)", rows[0].project.Name)
+		t.Errorf("rows[0] = %s, want bbb (more reciente)", rows[0].project.Name)
 	}
 }
 
@@ -195,7 +181,7 @@ func TestFilterOnlyDirty(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	if len(m.rows()) != 6 {
-		t.Fatalf("sin filtro rows = %d", len(m.rows()))
+		t.Fatalf("with no filter rows = %d", len(m.rows()))
 	}
 
 	m, _ = press(m, "d")
@@ -205,7 +191,7 @@ func TestFilterOnlyDirty(t *testing.T) {
 	}
 	for _, r := range rows {
 		if !pendingStates(r.state) {
-			t.Errorf("fila %s no es pending", r.project.Name)
+			t.Errorf("row %s is not pending", r.project.Name)
 		}
 	}
 
@@ -221,7 +207,7 @@ func TestSearch(t *testing.T) {
 
 	m, _ = press(m, "/")
 	if !m.searchActive {
-		t.Fatal("'/' no abrió el input")
+		t.Fatal("'/' did not open the input")
 	}
 	for _, c := range "api" {
 		m, _ = press(m, string(c))
@@ -236,19 +222,16 @@ func TestSearch(t *testing.T) {
 		t.Errorf("confirmar: active=%v search=%q", m.searchActive, m.search)
 	}
 
-	// reabrir con el filtro activo: limpiar el input y esc limpia el filtro
 	m, _ = press(m, "/")
 	for range 3 {
 		m, _ = press(m, "backspace")
 	}
 	m, _ = press(m, "esc")
 	if m.search != "" {
-		t.Errorf("esc no limpió el filtro (search=%q)", m.search)
+		t.Errorf("esc did not clear the filter (search=%q)", m.search)
 	}
 }
 
-// Feedback visual inmediato — al pulsar / la sección de filtro pinta [/|] con
-// el cursor del input (o su placeholder) ANTES de teclear nada.
 func TestSearchImmediateFeedback(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
@@ -256,19 +239,17 @@ func TestSearchImmediateFeedback(t *testing.T) {
 	m, _ = press(m, "/")
 	out := stripANSI(m.renderDashboard())
 	if !strings.Contains(out, "[/") {
-		t.Errorf("falta [/…] al entrar en filter mode:\n%s", out)
+		t.Errorf("[/…] missing when entering filter mode:\n%s", out)
 	}
-	// placeholder visible con input vacío (nombre/grupo…)
 	if !strings.Contains(out, "name/group") {
-		t.Errorf("placeholder no visible al abrir:\n%s", out)
+		t.Errorf("placeholder not visible on open:\n%s", out)
 	}
 
-	// al confirmar el flag persiste con el texto confirmado
 	m, _ = press(m, "a")
 	m, _ = press(m, "enter")
 	out = stripANSI(m.renderDashboard())
 	if !strings.Contains(out, "[/a]") {
-		t.Errorf("tras confirmar falta [/a]:\n%s", out)
+		t.Errorf("after confirming, [/a] is missing:\n%s", out)
 	}
 }
 
@@ -282,13 +263,13 @@ func TestSearchMatchesGroup(t *testing.T) {
 	m.search = "vsocial"
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].project.Name != "api" {
-		t.Errorf("búsqueda por primario falló: %v", rowNames(rows))
+		t.Errorf("search by primary failed: %v", rowNames(rows))
 	}
 	m2 := newTestModel(t, projects, states)
 	m2.search = "backend"
 	rows = m2.rows()
 	if len(rows) != 1 || rows[0].project.Name != "api" {
-		t.Errorf("búsqueda por secundario falló: %v", rowNames(rows))
+		t.Errorf("search by secondary failed: %v", rowNames(rows))
 	}
 }
 
@@ -300,41 +281,36 @@ func TestNavigationBounds(t *testing.T) {
 		m, _ = press(m, "j")
 	}
 	if m.cursor != len(m.rows())-1 {
-		t.Errorf("cursor = %d, want %d (límite inferior)", m.cursor, len(m.rows())-1)
+		t.Errorf("cursor = %d, want %d (lower bound)", m.cursor, len(m.rows())-1)
 	}
 	for range 10 {
 		m, _ = press(m, "k")
 	}
 	if m.cursor != 0 {
-		t.Errorf("cursor = %d, want 0 (límite superior)", m.cursor)
+		t.Errorf("cursor = %d, want 0 (upper bound)", m.cursor)
 	}
 }
 
-// La ficha del repo bajo el cursor se ve sin abrir nada: `enter` ya no abre un
-// detalle (plega worktrees y grupos), así que los ficheros cambiados tienen que
-// estar en la sección del panel.
-func TestPanelMuestraLosFicheros(t *testing.T) {
+func TestPanelShowsTheFiles(t *testing.T) {
 	projects, states := fixtureProjects()
 	s := states["/tmp/dirty-api"]
 	s.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	states["/tmp/dirty-api"] = s
-	// dirty-api es la primera fila (score 4): cursor en 0
 	m := newTestModel(t, projects, states)
 
 	out := stripANSI(m.renderDashboard())
 	for _, want := range []string{"main.go", "/tmp/dirty-api", "╭ dirty-api "} {
 		if !strings.Contains(out, want) {
-			t.Errorf("el panel no dice %q:\n%s", want, out)
+			t.Errorf("the panel does not say %q:\n%s", want, out)
 		}
 	}
-	// Y `enter` sobre un repo sin worktrees no pliega nada ni altera la vista.
 	before := stripANSI(m.renderDashboard())
 	m, _ = press(m, "enter")
 	if !strings.HasPrefix(stripANSI(m.renderDashboard()), before[:40]) {
-		t.Errorf("enter en un repo sin worktrees cambió la vista:\n%s", stripANSI(m.renderDashboard()))
+		t.Errorf("enter on a repo with no worktrees changed the view:\n%s", stripANSI(m.renderDashboard()))
 	}
 	if len(m.expanded) != 0 || len(m.collapsed) != 0 {
-		t.Errorf("enter en un repo sin worktrees plegó algo: expanded=%v collapsed=%v", m.expanded, m.collapsed)
+		t.Errorf("enter on a repo with no worktrees folded something: expanded=%v collapsed=%v", m.expanded, m.collapsed)
 	}
 }
 
@@ -346,26 +322,26 @@ func TestDetailShowsLastAction(t *testing.T) {
 	r, _ := m.selected()
 	out := m.renderDetail(r, m.height)
 	if !strings.Contains(out, "pull") || !strings.Contains(out, "failed") || !strings.Contains(out, "diverged") {
-		t.Errorf("detalle sin última acción:\n%s", out)
+		t.Errorf("detail without the last action:\n%s", out)
 	}
 }
 
-func TestGuardNoRepo(t *testing.T) {
+func TestGuardNotRepo(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
-	m.search = "no-repo" // cursor sobre el proyecto sin repo
+	m.search = "no-repo" // cursor on the project with no repo
 	m.cursor = 0
 
 	for _, key := range []string{"p", "P", "f"} {
 		_, cmd := press(m, key)
 		if cmd == nil {
-			t.Errorf("tecla %s sin guard sobre no-repo", key)
+			t.Errorf("key %s without a guard over no-repo", key)
 			continue
 		}
 		msg := cmd()
 		if nm, ok := msg.(notifyMsg); !ok || !strings.Contains(nm.text, "no git repo") {
-			if key != "f" { // f sobre no-repo: fetchTargets lo excluye, cmd nil es válido
-				t.Errorf("tecla %s notificó %v", key, msg)
+			if key != "f" { // f on a no-repo project: fetchTargets excludes it, a nil cmd is valid
+				t.Errorf("key %s notified %v", key, msg)
 			}
 		}
 	}
@@ -379,10 +355,10 @@ func TestBlockRunningAction(t *testing.T) {
 
 	_, cmd := press(m, "P")
 	if cmd == nil {
-		t.Fatal("push sin cmd de bloqueo")
+		t.Fatal("push without a blocking cmd")
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "already running") {
-		t.Errorf("notificación = %v", cmd())
+		t.Errorf("notification = %v", cmd())
 	}
 }
 
@@ -401,7 +377,7 @@ func TestViewContainsTable(t *testing.T) {
 	out := m.View().Content
 	for _, want := range []string{"gitdash", "dirty-api", "↑2", "↓3", "6 repos"} {
 		if !strings.Contains(stripANSI(out), want) {
-			t.Errorf("la vista no contiene %q", want)
+			t.Errorf("the view does not contain %q", want)
 		}
 	}
 }
@@ -442,26 +418,18 @@ func rowNames(rows []row) []string {
 	return out
 }
 
-// --- el scan con una raíz que no se puede leer ---
+// If the note were lost, a mistyped `root` in the config would show up as "I find no repos" instead of "this root does not exist", which is exactly the confusion the warning avoids.
+func TestTheScanReportsTheUnreadableRootAndKeepsTheReadableRepos(t *testing.T) {
+	good, _ := testutil.NewRepo(t, true)
+	testutil.Marker(t, good, "ok", "g", "s", false)
 
-// Una raíz ilegible no puede tirar el escaneo entero: `discovery.Scan`
-// acumula el error por raíz y sigue con las demás. El pipeline de la TUI tiene
-// que llevar ese aviso en la nota (de ahí sale el toast) SIN perder los repos
-// que sí se leyeron. Si la nota se pierde, un `root` mal escrito en la config
-// se manifiesta como "no encuentro repos" en vez de "esta raíz no existe", que
-// es justo la confusión que el aviso evita.
-func TestElScanReportaLaRaizIlegibleYConservaLosReposQueSi(t *testing.T) {
-	bueno, _ := testutil.NewRepo(t, true)
-	testutil.Marker(t, bueno, "ok", "g", "s", false)
-
-	// Una raíz que es un FICHERO, no un directorio: el caso que Scan reporta.
-	malo := filepath.Join(t.TempDir(), "esto-no-es-un-directorio")
-	if err := os.WriteFile(malo, []byte("x"), 0o644); err != nil {
-		t.Fatalf("preparando la raíz mala: %v", err)
+	bad := filepath.Join(t.TempDir(), "this-is-not-a-directory")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatalf("preparing the bad root: %v", err)
 	}
 
 	cfg := config.Defaults()
-	cfg.Roots = []string{bueno, malo}
+	cfg.Roots = []string{good, bad}
 	m := New(cfg)
 	t.Cleanup(m.cancel)
 
@@ -469,23 +437,21 @@ func TestElScanReportaLaRaizIlegibleYConservaLosReposQueSi(t *testing.T) {
 	sp := firstScanMsg(t, m)
 
 	if sp.note == "" {
-		t.Fatal("nota vacía: la raíz ilegible no llega al usuario, y un root mal escrito parece que no hay repos")
+		t.Fatal("empty note: the unreadable root never reaches the user, and a mistyped root looks like there are no repos")
 	}
-	if !strings.Contains(sp.note, "root ilegible") {
-		t.Errorf("la nota no nombra el problema: %q", sp.note)
+	if !strings.Contains(sp.note, "unreadable root") {
+		t.Errorf("the note does not name the problem: %q", sp.note)
 	}
 	var paths []string
 	for _, p := range sp.projects {
 		paths = append(paths, p.Path)
 	}
-	if len(paths) != 1 || paths[0] != bueno {
-		t.Errorf("el escaneo tiró los repos que sí se leían: %v", paths)
+	if len(paths) != 1 || paths[0] != good {
+		t.Errorf("the scan threw away the repos that could be read: %v", paths)
 	}
 }
 
-// firstScanMsg consume el primer evento del pump con plazo: si el pipeline no
-// emitiera nada, el test se quedaría colgado hasta el timeout global de go test
-// en lugar de fallar con un mensaje que diga qué pasó.
+// With a deadline, a pipeline that emits nothing fails with a message saying what happened instead of hanging until the global go test timeout.
 func firstScanMsg(t *testing.T, m Model) scanProjectsMsg {
 	t.Helper()
 	type res struct {
@@ -497,60 +463,52 @@ func firstScanMsg(t *testing.T, m Model) scanProjectsMsg {
 	case r := <-ch:
 		sp, ok := r.msg.(scanProjectsMsg)
 		if !ok {
-			t.Fatalf("primer evento = %T, want scanProjectsMsg", r.msg)
+			t.Fatalf("first event = %T, want scanProjectsMsg", r.msg)
 		}
 		return sp
 	case <-time.After(10 * time.Second):
-		t.Fatal("el scan no emitió ningún evento en 10s")
+		t.Fatal("the scan emitted no event in 10s")
 		return scanProjectsMsg{}
 	}
 }
 
-// --- el fin del scan: cache y fetch automático ---
-
-// `collectDoneMsg` no lo manejaba ningún test, así que el cierre del scan no
-// estaba sujeto: ni la cache que hace que la app pinte al instante al arrancar,
-// ni el fetch automático. Invertir la guarda de `cache.Path()` deja la app
-// aparente y sana mientras no cachea nunca, y por eso esto mira el fichero de
-// verdad y no un retorno.
-func TestElFinDelScanGuardaLaCache(t *testing.T) {
+// `collectDoneMsg` was handled by no test, so the end of the scan was unpinned: neither the cache that makes the app paint instantly nor the automatic fetch. Inverting the `cache.Path()` guard leaves the app looking healthy while never caching, which is why this looks at the real file and not at a return value.
+func TestTheEndOfTheScanGuardTheCache(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	m := newTestModel(t,
 		[]discovery.Project{proj("api", "/tmp/api", true)},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
-	m.cfg.FetchAuto = false // este test es el de la cache, no el del fetch
+	m.cfg.FetchAuto = false // this test is about the cache, not about fetch
 
 	m.Update(collectDoneMsg{})
 
-	ruta := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "gitdash", "repos.json")
-	esperaFichero(t, ruta)
+	path := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "gitdash", "repos.json")
+	esperaFichero(t, path)
 
 	var c cache.File
-	if err := json.Unmarshal(readFile(t, ruta), &c); err != nil {
-		t.Fatalf("cache ilegible: %v", err)
+	if err := json.Unmarshal(readFile(t, path), &c); err != nil {
+		t.Fatalf("unreadable cache: %v", err)
 	}
 	if len(c.Repos) != 1 || c.Repos[0].Path != "/tmp/api" {
-		t.Errorf("la cache no guardó lo escaneado: %+v", c.Repos)
+		t.Errorf("the cache did not store what was scanned: %+v", c.Repos)
 	}
 }
 
-// El otro mitad del cierre: con fetch automático y un repo con upstream, el
-// fin del scan Lanza el fetch. Se mira el evento, no el retorno, porque
-// `fetchBatchCmd` publica por el canal y devuelve siempre nil.
-func TestElFinDelScanLanzaElFetchAutomatico(t *testing.T) {
+// The event is looked at, not the return value, because `fetchBatchCmd` publishes through the channel and always returns nil.
+func TestTheEndOfTheScanLaunchesTheFetchAutomatic(t *testing.T) {
 	casos := []struct {
-		nombre    string
+		name      string
 		fetchAuto bool
 		snap      gitstatus.Snapshot
-		quiere    bool
+		want      bool
 	}{
-		{"con upstream", true, snapClean(), true},
-		{"sin fetch automatico", false, snapClean(), false},
-		{"repo sin upstream", true, gitstatus.Snapshot{}, false},
+		{"with upstream", true, snapClean(), true},
+		{"no automatic fetch", false, snapClean(), false},
+		{"repo no upstream", true, gitstatus.Snapshot{}, false},
 	}
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("XDG_CACHE_HOME", t.TempDir())
 			m := newTestModel(t,
 				[]discovery.Project{proj("api", "/tmp/api", true)},
@@ -559,55 +517,46 @@ func TestElFinDelScanLanzaElFetchAutomatico(t *testing.T) {
 
 			m.Update(collectDoneMsg{})
 
-			// /tmp/api no es un repo, así que el fetch falla; lo que importa es
-			// que se lanzara. El evento "fetching" sale antes de tocar git.
-			// El plazo solo es largo para el caso que debe LANZAR: en los
-			// negativos el evento "fetching" (que sale antes de tocar git) no
-			// puede tardar, así que esperar más solo alarga la suite.
+			// The deadline is only long for the case that must LAUNCH: in the negative ones the "fetching" event (emitted before touching git) cannot be slow, so waiting longer only lengthens the suite.
 			plazo := 200 * time.Millisecond
-			if c.quiere {
+			if c.want {
 				plazo = 5 * time.Second
 			}
 			visto := esperaEvento(t, m, plazo, func(ev event) bool {
 				fs, ok := ev.(fetchStateMsg)
 				return ok && fs.path == "/tmp/api"
 			})
-			if c.quiere && !visto {
-				t.Error("no se lanzó el fetch automático al terminar el scan")
+			if c.want && !visto {
+				t.Error("the automatic fetch did not launch when the scan ended")
 			}
-			if !c.quiere && visto {
-				t.Error("se lanzó un fetch que no tocaba: sin fetch automático o sin upstream")
+			if !c.want && visto {
+				t.Error("a fetch that should not fire ran: no automatic fetch or no upstream")
 			}
 		})
 	}
 }
 
-// esperaFichero espera a que la cache aparezca: el guardado sale en una
-// goroutine (no bloquea el render), así que no basta con mirar una vez.
-func esperaFichero(t *testing.T, ruta string) {
+func esperaFichero(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(ruta); err == nil {
+		if _, err := os.Stat(path); err == nil {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("la cache nunca apareció en %s", ruta)
+	t.Fatalf("the cache never showed up in %s", path)
 }
 
-func readFile(t *testing.T, ruta string) []byte {
+func readFile(t *testing.T, path string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(ruta)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("leyendo %s: %v", ruta, err)
+		t.Fatalf("leyendo %s: %v", path, err)
 	}
 	return raw
 }
 
-// esperaEvento consume eventos del pump hasta que uno cumpla pred o se agote el
-// plazo. Sin plazo, un fetch que no se lanza deja el test colgado hasta el
-// timeout global en vez de fallar diciendo qué faltaba.
 func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) bool) bool {
 	t.Helper()
 	ch := make(chan bool, 1)
@@ -631,33 +580,22 @@ func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) b
 	}
 }
 
-// --- New sin sitio donde guardar el plegado ---
-
-// Las dos guardas de nil de New. El store lo crea `state.NewStore()` y New
-// descarta su error, así que con el estado sin resolver (ni XDG_STATE_HOME ni
-// HOME) el store es nil DE VERDAD: son las guardas las que evitan que
-// `LoadCollapsed` se ejecute sobre un puntero nulo. Sin ellas, New revienta
-// con un nil pointer dereference al arrancar, y un usuario sin HOME (contenedor,
-// systemd tmpfiles, un home que no monta) no podría ni abrir la app.
-//
-// El segundo caso es el control: si la guarda se invirtiera, el plegado
-// persistido dejaría de cargarse aunque el sitio exista, que es el otro modo de
-// romper lo mismo.
-func TestNewAguantaQueNoHayDondeGuardarElPlegado(t *testing.T) {
-	t.Run("sin directorio de estado", func(t *testing.T) {
+// New discards the error from state.NewStore(), so with an unresolvable state the store is nil and these guards keep LoadCollapsed off a null pointer; a user with no HOME could not even open the app.
+func TestNewSurvivesWithNoStateDirToSaveTheFolded(t *testing.T) {
+	t.Run("no state directory", func(t *testing.T) {
 		t.Setenv("XDG_STATE_HOME", "")
 		t.Setenv("HOME", "")
 
-		m := New(config.Defaults()) // no debe reventar
+		m := New(config.Defaults()) // it must not blow up
 		t.Cleanup(m.cancel)
 
 		if len(m.collapsed) != 0 || len(m.expanded) != 0 {
-			t.Errorf("sin store no hay plegado que cargar, pero %v / %v",
+			t.Errorf("with no store there is no folding to load, but %v / %v",
 				m.collapsed, m.expanded)
 		}
 	})
 
-	t.Run("con plegado persistido", func(t *testing.T) {
+	t.Run("with persisted folding", func(t *testing.T) {
 		base := t.TempDir()
 		store := state.NewStoreAt(filepath.Join(base, "gitdash"))
 		if err := os.MkdirAll(store.Base(), 0o755); err != nil {
@@ -673,57 +611,44 @@ func TestNewAguantaQueNoHayDondeGuardarElPlegado(t *testing.T) {
 		t.Cleanup(m.cancel)
 
 		if !m.collapsed["g/s"] {
-			t.Error("el grupo colapsado persistido no se cargó")
+			t.Error("the persisted collapsed group was not loaded")
 		}
 		if !m.expanded["/tmp/api"] {
-			t.Errorf("el worktree expandido persistido no se cargó: %v", m.expanded)
+			t.Errorf("the persisted expanded worktree was not loaded: %v", m.expanded)
 		}
 	})
 }
 
-// --- avisos y resultados obsoletos ---
-
-// El `fetch ok` a secas solo es para UN repo: con varios se cuenta, porque
-// "fetch ok" a secas no dice si se sincronizaron 3 repos o 1. Y con alguno
-// fallido el aviso es otro entero: el número de fallos es lo que el usuario
-// necesita ver primero. Los tres arms se prueban porque el del medio (ok == 1)
-// era el único sin sujetar.
-func TestElFinDelFetchDistingueCuantosReposSincroniza(t *testing.T) {
+func TestTheEndOfTheFetchDistinguishesHowManyReposSyncs(t *testing.T) {
 	casos := []struct {
-		nombre       string
+		name         string
 		ok, failed   int
 		wantContiene string
 	}{
 		{"uno solo", 1, 0, "fetch ok"},
 		{"varios", 3, 0, "fetch ok (3 repos)"},
-		{"ninguno y todos fallan", 0, 2, "2 failed"},
+		{"none and all fail", 0, 2, "2 failed"},
 		{"mezcla", 2, 1, "2 ok, 1 failed"},
 	}
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)}, nil)
 
-			// Update devuelve el modelo nuevo: hay que leer ESE, no el de antes.
-			// Los mapas se comparten entre copias, así que un test que se queda
-			// con el viejo pasa en verde sin haber comprobado nada.
+			// Update returns the new model and THAT is what has to be read: the maps are shared between copies, so a test keeping the old one passes green without having checked anything.
 			mm, _ := m.Update(fetchDoneMsg{ok: c.ok, failed: c.failed})
 			m = mm.(Model)
 
 			got := lastToast(m)
 			if !strings.Contains(got, c.wantContiene) {
-				t.Errorf("fetch %d ok / %d failed: el aviso dice %q, want contiene %q",
+				t.Errorf("fetch %d ok / %d failed: the notice says %q, want it to contain %q",
 					c.ok, c.failed, got, c.wantContiene)
 			}
 		})
 	}
 }
 
-// Un `worktreeRemovedMsg` cuyo token no es el vigente es de un intento que se
-// sustituyó (el usuario relanzó el borrado, o un scan liberó el running por
-// su cuenta). Si se aceptara, borraría el token del intento vigente y le
-// enseñaría al usuario un éxito por un worktree que quizá sigue ahí. La rama
-// existe justo para esto y no estaba probada.
-func TestElBorradoDeWorktreeObsoletoNoTocaElIntentoVigente(t *testing.T) {
+// Accepting it would drop the current attempt's token and show the user a success for a worktree that may still be there.
+func TestTheDeletedOfWorktreeObsoleteNotTouchesTheAttemptCurrent(t *testing.T) {
 	const parent = "/tmp/api"
 	m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
 	m.removeTokens = map[string]int{parent: 7}
@@ -731,35 +656,30 @@ func TestElBorradoDeWorktreeObsoletoNoTocaElIntentoVigente(t *testing.T) {
 
 	mm, _ := m.Update(worktreeRemovedMsg{
 		parent: parent, wtPath: "/tmp/wt-a", name: "wt-a",
-		gen: 3, // intento antiguo: el vigente es el 7
+		gen: 3, // old attempt: the current one is the 7
 	})
 	m = mm.(Model)
 
 	if got := m.removeTokens[parent]; got != 7 {
-		t.Errorf("el resultado obsoleto consumió el token del intento vigente: %d, want 7", got)
+		t.Errorf("the stale result consumed the live attempt's token: %d, want 7", got)
 	}
-	if _, sigue := m.removeTokens[parent]; !sigue {
-		t.Error("el token vigente desapareció: el relanzamiento se queda sin poder comprobar su resultado")
+	if _, still := m.removeTokens[parent]; !still {
+		t.Error("the live token vanished: the relaunch can no longer check its result")
 	}
 	if m.running[parent] != "worktree_remove" {
-		t.Errorf("un resultado obsoleto liberó el running de otro intento: %q", m.running[parent])
+		t.Errorf("a stale result released another attempt's running: %q", m.running[parent])
 	}
 	if txt := lastToast(m); strings.Contains(txt, "wt-a") {
-		t.Errorf("un resultado obsoleto pintó un aviso: %q", txt)
+		t.Errorf("a stale result painted a notice: %q", txt)
 	}
 }
 
-// Esc es la vía de salida de la confirmación de borrado, y su valor está en
-// que SE CONSUME: la confirmación tiene prioridad sobre el resto del teclado
-// (también sobre el esc que cierra la búsqueda). Si esc no se consumiera,
-// desarmaría el borrado y además cerraría la búsqueda: dos efectos de una
-// tecla, que es justo lo que el bloque commentado prohíbe. Por eso el testigo
-// es la búsqueda, no el propio desarme (que ocurre igual en los dos caminos).
-func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
+// The witness is the search and not the disarm itself (which happens either way), because what distinguishes the two paths is that esc is consumed: two effects from one keystroke is exactly what the armed block forbids.
+func TestEscDisarmsTheDeletedAndNotArrivesOnTheRest(t *testing.T) {
 	const parent = "/tmp/api"
 	esc := tea.KeyPressMsg{Code: tea.KeyEsc, Text: "esc"}
 
-	t.Run("con confirmación armada", func(t *testing.T) {
+	t.Run("with a confirmation armed", func(t *testing.T) {
 		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
 		m.armed = &armedRemoval{wtPath: "/tmp/wt-a", parent: parent, name: "wt-a"}
 		m.searchActive = true
@@ -769,24 +689,22 @@ func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
 		m = mm.(Model)
 
 		if m.armed != nil {
-			t.Error("esc no desarmó la confirmación: la app queda esperando otra tecla")
+			t.Error("esc did not disarm the confirmation: the app stays waiting for another key")
 		}
 		if len(m.removeTokens) != 0 {
-			t.Errorf("esc registró un intento de borrado: %v", m.removeTokens)
+			t.Errorf("esc recorded a deletion attempt: %v", m.removeTokens)
 		}
 		if m.running[parent] != "" {
-			t.Errorf("esc dejó el repo en running: %q", m.running[parent])
+			t.Errorf("esc left the repo running: %q", m.running[parent])
 		}
-		// La parte que distingue este camino del default: la tecla se paró aquí.
 		if !m.searchActive || m.search != "api" {
-			t.Errorf("esc siguió su curso y tocó la búsqueda: searchActive=%v search=%q; "+
-				"la confirmación tiene que consumirla", m.searchActive, m.search)
+			t.Errorf("esc followed its course and touched the search: searchActive=%v search=%q; "+
+				"the confirmation must consume it", m.searchActive, m.search)
 		}
 	})
 
-	// El control: sin nada armado, esc sí cierra la búsqueda. Si este caso
-	// pasara también con la confirmación, el anterior no distinguiría nada.
-	t.Run("sin nada armado", func(t *testing.T) {
+	// The control: with nothing armed, esc does close the search; if this case also passed with the confirmation armed, the previous one would distinguish nothing.
+	t.Run("with nothing armed", func(t *testing.T) {
 		m := newTestModel(t, []discovery.Project{proj("api", parent, true)}, nil)
 		m.searchActive = true
 		m.search = "api"
@@ -795,52 +713,42 @@ func TestEscDesarmaElBorradoYNoLlegaAlResto(t *testing.T) {
 		m = mm.(Model)
 
 		if m.searchActive {
-			t.Error("sin nada armado, esc tiene que cerrar la búsqueda")
+			t.Error("with nothing armed, esc has to close the search")
 		}
 		if m.search != "" {
-			t.Errorf("esc en la búsqueda no limpió el filtro: %q", m.search)
+			t.Errorf("esc in the search did not clear the filter: %q", m.search)
 		}
 	})
 }
 
-// Update devuelve `m, nil` para un mensaje que no sabe tratar, y eso no es un
-// error: es lo que evita que un msg desconocido (el de otro modulo, o uno futuro)
-// pare la TUI. El mensaje tiene que pasar por el switch entero y salir por el
-// return de abajo.
-func TestUpdateIgnoraMensajesDesconocidos(t *testing.T) {
+// An unknown message must not stop the TUI, which is what returning `m, nil` for it achieves; it has to travel the whole switch and leave through the return below.
+func TestUpdateIgnoresMessagesUnknown(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	out, cmd := m.Update(struct{ tea.Msg }{})
 	if out == nil {
-		t.Fatal("Update devolvio nil en vez del modelo")
+		t.Fatal("Update returned nil instead of the model")
 	}
 	if cmd != nil {
-		t.Error("Update devolvio un comando para un mensaje desconocido, want nil")
+		t.Error("Update returned a command for an unknown message, want nil")
 	}
 }
 
-// El TickMsg del spinner llega solo (lo emite el propio spinner mientras corre),
-// asi que ningun test lo produce: hay que mandarlo a mano. Lo que se comprueba es
-// que el spinner AVANZA y que su Update devuelve el siguiente tick, que es lo
-// que lo mantiene girando; si el case se perdiera, el spinner se congelaria en
-// el primer frame y nadie se enteraria salvo mirando.
-func TestSpinnerAvanzaConSuTick(t *testing.T) {
+// tickMsg is what expires toasts, so if it stopped being emitted a warning would stay painted forever and the table would look frozen.
+func TestSpinnerAdvancesWithItsTick(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	antes := m.spinner.View()
 	out, cmd := m.Update(spinner.TickMsg{})
 	if cmd == nil {
-		t.Error("el TickMsg del spinner no devolvio comando, want el siguiente tick")
+		t.Error("the spinner's TickMsg returned no command, want the next tick")
 	}
 	despues := out.(Model).spinner.View()
 	if despues == antes && len(antes) > 0 {
-		t.Errorf("el spinner no se movio: %q -> %q", antes, despues)
+		t.Errorf("the spinner did not move: %q -> %q", antes, despues)
 	}
 }
 
-// `enter` sobre el input del comando `!` con el cursor en una fila SIN repo no
-// puede lanzar nada, y lo dice. El caso importa porque el camino de abajo abre una
-// shell: sin el aviso, `!` + enter sobre una carpeta sin repo abriria una terminal
-// en un sitio donde no hay nada que hacer.
-func TestComandoSinRepoAvisa(t *testing.T) {
+// The path below opens a shell, so without the warning `!` + enter on a folder with no repo would open a terminal where there is nothing to do.
+func TestCommandWithoutRepoWarns(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m = cursorOn(t, m, "/tmp/no-repo-docs")
@@ -849,186 +757,152 @@ func TestComandoSinRepoAvisa(t *testing.T) {
 
 	out, cmd := press(m, "enter")
 	if cmd == nil {
-		t.Fatal("enter sin repo no devolvio comando, want un aviso")
+		t.Fatal("enter with no repo returned no command, want a notice")
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok {
-		t.Fatalf("el comando devolvió %T, want un aviso", cmd())
+		t.Fatalf("the command returned %T, want a notice", cmd())
 	}
 	if !strings.Contains(msg.text, "no git repo") {
-		t.Errorf("aviso = %q, want que diga que no hay repo", msg.text)
+		t.Errorf("notice = %q, want it to say there is no repo", msg.text)
 	}
-	// Y el input se cierra igualmente: la accion termino.
 	if out.cmdOpen {
-		t.Error("el input del comando sigue abierto tras el aviso")
+		t.Error("the command's input stays open after the notice")
 	}
 }
 
-// `enter` sin fila bajo el cursor: no hay repo, asi que tampoco hay aviso que
-// dar. Devuelve nil y cierra el input, que es lo unico que se puede hacer.
-func TestComandoSinFilaNoAvisa(t *testing.T) {
+func TestCommandWithoutRowNotWarns(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	m.cmdOpen = true
 	m.cmdInput.SetValue("ls")
 	out, cmd := press(m, "enter")
 	if cmd != nil {
-		t.Errorf("enter sin fila devolvió %#v, want nil", cmd())
+		t.Errorf("enter with no row returned %#v, want nil", cmd())
 	}
 	if out.cmdOpen {
-		t.Error("el input sigue abierto sin fila bajo el cursor")
+		t.Error("the input stays open with no row under the cursor")
 	}
 }
 
-// `fetch_all` sin ningun repo con upstream tiene que decirlo, no lanzar un batch
-// vacio: un fetch de nada es un comando que no falla y no hace nada, y el usuario
-// no ve por que no paso nada.
-func TestFetchAllSinUpstreamAvisa(t *testing.T) {
+// A fetch of nothing is a command that does not fail and does nothing, and the user would not see why nothing happened.
+func TestFetchAllWithoutUpstreamWarns(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	_, cmd := press(m, "F")
 	if cmd == nil {
-		t.Fatal("fetch_all sin repos devolvio nil, want un aviso")
+		t.Fatal("fetch_all with no repos returned nil, want a notice")
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok {
-		t.Fatalf("devolvió %T, want un aviso", cmd())
+		t.Fatalf("returned %T, want a notice", cmd())
 	}
 	if !strings.Contains(msg.text, "no repositories") {
-		t.Errorf("aviso = %q, want que diga que no hay nada que traer", msg.text)
+		t.Errorf("notice = %q, want it to say there is nothing to fetch", msg.text)
 	}
 }
 
-// `r` (rescan) con un scan ya en marcha no arranca un segundo: el aviso es
-// "scan already running". El caso es el que evita el doble workerPool, que
-// fightaria por el canal de eventos.
-func TestRescanConScanEnMarchaAvisa(t *testing.T) {
+// This is the case that avoids the double workerPool, which would fight over the event channel.
+func TestRescanWithScanInRunsWarns(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	m.scanning = true
 	_, cmd := press(m, "r")
 	if cmd == nil {
-		t.Fatal("rescan con scan en marcha devolvio nil, want un aviso")
+		t.Fatal("rescan with a scan in progress returned nil, want a notice")
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok {
-		t.Fatalf("devolvió %T, want un aviso", cmd())
+		t.Fatalf("returned %T, want a notice", cmd())
 	}
 	if !strings.Contains(msg.text, "already running") {
 		t.Errorf("aviso = %q, want 'scan already running'", msg.text)
 	}
 }
 
-// busyActionCmd es la guarda que comparten las acciones que lanzan un comando en
-// un repo: si ya hay algo en marcha en ESE repo, avisa en vez de lanzar. Sus tres
-// salidas son distintas y las tres se usan: el aviso, el nil (nada en marcha, la
-// accion puede seguir), y... solo dos, en realidad. El test las fija las dos y
-// comprueba que el aviso nombra la accion que esta corriendo.
 func TestBusyActionCmd(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	m.running = map[string]string{"/tmp/api": "pull"}
 
 	if cmd := m.busyActionCmd("/tmp/api"); cmd == nil {
-		t.Fatal("busyActionCmd sobre un repo ocupado devolvio nil, want un aviso")
+		t.Fatal("busyActionCmd over a busy repo returned nil, want a notice")
 	} else if msg, ok := cmd().(notifyMsg); !ok {
-		t.Errorf("devolvió %T, want un aviso", cmd())
+		t.Errorf("returned %T, want a notice", cmd())
 	} else if !strings.Contains(msg.text, "pull") {
-		t.Errorf("aviso = %q, want que nombre la accion en marcha", msg.text)
+		t.Errorf("notice = %q, want it to name the action in progress", msg.text)
 	}
 
-	// Otro repo no se ve afectado: el bloqueo es por path, no global.
 	if cmd := m.busyActionCmd("/tmp/otro"); cmd != nil {
-		t.Errorf("busyActionCmd sobre un repo libre devolvió %#v, want nil", cmd())
+		t.Errorf("busyActionCmd over a free repo returned %#v, want nil", cmd())
 	}
 }
 
-// Los dos avisos armados se callan cuando no hay nada armado. No es un detalle:
-// promptLine() es el UNICO punto por el que keybinds pinta un aviso, y sin este
-// caso un prompt de un selector que ya se canceló se quedaría pintado encima de
-// las hints, ocupando la línea que las hints necesitan.
-func TestPromptsArmadosSeCallanSinArmar(t *testing.T) {
+// promptLine() is the ONLY point where keybinds paints a warning, so without this case the prompt of an already cancelled selector would stay painted on top of the hints, taking the line they need.
+func TestPromptsArmedIsAreSilentWithoutArm(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	if got := m.visualPrompt(); got != "" {
-		t.Errorf("visualPrompt sin armar = %q, want vacio", got)
+		t.Errorf("visualPrompt with nothing armed = %q, want empty", got)
 	}
 	if got := m.removePrompt(); got != "" {
-		t.Errorf("removePrompt sin armar = %q, want vacio", got)
+		t.Errorf("removePrompt with nothing armed = %q, want empty", got)
 	}
-	// Y promptLine, que es lo UNICO que keybinds consulta para pintar un aviso:
-	// sin ningun estado armado devuelve la cadena vacia, no un aviso residual de
-	// un selector que ya se cancelo.
 	if got := m.promptLine(); got != "" {
-		t.Errorf("promptLine sin armar = %q, want vacio", got)
+		t.Errorf("promptLine with nothing armed = %q, want empty", got)
 	}
 }
 
-// toggleFold sin nada bajo el cursor es un no-op: no hay header que plegar ni
-// worktree que ocultar, y sin guarda el cursor se moveria a un indice que no
-// existe.
-func TestToggleFoldSinFilaNoSeMueve(t *testing.T) {
+func TestToggleFoldWithoutRowNotIsMoves(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	if len(m.entries()) != 0 {
-		t.Fatalf("el modelo sin proyectos tiene %d entradas", len(m.entries()))
+		t.Fatalf("the model with no projects has %d entries", len(m.entries()))
 	}
 	out, cmd := m.toggleFold()
 	if cmd != nil {
-		t.Errorf("toggleFold sin fila devolvió %#v, want nil", cmd())
+		t.Errorf("toggleFold with no row returned %#v, want nil", cmd())
 	}
 	if got := out.(Model).cursor; got != 0 {
-		t.Errorf("cursor = %d tras plegar sin fila, want 0", got)
+		t.Errorf("cursor = %d after folding with no row, want 0", got)
 	}
 }
 
-// NotifyConfig es lo que main llama con el aviso de config, y lo que hace que el
-// usuario lo vea: stderr se queda detrás del alt screen, así que si el aviso no
-// llegara al modelo se perdería sin más. Se comprueba que encola un toast con el
-// texto, no que "no reviente".
-func TestNotifyConfigEncolaElAviso(t *testing.T) {
+// stderr stays behind the alt screen, so if the warning did not reach the model it would be lost with no trace.
+func TestNotifyConfigQueuesTheWarning(t *testing.T) {
 	m := newTestModel(t, nil, nil)
-	m.NotifyConfig("config: no se pudo leer el fichero")
+	m.NotifyConfig("config: the file could not be read")
 	if len(m.toasts.toasts) != 1 {
-		t.Fatalf("toasts = %d, want 1 (el aviso tiene que verse, no ir a stderr)", len(m.toasts.toasts))
+		t.Fatalf("toasts = %d, want 1 (the notice has to be visible, not go to stderr)", len(m.toasts.toasts))
 	}
 	got := m.toasts.toasts[0]
 	if got.level != toastWarning {
-		t.Errorf("nivel = %v, want warning (un aviso de config no es un exito)", got.level)
+		t.Errorf("level = %v, want warning (a config notice is not a success)", got.level)
 	}
-	if !strings.Contains(got.text, "no se pudo leer") {
-		t.Errorf("texto = %q, want el aviso entero", got.text)
+	if !strings.Contains(got.text, "could not be read") {
+		t.Errorf("text = %q, want the whole notice", got.text)
 	}
-	// Y sale en lo que se pinta de verdad, que es donde el usuario lo lee: los
-	// bloques del overlay. Con un bloque vacio el aviso no existiria en pantalla.
 	bloques := m.toasts.blocks()
 	if len(bloques) != 1 {
 		t.Fatalf("bloques = %d, want 1", len(bloques))
 	}
 	pintado := stripANSI(strings.Join(bloques[0], " "))
-	if !strings.Contains(pintado, "no se pudo leer") {
-		t.Errorf("el bloque pintado = %q, want el texto del aviso", pintado)
+	if !strings.Contains(pintado, "could not be read") {
+		t.Errorf("the painted block = %q, want the notice text", pintado)
 	}
 }
 
-// saveCollapsed con store nil no hace nada. Es el caso de un modelo construido
-// sin store (por ejemplo un test, o el modo --print si compartiera modelo), y la
-// guarda evita un nil-pointer en CADA tecla de plegado.
-func TestSaveCollapsedSinStoreNoRevienta(t *testing.T) {
+func TestSaveCollapsedWithoutStoreNotPanics(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	m.store = nil
 	m.collapsed = map[string]bool{"backend": true}
-	m.saveCollapsed() // no debe hacer nada, y sobre todo no reventar
+	m.saveCollapsed() // it must do nothing, and above all not blow up
 	if !m.collapsed["backend"] {
-		t.Error("el estado en memoria cambio: saveCollapsed no debe tocarlo")
+		t.Error("the in-memory state changed: saveCollapsed must not touch it")
 	}
 }
 
-// visualOptionForKey con una tecla que no es ninguna variante devuelve false, y
-// el selector visual usa ese false para no hacer nada. Sin ese caso, una tecla
-// desconocida se traduciria a una variante de git-sim inventada.
-func TestVisualOptionParaTeclaDesconocida(t *testing.T) {
-	for _, tecla := range []string{"", "x", "enter", "ESC", "mm"} {
-		if o, ok := visualOptionForKey(tecla); ok {
-			t.Errorf("visualOptionForKey(%q) = %+v, want no (no es ninguna variante)", tecla, o)
+// Without this case an unknown key would translate into an invented git-sim variant.
+func TestVisualOptionForKeyUnknown(t *testing.T) {
+	for _, key := range []string{"", "x", "enter", "ESC", "mm"} {
+		if o, ok := visualOptionForKey(key); ok {
+			t.Errorf("visualOptionForKey(%q) = %+v, want no (it is not a variant)", key, o)
 		}
 	}
-	// Y las que sí son, con su subcomando, para que el fallback no se confunda
-	// con un caso vacío.
 	for _, o := range visualOptions {
 		got, ok := visualOptionForKey(o.key)
 		if !ok {
@@ -1040,70 +914,51 @@ func TestVisualOptionParaTeclaDesconocida(t *testing.T) {
 	}
 }
 
-// tickCmd devuelve un tea.Tick de un segundo, y el closure que emite tickMsg solo
-// se ejecuta cuando esa tea.Cmd se invoca. El caso importa porque tickMsg es lo
-// que expira los toasts: si el tick dejara de emitirse, un aviso se quedaría
-// pintado para siempre y la tabla parecería congelada.
-//
-// Cuesta un segundo porque el timer es real: no hay reloj inyectable en
-// bubbletea, y falsearlo exigiria el seam entero de tea.Tick por un segundo de
-// suite. Un segundo en la suite entera es un precio aceptable.
-func TestTickCmdEmiteElTick(t *testing.T) {
+// It costs a second because the timer is real (bubbletea has no injectable clock, and faking it would need the whole tea.Tick seam for one second of suite).
+func TestTickCmdEmitsTheTick(t *testing.T) {
 	start := time.Now()
 	msg := tickCmd()()
 	if _, ok := msg.(tickMsg); !ok {
-		t.Fatalf("tickCmd()() = %#v, want un tickMsg", msg)
+		t.Fatalf("tickCmd()() = %#v, want a tickMsg", msg)
 	}
 	if d := time.Since(start); d < 900*time.Millisecond {
-		t.Errorf("el tick volvio en %v, want ~1s (un tick que no espera no expira nada)", d)
+		t.Errorf("the tick came back in %v, want ~1s (a tick that does not wait expires nothing)", d)
 	}
 }
 
-// --- pump de eventos ---
-
-// Init tiene que arrancar las tres cosas de las que depende el arranque: el
-// scan, la bomba de eventos y el tick. No se comprueba que hagan su trabajo (eso
-// lo cubren los tests de pipeline), sino que el Cmd existe: un `Init` que
-// devolviera nil arrancaría una app sana que nunca vuelve a pintar.
-func TestInitArrancaElPipeline(t *testing.T) {
+func TestInitStartsThePipeline(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
 	if cmd := m.Init(); cmd == nil {
-		t.Error("Init = nil, want un Cmd: sin scan, sin pump y sin tick la app no arranca")
+		t.Error("Init = nil, want a Cmd: without scan, pump and tick the app does not start")
 	}
 }
 
-// La bomba lee UN evento por Cmd (el patrón de tea) y se rearma tras cada uno.
-// Con el canal cerrado tiene que devolver nil, no un evento vacío: un `nil` es
-// lo que la app distingue de "hay trabajo", y un valor no-nil con el canal
-// cerrado la dejaría repintando para siempre.
+// With the channel closed it must return nil and not an empty event: nil is what the app tells apart from "there is work", and a non-nil value on a closed channel would keep it repainting forever.
 func TestWaitForEvent(t *testing.T) {
-	t.Run("entrega el evento y se rearma", func(t *testing.T) {
+	t.Run("it delivers the event and rearms", func(t *testing.T) {
 		ch := make(chan event, 1)
 		ch <- tickMsg{}
 		if ev := waitForEvent(ch)(); ev == nil {
-			t.Fatal("waitForEvent no devolvio el evento pendiente")
+			t.Fatal("waitForEvent returned no pending event")
 		}
 		ch <- tickMsg{}
 		if ev := waitForEvent(ch)(); ev == nil {
-			t.Error("la bomba no se rearma: el segundo evento nunca llega")
+			t.Error("the pump does not rearm: the second event never arrives")
 		}
 	})
 
-	t.Run("canal cerrado devuelve nil", func(t *testing.T) {
+	t.Run("a closed channel returns nil", func(t *testing.T) {
 		ch := make(chan event)
 		close(ch)
 		if ev := waitForEvent(ch)(); ev != nil {
-			t.Errorf("waitForEvent con el canal cerrado = %#v, want nil", ev)
+			t.Errorf("waitForEvent with the channel closed = %#v, want nil", ev)
 		}
 	})
 }
 
-// El PRODUCTOR de `collectDoneMsg`: el scan tiene que emitirlo cuando la
-// recolección se acaba. Los demás tests lo inyectan a mano, así que sin este la
-// línea que lo emite —y con ella el cierre real del scan— no la ejercita
-// nadie: el cierre se vería bien en los tests y no llegaría nunca en la app.
-func TestElScanEmiteCollectDoneAlTerminar(t *testing.T) {
+// The other tests inject it by hand, so without this the line that emits it (and with it the real end of the scan) is exercised by nobody: the end would look right in tests and never arrive in the app.
+func TestTheScanEmitsCollectDoneOnTheFinish(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "api")
 	testutil.Init(t, repo)
@@ -1120,24 +975,18 @@ func TestElScanEmiteCollectDoneAlTerminar(t *testing.T) {
 		_, ok := ev.(collectDoneMsg)
 		return ok
 	}) {
-		t.Fatal("el scan no emitió collectDoneMsg: el pipeline nunca cierra")
+		t.Fatal("the scan emitted no collectDoneMsg: the pipeline never closes")
 	}
 }
 
-// --- a quién se le hace fetch automático ---
-
-// `fetchTargets` decide a qué repos se les hace fetch tras un scan. Los tres
-// filtros son la razón de que el fetch automático no golpee repos sin
-// upstream, sin repo, ni uno que ya está en curso: los tres son ruido en
-// el log de git y, en el caso del que ya está en curso, dos `git fetch` en
-// paralelo sobre el mismo repo.
-func TestFetchTargetsSoloLosReposQueProcede(t *testing.T) {
-	conRepo := "/tmp/con-repo"
-	sinRepo := "/tmp/sin-repo"
+// The three filters are the reason the automatic fetch does not hit repos with no upstream, with no repo, or one already in flight: the first two are noise in the git log and the third would mean two `git fetch` in parallel on the same repo.
+func TestFetchTargetsOnlyTheReposItShouldFetch(t *testing.T) {
+	conRepo := "/tmp/with-repo"
+	sinRepo := "/tmp/no-repo"
 	enCurso := "/tmp/en-curso"
 	m := newTestModel(t, []discovery.Project{
-		proj("con-repo", conRepo, true),
-		proj("sin-repo", sinRepo, false),
+		proj("with-repo", conRepo, true),
+		proj("no-repo", sinRepo, false),
 		proj("en-curso", enCurso, true),
 	}, map[string]gitstatus.Snapshot{
 		conRepo: snapClean(),
@@ -1152,104 +1001,78 @@ func TestFetchTargetsSoloLosReposQueProcede(t *testing.T) {
 	}
 }
 
-// Un snapshot con error (por ejemplo el repo roto) tampoco se fetchea: no hay
-// nada que traer de un repo que ni siquiera abre.
-func TestFetchTargetsSaltaElRepoConError(t *testing.T) {
+func TestFetchTargetsJumpsTheRepoWithError(t *testing.T) {
 	roto := "/tmp/roto"
-	bueno := "/tmp/bueno"
+	good := "/tmp/good"
 	m := newTestModel(t, []discovery.Project{
-		proj("roto", roto, true), proj("bueno", bueno, true),
+		proj("roto", roto, true), proj("good", good, true),
 	}, map[string]gitstatus.Snapshot{
-		roto:  {Err: "no such repository"},
-		bueno: snapClean(),
+		roto: {Err: "no such repository"},
+		good: snapClean(),
 	})
 	got := m.fetchTargets()
-	if len(got) != 1 || got[0] != bueno {
-		t.Errorf("fetchTargets = %v, want solo [%s]", got, bueno)
+	if len(got) != 1 || got[0] != good {
+		t.Errorf("fetchTargets = %v, want solo [%s]", got, good)
 	}
 }
 
-// `rescan` arranca un pipeline nuevo. No se mira el Cmd que devuelve
-// (startScanCmd devuelve nil siempre: publica por el canal), sino el estado que
-// deja: sin `scanning` la app se creería que no hay nada en curso y el segundo
-// rescan se colaría sin avisar.
-func TestRescanCuandoNoHayScanEnCurso(t *testing.T) {
+// The state left behind is what is checked, not the returned Cmd (startScanCmd always returns nil and publishes through the channel): without `scanning` the app would believe nothing is in flight and the second rescan would slip in without warning.
+func TestRescanWhenNotThereScanInCourse(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
 		map[string]gitstatus.Snapshot{"/tmp/api": snapClean()})
 	m.scanning = false
 	m, _ = press(m, "r")
 	if !m.scanning {
-		t.Error("rescan no marco el scan como en curso")
+		t.Error("rescan did not mark the scan as running")
 	}
 }
 
-// El límite de concurrencia del fetch es un semáforo, y su rama de "cancelado
-// esperando hueco" no es decorativa: un repo que no llega a ejecutarse no debe
-// contarse ni como ok ni como fallo (si no, `fetch all` sobre 20 repos
-// cerraría con "1 ok, 19 failed" tras un simple Ctrl-C).
-//
-// Inline en el `select` de la goroutine, esta rama no se podía probar sin una
-// carrera (cancelar mientras N goroutines esperan turno). Con `adquirirSlot`
-// suelta, llenar el semáforo y cancelar es determinista.
-func TestAdquirirSlot(t *testing.T) {
-	t.Run("con hueco lo toma", func(t *testing.T) {
+// The "cancelled while waiting for a slot" branch is not decorative: a repo that never ran must count neither as ok nor failed, or fetch all over 20 repos closes with "1 ok, 19 failed" after a plain Ctrl-C.
+func TestAcquireSlot(t *testing.T) {
+	t.Run("with room it takes it", func(t *testing.T) {
 		sem := make(chan struct{}, 2)
 		if !adquirirSlot(context.Background(), sem) {
-			t.Error("adquirirSlot = false con un hueco libre, want true")
+			t.Error("adquirirSlot = false with a free slot, want true")
 		}
 		if len(sem) != 1 {
-			t.Errorf("el hueco no se ocupo: len(sem) = %d, want 1", len(sem))
+			t.Errorf("the slot was not taken: len(sem) = %d, want 1", len(sem))
 		}
 	})
 
-	t.Run("cancelado sin hueco no lo toma", func(t *testing.T) {
+	t.Run("cancelled with no slot it does not take it", func(t *testing.T) {
 		sem := make(chan struct{}, 1)
-		sem <- struct{}{} // ocupado: el siguiente tiene que esperar
+		sem <- struct{}{} // taken: the next one has to wait
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		if adquirirSlot(ctx, sem) {
-			t.Error("adquirirSlot = true con el semáforo lleno y el contexto cancelado, want false")
+			t.Error("adquirirSlot = true with the semaphore full and the context cancelled, want false")
 		}
 		if len(sem) != 1 {
-			t.Errorf("ocupó un hueco que no era suyo: len(sem) = %d, want 1", len(sem))
+			t.Errorf("it took a slot that was not its own: len(sem) = %d, want 1", len(sem))
 		}
 	})
 
-	// Y el caso que de verdad importa en la app: sin cancelar, esperar un hueco
-	// que se libera tiene que concederse. Un `select` mal escrito (priorizando
-	// ctx.Done) passesía por aquí y devolvería false sin motivo.
-	t.Run("espera a que se libere", func(t *testing.T) {
+	// A badly written select (prioritizing ctx.Done) would slip through here and return false for no reason.
+	t.Run("it waits for a slot to free up", func(t *testing.T) {
 		sem := make(chan struct{}, 1)
 		sem <- struct{}{}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go func() {
-			<-sem // libera como lo haría el fetch anterior
+			<-sem // released the way the previous fetch would
 		}()
 		if !adquirirSlot(ctx, sem) {
-			t.Error("adquirirSlot = false esperando un hueco que se liberaba, want true")
+			t.Error("adquirirSlot = false while waiting for a slot that was freeing, want true")
 		}
 	})
 }
 
-// gitLentoEspera devuelve un shim de `git` que se cuela en el PATH y se queda
-// esperando 30s en cada `fetch`, antes de delegar el resto de verbos en el git de
-// verdad. Es lo que hace reproducible la cola del fetch sin red: con concurrency=1
-// el primer fetch retiene el único hueco 30s, así que los demás están de verdad
-// esperando turno cuando se cancela.
-//
-// `exec`, no `sleep & wait`: con un nieto, el SIGKILL de CommandContext mata al
-// shim pero el nieto se queda con el pipe de stdout y Output() no vuelve nunca
-// (medido). Con exec hay un solo proceso y se mata entero.
-// `marcar` es el fichero que el shim toca al arrancar un fetch: es la señal de
-// "este repo está DENTRO del subprocess ahora mismo". Sin ella no hay forma de
-// saber cuándo el hueco quedó ocupado, porque recordExec solo corre cuando el
-// subprocess TERMINA (y este se cuelga 30s a propósito).
+// With concurrency=1 the first fetch holds the only slot for 30s; `exec` and not `sleep & wait` because a grandchild keeps stdout's pipe and Output() never returns (measured), and `marcar` is the shim's only signal that the slot is taken since recordExec runs when the process ENDS.
 func gitLentoEspera(t *testing.T, marcar string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
 	if err != nil {
-		t.Skip("git no disponible")
+		t.Skip("git not available")
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
@@ -1261,7 +1084,6 @@ func gitLentoEspera(t *testing.T, marcar string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// esperaDentroDelShim espera a que algún fetch haya arrancado de verdad.
 func esperaDentroDelShim(t *testing.T, marcar string, plazo time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(plazo)
@@ -1271,58 +1093,36 @@ func esperaDentroDelShim(t *testing.T, marcar string, plazo time.Duration) {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("ningún fetch llegó a arrancar en %s", plazo)
+	t.Fatalf("no fetch got to start in %s", plazo)
 }
 
-// fetchEnCola es cuántos repos esperan turno en ESTE test: uno tiene el hueco y
-// el resto hace cola.
 const fetchEnCola = 12
 
-// El guard de `adquirirSlot` DENTRO del batch: un repo que se cancela mientras
-// ESPERA TURNO no llega a ejecutar `git fetch`.
-//
-// El shim retiene el hueco; el command log es lo que se mira. Y hay una razón
-// concreta para NO mirar otra cosa, que se tardó tres intentos en averiguar:
-//
-//   - El shim no sirve: con el contexto ya cancelado, `exec.CommandContext` ni
-//     siquiera lanza el binario, así que el shim no escribe tanto si el guard
-//     funciona como si no. Medido.
-//   - `fetchStateMsg`/`fetchDoneMsg` tampoco: `sendEvent` con el ctx cancelado
-//     entrega el mensaje la mitad de las veces (981/2000), así que un test que
-//     mira el canal PASA POR ACCIDENTE la mitad de las veces con el bug dentro.
-//     Falso negativo del 50%, que es peor que no tener test.
-//   - `rec.Entries()` sí: `recordExec` se llama desde `runGit` SIEMPRE, tanto si
-//     el subprocess arrancó como si no. Es el único registro del intento, y por
-//     eso un fetch que pasó el guard deja entrada y uno que no, no.
-func TestFetchBatchLosCanceladosEnEsperaNoEjecutanGit(t *testing.T) {
-	marcar := filepath.Join(t.TempDir(), "dentro")
+// Only the command log is watched: with the context already cancelled the shim writes whether or not the guard works, and the fetchState/fetchDone events deliver half the time (981/2000), a 50% false negative worse than no test; rec.Entries() works because recordExec runs from runGit either way.
+func TestFetchBatchTheCancelledInWaitsNotRunGit(t *testing.T) {
+	marcar := filepath.Join(t.TempDir(), "inside")
 	gitLentoEspera(t, marcar)
 
 	paths := make([]string, fetchEnCola)
 	projects := make([]discovery.Project, fetchEnCola)
 	states := make(map[string]gitstatus.Snapshot, fetchEnCola)
 	for i := range paths {
-		// Los dirs tienen que EXISTIR: con `cmd.Dir` inexistente, Start falla
-		// antes de ejecutar el shim y el test esperaría una entrada que no llega.
+		// The dirs have to EXIST: with a missing `cmd.Dir` Start fails before running the shim and the test would wait for an entry that never comes.
 		paths[i] = t.TempDir()
 		projects[i] = proj(fmt.Sprintf("repo-%02d", i), paths[i], true)
 		states[paths[i]] = snapClean()
 	}
 	m := newTestModel(t, projects, states)
 	rec := cmdlog.Active()
-	t.Cleanup(func() { cmdlog.SetRecorder(nil) }) // el log del test siguiente
-	m.cfg.FetchConcurrency = 1                    // un solo hueco: el resto TIENE que esperar
+	t.Cleanup(func() { cmdlog.SetRecorder(nil) }) // the next test's log
+	m.cfg.FetchConcurrency = 1                    // a single slot: the rest HAVE to wait
 
 	m.fetchBatchCmd(paths, cmdlog.ClassAction)
 
-	// El primero retiene el hueco: su fetch ya está DENTRO del subprocess (el
-	// shim lo ha tocado). Los demás ya emitieron su "fetching" y están esperando.
 	esperaDentroDelShim(t, marcar, 10*time.Second)
 
 	m.cancel()
 
-	// Margen para que un fetch que hubiera pasado el guard llegue a registrar.
-	// Si va a arrancar, arranca enseguida: el shim se cuelga 30s después.
 	time.Sleep(time.Second)
 
 	var ejecutados []string
@@ -1333,7 +1133,7 @@ func TestFetchBatchLosCanceladosEnEsperaNoEjecutanGit(t *testing.T) {
 		ejecutados = append(ejecutados, e.Dir)
 	}
 	if len(ejecutados) > 1 {
-		t.Errorf("fetches que salieron a subprocess = %v, want solo el primero: %d de %d en cola llegaron a ejecutar pese a la cancelación",
+		t.Errorf("fetches that went out to a subprocess = %v, want only the first: %d of %d queued got to run despite the cancellation",
 			ejecutados, len(ejecutados)-1, fetchEnCola-1)
 	}
 }

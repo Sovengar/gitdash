@@ -1,4 +1,3 @@
-// Tests de worktrees: parseo canned y recolección real.
 package gitstatus
 
 import (
@@ -23,11 +22,10 @@ func TestParseWorktrees(t *testing.T) {
 		t.Errorf("wts[0] = %+v", wts[0])
 	}
 	if wts[1].Path != "/repos/wt2" || wts[1].Branch != "" {
-		t.Errorf("wts[1] = %+v (detached: branch vacía)", wts[1])
+		t.Errorf("wts[1] = %+v (detached: empty branch)", wts[1])
 	}
 }
 
-// El conteo incluye worktrees aunque no tengan marcador.
 func TestCollectWorktrees(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtA := t.TempDir()
@@ -37,14 +35,13 @@ func TestCollectWorktrees(t *testing.T) {
 
 	snap := Collect(t.Context(), dir, "", false)
 	if len(snap.Worktrees) != 2 {
-		t.Fatalf("wts = %d, want 2 (marcador o no)", len(snap.Worktrees))
+		t.Fatalf("wts = %d, want 2 (with marker or not)", len(snap.Worktrees))
 	}
 	if snap.Worktrees[0].Branch != "wt-a" {
 		t.Errorf("branch = %q, want wt-a", snap.Worktrees[0].Branch)
 	}
 }
 
-// gitOut ejecuta git en dir y devuelve stdout (helper local de los tests).
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -56,7 +53,6 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// RemoveWorktree borra el worktree (carpeta + registro) y NUNCA la rama.
 func TestRemoveWorktreeRemovesAndKeepsBranch(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-a")
@@ -66,45 +62,41 @@ func TestRemoveWorktreeRemovesAndKeepsBranch(t *testing.T) {
 		t.Fatalf("RemoveWorktree: %v", err)
 	}
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
-		t.Errorf("la carpeta del worktree sigue existiendo: %v", err)
+		t.Errorf("the worktree folder still exists: %v", err)
 	}
-	// El registro desaparece: git ya no lo lista.
 	if snap := Collect(t.Context(), dir, "", false); len(snap.Worktrees) != 0 {
-		t.Errorf("worktrees tras borrar = %d, want 0", len(snap.Worktrees))
+		t.Errorf("worktrees after deleting = %d, want 0", len(snap.Worktrees))
 	}
-	// La rama sobrevive.
 	if branches := gitOut(t, dir, "branch", "--list", "wt-a"); !strings.Contains(branches, "wt-a") {
-		t.Errorf("la rama wt-a desapareció: %q", branches)
+		t.Errorf("the wt-a branch disappeared: %q", branches)
 	}
 }
 
-// Un worktree sucio falla sin force y se borra con force.
 func TestRemoveWorktreeDirtyNeedsForce(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty")
-	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "sin commitear"})
+	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "uncommitted"})
 
 	out, err := RemoveWorktree(t.Context(), dir, wtDir, false)
 	if err == nil {
-		t.Fatalf("se esperaba error sin force; out=%q", out)
+		t.Fatalf("expected an error without force; out=%q", out)
 	}
 	if reason := FailureReason(out, err); reason == "" {
-		t.Error("FailureReason vacío para el fallo sin force")
+		t.Error("FailureReason empty for the failure without force")
 	}
 	if _, statErr := os.Stat(wtDir); statErr != nil {
-		t.Errorf("el worktree sucio se borró pese al fallo: %v", statErr)
+		t.Errorf("the dirty worktree was deleted despite the failure: %v", statErr)
 	}
 
 	if _, err := RemoveWorktree(t.Context(), dir, wtDir, true); err != nil {
 		t.Fatalf("RemoveWorktree force: %v", err)
 	}
 	if _, statErr := os.Stat(wtDir); !os.IsNotExist(statErr) {
-		t.Errorf("el worktree sigue existiendo tras force: %v", statErr)
+		t.Errorf("the worktree still exists after force: %v", statErr)
 	}
 }
 
-// Un worktree en detached se borra igual (no depende de tener rama).
 func TestRemoveWorktreeDetached(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-det")
@@ -115,13 +107,10 @@ func TestRemoveWorktreeDetached(t *testing.T) {
 		t.Fatalf("RemoveWorktree detached: %v", err)
 	}
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
-		t.Errorf("la carpeta detached sigue existiendo: %v", err)
+		t.Errorf("the detached folder still exists: %v", err)
 	}
 }
 
-// Un worktree huérfano (carpeta borrada a mano) no rompe: git lo auto-purga o
-// devuelve un error real, nunca un pánico. Un path que no es worktree sí
-// devuelve error.
 func TestRemoveWorktreePrunableFailsGracefully(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-prune")
@@ -130,27 +119,24 @@ func TestRemoveWorktreePrunableFailsGracefully(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Carpeta ya ausente: el registro huérfano se limpia sin pánico.
 	out, err := RemoveWorktree(t.Context(), dir, wtDir, false)
 	if err != nil && FailureReason(out, err) == "" {
-		t.Errorf("error sin motivo resumible: err=%v out=%q", err, out)
+		t.Errorf("error with no summarisable reason: err=%v out=%q", err, out)
 	}
 	if snap := Collect(t.Context(), dir, "", false); len(snap.Worktrees) != 0 {
-		t.Errorf("el registro huérfano sigue listado: %+v", snap.Worktrees)
+		t.Errorf("the orphan registration is still listed: %+v", snap.Worktrees)
 	}
-	// El force sobre un path ya inexistente tampoco rompe.
 	_, _ = RemoveWorktree(t.Context(), dir, wtDir, true)
 
-	// Un path que no es worktree devuelve error real (sin pánico).
 	notWT := filepath.Join(t.TempDir(), "no-worktree")
 	if err := os.MkdirAll(notWT, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	out2, err2 := RemoveWorktree(t.Context(), dir, notWT, false)
 	if err2 == nil {
-		t.Fatalf("se esperaba error para un path no-worktree; out=%q", out2)
+		t.Fatalf("expected an error for a non-worktree path; out=%q", out2)
 	}
 	if FailureReason(out2, err2) == "" {
-		t.Error("FailureReason vacío para un path no-worktree")
+		t.Error("FailureReason empty for a non-worktree path")
 	}
 }

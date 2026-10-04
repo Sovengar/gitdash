@@ -1,7 +1,3 @@
-// Tests de la configuración de forges: qué proveedor vive en qué host y qué
-// prefijo de subcarpeta lleva cada instancia. Es la capa que hace que un
-// GitLab self-managed (que vive en /git/, no en la raíz del host) resuelva en
-// vez de quedarse sin forge.
 package config
 
 import (
@@ -9,9 +5,6 @@ import (
 	"testing"
 )
 
-// La forma de la sección [forge.*] que se usa: un host por proveedor, el
-// api_base RELATIVO de la instancia y enabled explícito. El prefijo de
-// subcarpeta sale de ahí, no de un segundo dato.
 const forgeSelfManaged = `
 [forge.github]
 enabled = true
@@ -23,14 +16,12 @@ host = "umane.emeal.nttdata.com"
 api_base = "/git/api/v4/"
 `
 
-// Los hosts públicos se resuelven sin declarar nada: sin ellos, hasta un remote
-// de github.com devolvería "forge desconocido" y la acción de PR fallaría en
-// silencio.
+// Public hosts resolve with nothing declared: without them even a github.com remote would return "unknown forge" and the PR action would fail silently.
 func TestForgeDefaults(t *testing.T) {
 	cfg := Defaults()
 	hosts := cfg.ForgeHosts()
 	if len(hosts) != 2 {
-		t.Errorf("ForgeHosts() = %v, want solo los dos públicos", hosts)
+		t.Errorf("ForgeHosts() = %v, want only the two public ones", hosts)
 	}
 	for host, want := range map[string]string{
 		"github.com": "github",
@@ -48,49 +39,41 @@ func TestForgeDefaults(t *testing.T) {
 			t.Errorf("default %q = %+v, want %+v", name, got, want)
 		}
 	}
-	// gitlab.com vive en la raíz de su host: un prefijo inventado mandaría
-	// todos sus proyectos a /git/grupo/proy, que no existe. Y al estar vacío,
-	// el prefijo ni siquiera entra en el mapa.
+	// gitlab.com lives at the root of its host: an invented prefix would send all its projects to /git/group/proj, which does not exist; and being empty, the prefix does not even enter the map.
 	if _, ok := cfg.ForgePrefixes()["gitlab.com"]; ok {
-		t.Error("gitlab.com entró en ForgePrefixes con la raíz del host")
+		t.Error("gitlab.com entered ForgePrefixes with the host root")
 	}
 	if got := cfg.Forges["gitlab"].ClonePrefix(); got != "" {
 		t.Errorf("ClonePrefix() de gitlab.com = %q, want \"\"", got)
 	}
 }
 
-// La forma que necesita un GitLab self-managed en subcarpeta: un host, y un
-// api_base RELATIVO del que sale el prefijo (/git/api/v4/ → "git"). Declarar el
-// host sustituye al del default del proveedor, porque son una sola instancia
-// por proveedor: no es una lista a la que añadir el self-managed.
-func TestForgeSelfManagedEnSubcarpeta(t *testing.T) {
+// Declaring the host replaces the provider default's, because there is one instance per provider: it is not a list the self-managed is added to.
+func TestForgeSelfManagedInSubfolder(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, forgeSelfManaged))
 	if warn != "" {
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	hosts := cfg.ForgeHosts()
 	if len(hosts) != 2 {
-		t.Errorf("ForgeHosts() = %v, want el host declarado y el de github", hosts)
+		t.Errorf("ForgeHosts() = %v, want the declared host and github's", hosts)
 	}
 	if got := hosts["umane.emeal.nttdata.com"]; got != "gitlab" {
 		t.Errorf("ForgeHosts()[umane.emeal.nttdata.com] = %q, want gitlab", got)
 	}
 	if _, ok := hosts["gitlab.com"]; ok {
-		t.Error("el host declarado no sustituyó al del default del proveedor")
+		t.Error("the declared host did not replace the provider's default")
 	}
 	prefixes := cfg.ForgePrefixes()
 	if len(prefixes) != 1 {
-		t.Errorf("ForgePrefixes() = %v, want solo el host con prefijo", prefixes)
+		t.Errorf("ForgePrefixes() = %v, want only the host with a prefix", prefixes)
 	}
 	if got := prefixes["umane.emeal.nttdata.com"]; got != "git" {
-		t.Errorf("prefijo = %q, want \"git\" (derivado de /git/api/v4/)", got)
+		t.Errorf("prefix = %q, want \"git\" (derivado de /git/api/v4/)", got)
 	}
 }
 
-// enabled = false apaga el proveedor entero: ni su host resuelve a forge ni su
-// prefijo entra en el mapa. Es lo que permite dejar una puerta (glab) instalada
-// pero sin Instances declaradas.
-func TestForgeEnabledFalseDeshabilitaElProveedor(t *testing.T) {
+func TestForgeEnabledFalseDisablesTheProvider(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, `
 [forge.gitlab]
 enabled = false
@@ -101,24 +84,21 @@ api_base = "/git/api/v4/"
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if _, ok := cfg.ForgeHosts()["umane.emeal.nttdata.com"]; ok {
-		t.Error("el host de un proveedor deshabilitado resolvió a forge")
+		t.Error("the host of a disabled provider resolved to forge")
 	}
 	if _, ok := cfg.ForgePrefixes()["umane.emeal.nttdata.com"]; ok {
-		t.Error("el prefijo de un proveedor deshabilitado entró en el mapa")
+		t.Error("the prefix of a disabled provider entered the map")
 	}
-	// El flag es POR PROVEEDOR, no por host: gitlab.com tampoco resuelve ya, y
-	// github sí (no es un apagón global).
+	// The flag is PER PROVIDER and not per host: gitlab.com stops resolving too, while github keeps working (this is not a global blackout).
 	if _, ok := cfg.ForgeHosts()["gitlab.com"]; ok {
-		t.Error("gitlab.com resolvió con su proveedor deshabilitado")
+		t.Error("gitlab.com resolved with its provider disabled")
 	}
 	if got := cfg.ForgeHosts()["github.com"]; got != "github" {
 		t.Errorf("ForgeHosts()[github.com] = %q, want github", got)
 	}
 }
 
-// enabled ausente conserva lo declarado antes: el puntero del TOML crudo
-// distingue "no lo he dicho" de "lo he apagado".
-func TestForgeEnabledAusenteNoDeshabilita(t *testing.T) {
+func TestForgeEnabledMissingNotDisables(t *testing.T) {
 	cfg, _ := LoadFrom(write(t, `
 [forge.gitlab]
 host = "git.example.com"
@@ -128,37 +108,34 @@ host = "git.example.com"
 	}
 }
 
-// clone_base es el override explícito del prefijo: gana sobre el derivado del
-// api_base, y es lo que se declara cuando la instancia NO deduce su subcarpeta
-// de la ruta del API.
-func TestForgeCloneBaseEsOverrideDelPrefijo(t *testing.T) {
+func TestForgeCloneBaseIsOverrideOfThePrefix(t *testing.T) {
 	cases := []struct {
 		name string
 		toml string
 		want string
 	}{
 		{
-			name: "sin clone_base sale del api_base",
+			name: "without clone_base it comes from the api_base",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v4/\"\n",
 			want: "git",
 		},
 		{
-			name: "clone_base manda sobre un api_base sin subcarpeta",
+			name: "clone_base wins over an api_base with no subfolder",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/api/v4/\"\nclone_base = \"git\"\n",
 			want: "git",
 		},
 		{
-			name: "clone_base manda sobre un api_base con otra subcarpeta",
+			name: "clone_base wins over an api_base with another subfolder",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v4/\"\nclone_base = \"otro\"\n",
 			want: "otro",
 		},
 		{
-			name: "clone_base con barras se normaliza",
+			name: "clone_base with slashes is normalised",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\nclone_base = \"/git/\"\n",
 			want: "git",
 		},
 		{
-			name: "api_base inesperado no inventa prefijo",
+			name: "an unexpected api_base invents no prefix",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v3/\"\n",
 			want: "",
 		},
@@ -170,26 +147,21 @@ func TestForgeCloneBaseEsOverrideDelPrefijo(t *testing.T) {
 				t.Fatalf("warn inesperado: %q", warn)
 			}
 			if got := cfg.ForgePrefixes()["a.example.com"]; got != tc.want {
-				t.Errorf("prefijo = %q, want %q", got, tc.want)
+				t.Errorf("prefix = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// El prefijo vacío NO va al mapa: con la raíz del host, una entrada "" y su
-// ausencia producen el mismo Project, así que meterse solo añade ruido al mapa
-// que consume el parser.
-func TestForgePrefijoVacioNoEntraEnElMapa(t *testing.T) {
+// An empty prefix does NOT go into the map: with the host root, an "" entry and its absence produce the same Project, so it would only add noise to the map the parser reads.
+func TestForgePrefixEmptyNotEntersInTheMap(t *testing.T) {
 	cfg, _ := LoadFrom(write(t, forgeSelfManaged))
 	if _, ok := cfg.ForgePrefixes()["github.com"]; ok {
-		t.Error("github (sin api_base) entró en ForgePrefixes")
+		t.Error("github (without api_base) entered ForgePrefixes")
 	}
 }
 
-// Un host repetido no aparece dos veces ni pisa al otro proveedor: el mapa es
-// host → proveedor, y el host de un default que se vuelve a declarar es el
-// mismo host.
-func TestForgeHostDuplicadoNoSeRepite(t *testing.T) {
+func TestForgeHostDuplicateNotIsRepeats(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, `
 [forge.github]
 host = "github.com"
@@ -202,7 +174,7 @@ host = "gitlab.com"
 	}
 	hosts := cfg.ForgeHosts()
 	if len(hosts) != 2 {
-		t.Errorf("ForgeHosts() = %v, want dos hosts, uno por proveedor", hosts)
+		t.Errorf("ForgeHosts() = %v, want two hosts, one per provider", hosts)
 	}
 	for host, want := range map[string]string{
 		"github.com": "github",
@@ -213,31 +185,27 @@ host = "gitlab.com"
 		}
 	}
 	if got := hosts["github.com"]; got != "github" {
-		t.Errorf("el host re-declarado perdió su proveedor: %q", got)
+		t.Errorf("the re-declared host lost its provider: %q", got)
 	}
 }
 
-// Un host vacío o en blanco no inventa una entrada: sin host el proveedor no
-// tiene dónde vivir, y un "" en el mapa haría pasar por GitHub a un remoto sin
-// host (ForgeForHost normaliza a "" igual).
-func TestForgeHostVacioNoEntraEnElMapa(t *testing.T) {
+// An empty or blank host does not invent an entry: without a host the provider has nowhere to live, and an "" in the map would make a hostless remote pass for GitHub (ForgeForHost normalizes to "" too).
+func TestForgeHostEmptyNotEntersInTheMap(t *testing.T) {
 	cfg, _ := LoadFrom(write(t, `
 [forge.gitlab]
 host = "   "
 `))
 	for h := range cfg.ForgeHosts() {
 		if h == "" {
-			t.Error("ForgeHosts() tiene la clave vacía")
+			t.Error("ForgeHosts() has the empty key")
 		}
 	}
 	if got := cfg.Forges["gitlab"].Host; got != "gitlab.com" {
-		t.Errorf("host = %q, want el del default (el vacío no sustituye)", got)
+		t.Errorf("host = %q, want the default's (the empty one does not replace)", got)
 	}
 }
 
-// El nombre del proveedor se normaliza: viene de una clave escrita a mano, y un
-// "GitLab" que no casara con la constante dejaría la acción sin puerta.
-func TestForgeNombreNormalizado(t *testing.T) {
+func TestForgeNameNormalized(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, `
 [forge.GitLab]
 host = "a.example.com"
@@ -250,37 +218,29 @@ host = "a.example.com"
 	}
 }
 
-// Un proveedor que no soportamos avisa en vez de aceptarse en silencio: con él,
-// cada remote de ese host resolvería a un forge sin puerta y el PR fallaría con
-// un motivo que no señala la config.
-func TestForgeNoSoportadoAvisa(t *testing.T) {
+func TestForgeNotSupportedWarns(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, `
 [forge.bitbucket]
 host = "bitbucket.org"
 `))
 	if !strings.Contains(warn, "bitbucket") {
-		t.Errorf("warn sin el proveedor no soportado: %q", warn)
+		t.Errorf("warn without the unsupported provider: %q", warn)
 	}
 	if _, ok := cfg.ForgeHosts()["bitbucket.org"]; ok {
-		t.Error("el proveedor no soportado quedó en el mapa de hosts")
+		t.Error("the unsupported provider stayed in the hosts map")
 	}
 }
 
-// Un api_base vacío no borra el declarado: la clave ausente y la vacía son lo
-// mismo aquí (mismo criterio que el resto de secciones con punteros).
-func TestForgeAPIBaseVacioConservaElDefault(t *testing.T) {
+func TestForgeAPIBaseEmptyKeepsTheDefault(t *testing.T) {
 	cfg, _ := LoadFrom(write(t, `
 [forge.gitlab]
 api_base = ""
 `))
 	if got := cfg.Forges["gitlab"].APIBase; got != DefaultGitLabAPIBase {
-		t.Errorf("api_base = %q, want el default %q", got, DefaultGitLabAPIBase)
+		t.Errorf("api_base = %q, want the default %q", got, DefaultGitLabAPIBase)
 	}
 }
 
-// La acción de PR existe y su tecla no pisa a ninguna otra: dos acciones con la
-// misma tecla harían que actionForKey devolviera una u otra al azar (recorre el
-// mapa).
 func TestDefaultKeybindingsPR(t *testing.T) {
 	cfg := Defaults()
 	if got := cfg.KeyFor("pr"); got != "O" {
@@ -288,11 +248,10 @@ func TestDefaultKeybindingsPR(t *testing.T) {
 	}
 	for action, key := range DefaultKeybindings() {
 		if action != "pr" && key == "O" {
-			t.Errorf("la acción %q también usa la tecla O", action)
+			t.Errorf("the action %q also uses the O key", action)
 		}
 	}
-	// La etiqueta va SIN la tecla dentro: la antepone HintBarLines, y si la
-	// llevara un rebind produciría hints como "W O open PR".
+	// The label carries NO key inside (HintBarLines prepends it), or a rebind would produce hints like "W O open PR".
 	if label, ok := hintLabels["pr"]; !ok || label != "open PR" {
 		t.Errorf("hintLabels[pr] = %q (%v), want \"open PR\"", label, ok)
 	}
@@ -300,20 +259,16 @@ func TestDefaultKeybindingsPR(t *testing.T) {
 	if !strings.Contains(hints, "O open PR") {
 		t.Errorf("hint de PR ausente: %v", cfg.HintBarLines())
 	}
-	// "open PR" a secas en los hints, y no "new PR": la caja del formulario se
-	// titula "new PR · repo" y un substring laxo encontraría los dos.
 	if strings.Contains(hints, "new PR") {
-		t.Errorf("los hints no deberían decir \"new PR\": %v", cfg.HintBarLines())
+		t.Errorf("the hints should not say \"new PR\": %v", cfg.HintBarLines())
 	}
-	// Y tampoco una tecla que el enrutado resuelve por su cuenta.
 	for _, fixed := range []string{"q", "k", "j", "up", "down", "home", "end", "enter", "esc", "tab"} {
 		if DefaultKeybindings()["pr"] == fixed {
-			t.Errorf("pr pisa la tecla fija %q", fixed)
+			t.Errorf("pr overrides the fixed key %q", fixed)
 		}
 	}
 }
 
-// La tecla de PR se rebindea como cualquier otra, y el hint lo sigue.
 func TestDefaultKeybindingsPRRebind(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, `
 [keybindings]
@@ -331,41 +286,34 @@ pr = "W"
 	}
 }
 
-// Un proveedor con nombre VACIO se ignora, en vez de entrar en el mapa con la
-// clave "": un host "" no puede atribuirse a nadie y `ForgeForHost("")` devolveria
-// ese proveedor fantasma. El caso sale de una tabla [forge.""] en el TOML, que
-// es raro pero se puede escribir.
-func TestForgeConNombreVacioSeIgnora(t *testing.T) {
+// A provider with an EMPTY name is ignored instead of entering the map with the "" key: a "" host cannot be attributed to anyone and `ForgeForHost("")` would return that phantom provider; the case comes from a `[forge.""]` table in the TOML, which is rare but writable.
+func TestForgeWithNameEmptyIsIgnores(t *testing.T) {
 	cfg := Defaults()
 	cfg.addForge("   ", forgeConfig{})
 	for name := range cfg.Forges {
 		if name == "" {
-			t.Errorf("Forges = %v, want sin entrada de nombre vacio", cfg.Forges)
+			t.Errorf("Forges = %v, want no entry with an empty name", cfg.Forges)
 		}
 	}
 	if got := len(cfg.Forges); got != len(Defaults().Forges) {
-		t.Errorf("Forges tiene %d entradas, want %d (las de por defecto)", got, len(Defaults().Forges))
+		t.Errorf("Forges has %d entries, want %d (the default ones)", got, len(Defaults().Forges))
 	}
 }
 
-// Un proveedor habilitado cuyo Host es VACIO no aporta nada, ni al mapa de
-// hosts ni al de prefijos. Es un error de configuracion que se avisa al cargar,
-// pero un host vacio no puede colarse en el mapa: `ForgeForHost("")` tiene que
-// seguir sin respuesta, y un "" en ForgeHosts haria que cualquier remote sin host
-// resolved se atribuyera a este proveedor.
-func TestForgeSinHostNoEntraEnLosMapas(t *testing.T) {
+// An enabled provider with an EMPTY Host contributes nothing to either map: it is a configuration error warned about on load, but an empty host must not slip into the map, since `ForgeForHost("")` has to keep answering nothing and an "" in ForgeHosts would attribute every hostless remote to this provider.
+func TestForgeWithoutHostNotEntersInTheMaps(t *testing.T) {
 	cfg := Defaults()
 	enabled := true
-	vacio := "   "
-	cfg.addForge("bitbucket", forgeConfig{Enabled: &enabled, Host: &vacio})
+	empty := "   "
+	cfg.addForge("bitbucket", forgeConfig{Enabled: &enabled, Host: &empty})
 
 	if got, ok := cfg.ForgeHosts()["bitbucket"]; ok && got != "" {
-		t.Errorf("ForgeHosts()[%s] = %q, want sin entrada (el host es vacio)", "bitbucket", got)
+		t.Errorf("ForgeHosts()[%s] = %q, want no entry (the host is empty)", "bitbucket", got)
 	}
 	if got, ok := cfg.ForgePrefixes()["bitbucket"]; ok {
-		t.Errorf("ForgePrefixes()[%s] = %q, want sin entrada", "bitbucket", got)
+		t.Errorf("ForgePrefixes()[%s] = %q, want no entry", "bitbucket", got)
 	}
 	if f, ok := cfg.ForgeHosts()[""]; ok {
-		t.Errorf("ForgeHosts()[\"\"] = %q, want sin entrada (un host vacio no es ningun forge)", f)
+		t.Errorf("ForgeHosts()[\"\"] = %q, want no entry (an empty host is no forge)", f)
 	}
 }

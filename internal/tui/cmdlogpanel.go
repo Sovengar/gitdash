@@ -1,7 +1,4 @@
-// Vista del command log: qué se ha ejecutado de verdad, con qué resultado y
-// por qué. Es un view mode más, no un overlay: necesita
-// scroll y muchas líneas, y tapar la tabla obligaría a reservar su alto igual
-// que hacen los toasts.
+// Another view mode, not an overlay: it needs scroll and many lines, and covering the table would force reserving its height the way toasts do.
 package tui
 
 import (
@@ -14,27 +11,19 @@ import (
 	"gitdash/internal/cmdlog"
 )
 
-// Anchos de columna del panel. El argv se lleva lo que sobra: en un log el
-// comando es lo que hay que leer entero.
+// Column widths, where the argv gets what is left: in a log the command is what has to be read whole.
 const (
-	logColTime    = 12 // "15:04:05.000"
-	logColKind    = 7  // "key", "pull", "fetch", "worktree" (truncado)
+	logColTime    = 12
+	logColKind    = 7
 	logColRepo    = 14
 	logColOutcome = 16
-	logColVerdict = 8 // "412ms", "exit 1"
+	logColVerdict = 8
 	logColSep     = 2
-	// logMinArgv es el mínimo que se le concede al argv antes de empezar a
-	// quitarle columnas a las demás. 20 cabe "git pull --ff-only": por debajo
-	// de eso el comando se lee a medias, que es justo lo que el panel existe
-	// para evitar. La variante más larga (`--rebase --autostash`) se recorta,
-	// pero la línea de intención de arriba ya nombra la variante.
+	// 20 fits "git pull --ff-only": below that the command is read half-way, which is exactly what this panel exists to prevent.
 	logMinArgv = 20
 )
 
-// logColumns reparte el ancho interior entre las columnas. Degrada en orden de
-// menor valor: primero el veredicto, luego el resultado y el repo, y solo
-// entonces el argv. bordered ya recorta cada línea al ancho interior, así que
-// esto es para no desperdiciar terminal, no para evitar desbordes.
+// It degrades by value (verdict first, then result and repo, and only then the argv); bordered already clips every line to the inner width, so this is about not wasting terminal, not about avoiding overflows.
 type logColumns struct {
 	kind, repo, outcome, verdict, argv int
 }
@@ -53,12 +42,9 @@ func computeLogColumns(inner int) logColumns {
 		case c.repo > 0:
 			c.repo = 0
 		case c.kind > 4:
-			// KIND se recorta pero no desaparece: es la columna que explica el
-			// argv ("key p" vs "exec"), y sin ella la línea no se lee. Por eso
-			// el render la pinta sin guarda: kind nunca vale 0.
+			// KIND is clipped but never disappears: it is the column that explains the argv ("key p" vs "exec"), and without it the line does not read, which is why the render paints it unguarded (kind is never 0).
 			c.kind = 4
 		default:
-			// Sin sitio para más: el argv se queda con lo que hay.
 			c.argv = max(0, inner-logColTime-logColSep)
 			return c
 		}
@@ -67,9 +53,7 @@ func computeLogColumns(inner int) logColumns {
 	return c
 }
 
-// logEntries devuelve las entradas visibles con el filtro aplicado, y refresca
-// la copia cacheada solo cuando el ring ha cambiado. Sin esto, cada frame
-// copiaría 500 entradas para pintar las ~30 últimas.
+// Without the cached copy every frame would copy 500 entries to paint the last ~30.
 func (m *Model) logEntries() []cmdlog.Entry {
 	if seq := cmdlog.LastSeq(); seq != m.logCacheSeq {
 		m.logCache = cmdlog.Entries()
@@ -78,8 +62,7 @@ func (m *Model) logEntries() []cmdlog.Entry {
 	if m.logShowAll {
 		return m.logCache
 	}
-	// Por defecto solo las acciones del usuario: las lecturas del scan son
-	// ~4 por repo y repetirían la misma pregunta.
+	// By default only the user's actions: the scan's reads are ~4 per repo and would repeat the same question.
 	out := make([]cmdlog.Entry, 0, len(m.logCache))
 	for _, e := range m.logCache {
 		if e.Class == cmdlog.ClassAction {
@@ -89,32 +72,20 @@ func (m *Model) logEntries() []cmdlog.Entry {
 	return out
 }
 
-// logSection pinta el panel con cabecera, líneas visibles y pie con el
-// desplazamiento. El offset cuenta desde la cola: 0 es "lo más reciente al
-// final", que es donde se mira un log; las entradas nuevas no te sacan de
-// sitio si estabas scrolleado arriba.
+// The offset counts from the tail (0 = most recent at the bottom), which is where a log is read, and new entries do not move you if you were scrolled up.
 func (m *Model) logSection(bodyLines int) string {
 	entries := m.logEntries()
 	cols := computeLogColumns(max(0, m.width-2))
 
-	// El scroll parte de las últimas N líneas que caben (una para la
-	// cabecera), y se recorta para que el desplazamiento nunca deje huecos
-	// al final.
 	visible := max(1, bodyLines-1)
-	// Sin el clamp del offset aquí: logScroll ya lo deja en [0,
-	// len(entries)-visible] en cada pulsación, y `start` vuelve a acotar por
-	// abajo. Un segundo `min` sobre lo mismo era una aritmética que la mutation
-	// no podía distinguir (mutar el 0 del max no cambia ni una fila).
+	// No offset clamp here: logScroll already leaves it in [0, len(entries)-visible] on every keystroke and `start` bounds it again, so a second `min` was arithmetic mutation could not tell apart (mutating the 0 of the max does not move a single row).
 	start := max(0, len(entries)-visible-m.logOffset)
 
 	rows := make([]string, 0, visible)
 	for _, e := range entries[start : start+min(visible, len(entries)-start)] {
 		rows = append(rows, m.logLine(e, cols))
 	}
-	// Rellenar hasta el presupuesto: la caja no debe encogerse porque el log
-	// tenga pocas entradas. rellenaHasta en vez de `for len(rows) < visible`
-	// porque comparar-y-appendar convierte el mutante `<`->`>=` en un cuelgue
-	// (ver el comentario de rellenaHasta en sections.go).
+	// rellenaHasta instead of `for len(rows) < visible`, because comparing and appending turns the `<`->`>=` mutant into a hang (see rellenaHasta in sections.go).
 	rows = rellenaHasta(rows, visible)
 
 	title := "log · actions"
@@ -126,7 +97,6 @@ func (m *Model) logSection(bodyLines int) string {
 	return m.section(title, body)
 }
 
-// logHeader rotula las columnas con los mismos anchos que las líneas.
 func (m Model) logHeader(c logColumns) string {
 	var b strings.Builder
 	b.WriteString(pad("TIME", logColTime))
@@ -146,13 +116,7 @@ func (m Model) logHeader(c logColumns) string {
 	return b.String()
 }
 
-// logLine compone una entrada. La intención se pinta tenue y sin veredicto:
-// es contexto de "qué pediste", no un resultado. El código de salida y la
-// duración van juntos porque sin uno de los dos la línea no dice nada.
-//
-// Todo lo que viene de fuera (el argv, que puede incluir el prompt del marcador)
-// pasa por sanitizeLogText: una entrada tiene que ocupar exactamente UNA línea,
-// sin caracteres de control que inyecten secuencias en la terminal.
+// The intent is painted faint and with no verdict (context for "what you asked", not a result), and everything from outside goes through sanitizeLogText because an entry must take exactly ONE line free of injected control characters.
 func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 	style := styleLogExec
 	if e.Intent {
@@ -160,8 +124,6 @@ func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 	}
 	var b strings.Builder
 	b.WriteString(style.Render(pad(e.At.Format("15:04:05.000"), logColTime)))
-	// La intención se rotula con su tecla ("key p"): es lo que explica
-	// el argv de la línea siguiente.
 	kind := "key " + e.Key
 	if !e.Intent {
 		kind = "exec"
@@ -194,19 +156,10 @@ func (m Model) logLine(e cmdlog.Entry, c logColumns) string {
 	return b.String()
 }
 
-// sanitizeLogText deja un texto apto para una línea del panel: fuera caracteres
-// de control (C0/C1 y DEL), caracteres de formato (Cf: bidi y zero-width) y los
-// separadores de línea/parágrafo U+2028/U+2029 —todos reordenarían o partirían
-// la línea visualmente—, y las secuencias de escape; los saltos de línea y
-// tabuladores se colapsan a un solo espacio. El argv incluye texto no confiable
-// —el prompt del marcador—, así que sin esto una secuencia OSC/CSI inyectada se
-// renderiza tal cual y un prompt multilínea rompe el alto del panel. Solo afecta
-// a la pintura: el argv ejecutado y el registrado no se tocan.
+// Control and format characters, the U+2028/U+2029 separators and escape sequences are removed because they reorder or split the line visually; the argv carries the untrusted marker prompt, and this only affects painting, not the record.
 func sanitizeLogText(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
-	// lastSpace evita que una tirada de saltos/tabuladores ("\r\n", "\n\n")
-	// meta varios espacios: el texto sigue siendo de una línea.
 	lastSpace := false
 	for i := 0; i < len(s); {
 		if s[i] == 0x1b {
@@ -215,9 +168,7 @@ func sanitizeLogText(s string) string {
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
 		i += size
-		// else-if y no switch: el orden ES la regla (un whitespace colapsa, un
-		// control se descarta, y lo demas se pinta), y asi cada condicion queda
-		// dentro de un bloque que el instrumento puede medir.
+		// else-if and not switch: the order IS the rule (a whitespace collapses, a control is dropped, everything else is painted), and this way each condition sits in a block the instrument can measure.
 		switch {
 		case r == '\n' || r == '\r' || r == '\t':
 			if !lastSpace {
@@ -225,13 +176,9 @@ func sanitizeLogText(s string) string {
 				lastSpace = true
 			}
 		case r == utf8.RuneError && size <= 1:
-			// byte inválido: se descarta
 		case unicode.IsControl(r):
-			// C0, C1 y DEL: se descartan
 		case unicode.Is(unicode.Cf, r):
-			// formato (bidi, zero-width): se descarta
 		case r == '\u2028' || r == '\u2029':
-			// separadores de línea/parágrafo: se descartan
 		default:
 			b.WriteRune(r)
 			lastSpace = r == ' '
@@ -240,29 +187,22 @@ func sanitizeLogText(s string) string {
 	return b.String()
 }
 
-// skipEscape devuelve el índice tras la secuencia de escape que arranca en i
-// (s[i] == ESC). Reconoce CSI (parámetros hasta un byte final 0x40–0x7E) y OSC
-// (hasta BEL o ST); para cualquier otra se descarta ESC y el carácter siguiente.
-// Si la secuencia queda sin terminar, se come el resto: mejor perder cola que
-// dejar un fragmento de escape.
+// An unterminated sequence eats the rest: losing the tail beats leaving an escape fragment.
 func skipEscape(s string, i int) int {
 	j := i + 1
 	if j >= len(s) {
 		return j
 	}
 	switch s[j] {
-	case '[': // CSI
+	case '[':
 		j++
 		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 			j++
 		}
-		// min() y no un "j++": una secuencia sin cerrar deja j == len(s) y el
-		// índice devuelto nunca puede pasar del final de la cadena.
+		// min() and not a "j++": an unterminated sequence leaves j == len(s), so the returned index can never pass the end of the string.
 		return min(j+1, len(s))
-	case ']': // OSC
-		// El escaneo arranca en el PRIMER byte del payload: ni el ESC ni el ']'
-		// son terminadores, pero el payload sí forma parte de la secuencia, así
-		// que saltar más allá perdería texto legítimo del argv.
+	case ']':
+		// The scan starts at the FIRST payload byte: neither ESC nor ']' terminates, but the payload is part of the sequence, so skipping further would lose legitimate argv text.
 		j = i + 2
 		for j < len(s) {
 			if s[j] == 0x07 {
@@ -279,9 +219,6 @@ func skipEscape(s string, i int) int {
 	}
 }
 
-// logOutcomeStyle colorea el resultado: lo que integró commits con éxito es
-// verde, y un conflicto o un rechazo en rojo. Un resultado sin color (up-to-date
-// gris) es un acierto también: no había nada que hacer.
 func (m Model) logOutcomeStyle(e cmdlog.Entry) lipglossStyle {
 	if e.Outcome == "" {
 		return styleLogIntent
@@ -296,7 +233,6 @@ func (m Model) logOutcomeStyle(e cmdlog.Entry) lipglossStyle {
 	}
 }
 
-// logVerdictStyle verde si el proceso salió con 0.
 func (m Model) logVerdictStyle(e cmdlog.Entry) lipglossStyle {
 	if e.Exit == 0 {
 		return styleHint
@@ -304,9 +240,6 @@ func (m Model) logVerdictStyle(e cmdlog.Entry) lipglossStyle {
 	return styleError
 }
 
-// logVerdict compone la columna final: duración si la hubo, y el código de
-// salida solo cuando no fue 0 o no se pudo obtener. Una intención no tiene
-// veredicto: no ha corrido nada todavía.
 func logVerdict(e cmdlog.Entry) string {
 	if e.Intent {
 		return ""
@@ -326,10 +259,7 @@ func logVerdict(e cmdlog.Entry) string {
 	return fmt.Sprintf("%dms", e.Dur.Milliseconds())
 }
 
-// logLegend es el aviso persistente del panel: qué teclas hacen qué, igual que
-// los avisos armados. Comparte la sección de keybinds porque comparte función
-// con las hints ("qué hago ahora"), y se fuerza su visibilidad: sin ella el
-// panel sería un texto plano sin explicación de cómo se navega.
+// It shares the keybinds section because it shares its function with the hints ("what do I do now"), and its visibility is forced: without it the panel would be plain text with no explanation of how to navigate.
 func (m Model) logLegend() string {
 	toggle := "show all (reads + auto fetch)"
 	if m.logShowAll {
@@ -339,19 +269,12 @@ func (m Model) logLegend() string {
 	return fmt.Sprintf("command log: j/k scroll · a %s · %s or esc back", toggle, keys)
 }
 
-// logScroll mueve el panel n líneas hacia atrás (n > 0) o hacia la cola
-// (n < 0). El offset se recorta contra el número de líneas visibles, que
-// depende del alto real de la sección: un offset mayor solo dejaría líneas en
-// blanco abajo.
+// The offset is clipped against the visible line count, which depends on the section's real height: a bigger offset would just leave blank lines at the bottom.
 func (m *Model) logScroll(n, visible int) {
 	maxOffset := max(0, len(m.logEntries())-visible)
 	m.logOffset = min(max(0, m.logOffset+n), maxOffset)
 }
 
-// handleLogKey enruta las teclas propias del panel. Se consulta ANTES del
-// enrutado normal de la tabla (igual que los estados armados): j/k/up/down
-// desplazan el panel en vez de mover el cursor, y el resto de teclas sigue su
-// curso normal para que la app nunca quede encerrada aquí dentro.
 func (m *Model) handleLogKey(key string, bodyLines int) bool {
 	visible := max(1, bodyLines-1)
 	switch key {
@@ -363,7 +286,7 @@ func (m *Model) handleLogKey(key string, bodyLines int) bool {
 		return true
 	case "a":
 		m.logShowAll = !m.logShowAll
-		m.logOffset = 0 // el filtro cambia cuántas hay: el offset se recalcula
+		m.logOffset = 0
 		return true
 	case "esc":
 		m.logOpen = false
@@ -378,10 +301,7 @@ func (m *Model) handleLogKey(key string, bodyLines int) bool {
 	return false
 }
 
-// toggleLog abre o cierra el panel. Al abrir se ancla en la cola (lo más
-// reciente visible). Tanto abrir como cerrar sueltan los estados armados:
-// navegar fuera deja el aviso sin sentido, y dentro del panel `a` es "show all",
-// así que un selector de pull armado secuestraría la tecla.
+// Opening and closing both drop the armed states: navigating away makes their warning meaningless, and inside the panel `a` is "show all", so an armed pull selector would hijack the key.
 func (m *Model) toggleLog() {
 	m.logOpen = !m.logOpen
 	m.armed = nil

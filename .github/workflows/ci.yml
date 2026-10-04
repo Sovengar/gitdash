@@ -70,9 +70,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Historial completo: el gate necesita `git diff $BASE...HEAD`, y un
-          # clon de profundidad 1 hace que ese diff sea un no-op — el diff
-          # saldria vacio y el gate aprobaria todos los PRs en silencio.
+          # Full history: the gate needs `git diff $BASE...HEAD`, and a
+          # depth-1 clone makes that diff a no-op — the diff comes out empty and
+          # the gate would approve every PR in silence.
           fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -86,44 +86,44 @@ jobs:
       # The suite is self-contained: every git fixture is created under
       # t.TempDir() via internal/testutil, so no `make fixtures` / testdata
       # checkout is needed.
-      # -coverpkg ./... es lo que hace que el perfil incluya los paquetes
-      # CRUZADOS: sin el, cada test binary solo mide el suyo, y los helpers que
-      # se usan desde otros (internal/testutil sobre todo) salen sin cubrir. Medido
-      # en este repo: sin -coverpkg el total es 97.30%, con el 98.17%. El Makefile
-      # lo pasa y el gate mide sobre lo mismo; si divergen, el gate de local y el
-      # de CI estan midiendo dos cosas distintas.
+      # -coverpkg ./... is what makes the profile include CROSS packages:
+      # without it each test binary only measures its own, and the helpers used
+      # from others (internal/testutil above all) come out uncovered. Measured
+      # in this repo: without -coverpkg the total is 97.30%, with it 98.17%. The
+      # Makefile passes it and the gate measures the same thing; if they diverge,
+      # the local gate and the CI one are measuring two different things.
       - name: Test
         run: go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...
-      # `func main()` llama a os.Exit, asi que no puede correr dentro del binario
-      # de test: corre en un subproceso (cmd/gitdash/main_test.go), y sus
-      # contadores caen en un GOCOVERDIR aparte que `go test -coverprofile` no
-      # fusiona. Sin este paso, main() sale a 0 pese a estar testeado de verdad.
+      # `func main()` calls os.Exit, so it cannot run inside the test binary:
+      # it runs in a subprocess (cmd/gitdash/main_test.go), and its counters land
+      # in a separate GOCOVERDIR that `go test -coverprofile` does not merge.
+      # Without this step main() reads 0 despite being tested for real.
       - name: Coverage of the subprocess (main)
         if: always()
         run: |
           set -euo pipefail
           mkdir -p .covmain
           go build -cover -o .covmain/gitdash ./cmd/gitdash
-          # --print recorre discovery+collect y sale 0. El codigo de salida no
-          # importa aqui: lo que se necesita es el perfil de cobertura.
+          # --print walks discovery+collect and exits 0. The exit code does not
+          # matter here: what is needed is the coverage profile.
           XDG_CONFIG_HOME="$(mktemp -d)" GOCOVERDIR="$PWD/.covmain" \
             ./.covmain/gitdash --print >/dev/null 2>&1 || true
           go tool covdata textfmt -i=.covmain -o=.covmain/main.txt
           test -s .covmain/main.txt
-      # El gate va al final y sin `continue-on-error`: si el perfil no se
-      # escribio (suite rota antes), el step falla, que es lo que tiene que
-      # pasar. Un gate que se salta cuando algo falla no protege nada.
-      # La base del diff NO es el nombre de la rama: en el runner eso no existe
-      # como ref comparable (Actions deja el checkout en un merge sintetico), y
-      # `git diff main...HEAD` sale vacio — el gate informaria "sin lineas
-      # tocadas", o sea un 100% de un diff que no existe. Lo que funciona en los
-      # dos casos (PR y push a main) es el MERGE-BASE explicito, queActions si
-      # materializa en refs/pull/N/merge.
+      # The gate goes last and without `continue-on-error`: if the profile was
+      # not written (the suite broke earlier), the step fails, which is what has
+      # to happen. A gate that is skipped when something fails protects nothing.
+      # The diff base is NOT the branch name: on the runner that does not exist
+      # as a comparable ref (Actions leaves the checkout on a synthetic merge),
+      # and `git diff main...HEAD` comes out empty — the gate would report "no
+      # lines touched", i.e. 100% of a diff that does not exist. What works in
+      # both cases (PR and push to main) is the explicit MERGE-BASE, which
+      # Actions does materialise at refs/pull/N/merge.
       - name: Coverage gate
         run: |
           set -euo pipefail
           if [ ! -f coverage.out ]; then
-            echo "::error::no coverage.out (los tests no lo produjeron)"
+            echo "::error::no coverage.out (the tests did not produce it)"
             exit 1
           fi
           base="origin/${{ github.event.pull_request.base.ref || 'main' }}"
@@ -132,9 +132,9 @@ jobs:
           fi
           merge_base="$(git merge-base "$base" HEAD)"
           if [ -z "$merge_base" ]; then
-            echo "::error::no hay merge-base entre HEAD y $base"
+            echo "::error::no merge-base between HEAD and $base"
             exit 1
           fi
-          echo "diff contra el merge-base $merge_base ($base)"
+          echo "diff against the merge-base $merge_base ($base)"
           scripts/diff-coverage.sh coverage.out "$merge_base" -a "$PWD/.covmain/main.txt" \
             | tee -a "$GITHUB_STEP_SUMMARY"

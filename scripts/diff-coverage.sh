@@ -1,31 +1,20 @@
 #!/usr/bin/env bash
-# diff-coverage.sh — la cobertura de las lineas que este PR TOCA.
+# diff-coverage.sh — coverage of the lines this PR TOUCHES.
+# Why the diff and not the total: a threshold on the project total is a number no PR can move locally (three tested lines take you to 99.9%, a hundred untested lines drop you to 97%), the first is almost always noise and the second almost always a bug, and a gate that cannot tell them apart serves neither.
+# The diff inverts it: it looks ONLY at the changed lines and demands 100% there, so whoever touches the code has to test it and old untouched code cannot block a PR; it is the metric Google calls changelist coverage (Ivankovic et al., "Code Coverage at Google", FSE 2019: 14M changelist measurements over a trillion lines) and the one shown in code review to author and reviewers.
 #
-# Por que el diff y no el total: un umbral sobre el total del proyecto es un
-# numero que ningun PR puede mover de forma.local. Anades tres lineas testeadas
-# y sube a 99.9%; refactorizas cien lineas sin tests y baja a 97%. El primero es
-# casi siempre ruido y el segundo casi siempre un bug, y un gate que no distingue
-# entre los dos no sirve para ninguna de las dos cosas.
+# Usage:  diff-coverage.sh <profile.out> [base] [--min N] [-a extra.profile]
+#   profile.out    output of go test -coverprofile
+#   base           ref to compare against (default: MUTATE_BASE, then main)
+#   --min N         minimum diff percentage (default 100)
+#   -a profile     extra profile to merge (a subprocess's counters; also settable
+#                  with DIFF_COVERAGE_EXTRA, space separated)
 #
-# El diff invierte eso: mira SOLO las lineas del cambio, y exige el 100% de ahi.
-# Quien toca el codigo es quien tiene que testearlo, y codigo viejo que no se
-# toca no puede bloquear un PR. Es la metrica que Google llama changelist
-# coverage (Ivankovic et al., "Code Coverage at Google", FSE 2019: 14M de
-# mediciones de changelist sobre un billon de lineas) y la que se muestra en su
-# code review al autor y a los revisores.
-#
-# Uso:  diff-coverage.sh <perfil.out> [base] [--min N] [-a perfil.extra]
-#   perfil.out     salida de go test -coverprofile
-#   base           ref contra la que se compara (default: MUTATE_BASE, luego main)
-#   --min N        porcentaje minimo del diff (default 100)
-#   -a perfil      perfil adicional a fusionar (contadores de un subproceso;
-#                  tambien se puede con DIFF_COVERAGE_EXTRA, separados por espacio)
-#
-# Salida: tabla por fichero + resumen; exit 1 si el diff queda por debajo del
-# minimo, exit 2 si el calculo no se puede hacer.
+# Output: per-file table + summary; exit 1 if the diff falls below the minimum,
+# exit 2 if the calculation cannot be done.
 set -euo pipefail
 
-PROFILE="${1:?falta el perfil de cobertura}"
+PROFILE="${1:?missing coverage profile}"
 shift || true
 
 BASE="${MUTATE_BASE:-main}"
@@ -33,53 +22,34 @@ MIN=100
 EXTRA_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --min) MIN="${2:?--min necesita un numero}"; shift 2 ;;
+    --min) MIN="${2:?--min needs a number}"; shift 2 ;;
     --min=*) MIN="${1#--min=}"; shift ;;
-    -a) EXTRA_ARGS+=("${2:?-a necesita un perfil}"); shift 2 ;;
+    -a) EXTRA_ARGS+=("${2:?-a needs a profile}"); shift 2 ;;
     -a*) EXTRA_ARGS+=("${1#-a}"); shift ;;
     *) BASE="$1"; shift ;;
   esac
 done
 
 if [ ! -f "$PROFILE" ]; then
-  echo "diff-coverage: no existe el perfil '$PROFILE'" >&2
+  echo "diff-coverage: the profile '$PROFILE' does not exist" >&2
   exit 2
 fi
 
-# El perfil tiene un bloque por test binary: el mismo rango sale N veces, una con
-# count>0 (el binario dueño del paquete) y el resto a 0 (los demas, que
-# instrumentan pero no ejercitan). Deduplicar por rango quedandose con el MAX
-# del count es lo que convierte el perfil en una medida. Sin esto, aqui mismo se
-# leeria 10% de cobertura en un repo al 98%.
+# The profile has one block per test binary: the same range appears N times, one with count>0 (the binary owning the package) and the rest at 0 (the others instrument but do not exercise); deduplicating by range keeping the MAX count is what turns the profile into a measurement, since without it this very repo would read 10% coverage at 98%.
 python3 - "$PROFILE" "$BASE" "$MIN" "${EXTRA_ARGS[@]}" <<'PY'
 import re, subprocess, sys, os
 from collections import defaultdict
 
 profile, base, min_pct = sys.argv[1], sys.argv[2], float(sys.argv[3])
-# Los perfiles extra llegan tal cual, SIN filtrar por existencia: un perfil que
-# no existe tiene que ser un error, no un perfil que se ignora en silencio (eso
-# haria que el gate pasara sin el, que es justo lo que el perfil extra existe
-# para evitar).
+# Extra profiles arrive unfiltered by existence: one that does not exist has to be an error and not silently ignored (which would let the gate pass without it, the exact thing the extra profile exists to prevent).
 argv_extra = [a for a in sys.argv[4:] if not a.startswith("-")]
 
-# --- perfiles adicionales ---------------------------------------------------
-# `go test -coverprofile` NO recoge los contadores de un SUBPROCESO. El unico
-# statement con esa forma en este repo es func main(), que se ejecuta de verdad
-# en un subproceso (ver cmd/gitdash/main_test.go) pero cuyo contador vive en un
-# fichero aparte. Sin este merge, main() sale a 0 en la metrica aunque su test
-# verifique que se ejecuto.
-#
-# Se fusiona por MAX de count sobre el mismo rango, que es la misma regla que
-# para los duplicados del perfil principal: dos medidas del mismo bloque, gana la
-# mayor. Sumar daria un numero sin sentido.
+# `go test -coverprofile` does NOT collect a SUBPROCESS's counters; the only statement with that shape here is func main(), which really runs in a subprocess (see cmd/gitdash/main_test.go) but whose counter lives in a separate file, so without this merge main() reads 0 in the metric even though its test verifies it ran.
+# It is merged by MAX count over the same range, the same rule as the main profile's duplicates: two measurements of the same block, the bigger one wins; adding them would give a meaningless number.
 extra_profiles = argv_extra + os.environ.get("DIFF_COVERAGE_EXTRA", "").split()
 all_profiles = [profile] + extra_profiles
 
-# --- perfil -> bloques unicos con el maximo de count -------------------------
-# El perfil nombra los ficheros como <modulo>/<ruta>, y el path del repo es
-# <ruta>. El prefijo sale de go.mod, no de una constante: si el modulo se
-# renombra, un prefijo hardcodeado deja TODAS las rutas sin casar y el script
-# informa "sin lineas tocadas", que es un aprobado silencioso de un PR entero.
+# The prefix comes from go.mod and not from a constant: if the module were renamed, a hardcoded prefix would leave every path unmatched and the script would report "no lines touched", which is a silent pass for the whole PR.
 prefix = ""
 try:
     with open("go.mod") as fh:
@@ -90,10 +60,10 @@ try:
 except OSError:
     pass
 
-blocks = defaultdict(dict)   # fichero -> {(sl,sc,el,ec): count}
+blocks = defaultdict(dict)   # file -> {(sl,sc,el,ec): count}
 for prof in all_profiles:
     if not os.path.exists(prof):
-        print(f"diff-coverage: perfil adicional no existe: {prof}", file=sys.stderr)
+        print(f"diff-coverage: the extra profile does not exist: {prof}", file=sys.stderr)
         sys.exit(2)
     with open(prof) as fh:
         for line in fh:
@@ -115,10 +85,7 @@ total_stmt = sum(len(v) for v in blocks.values())
 covered = sum(1 for v in blocks.values() for c in v.values() if c > 0)
 pct = 100.0 * covered / total_stmt if total_stmt else 0.0
 
-# --- que lineas ha cambiado el diff ------------------------------------------
-# `git diff -U0` da los hunks sin contexto: una linea modificada cuenta, las de
-# alrededor no. El segundo `-U0` del formato es para que el hunk no traiga el
-# Codigo de la linea anterior.
+# `git diff -U0` gives the hunks without context, so a modified line counts and the ones around it do not.
 def changed_lines(path):
     try:
         out = subprocess.run(
@@ -132,30 +99,21 @@ def changed_lines(path):
     for hunk in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", out, re.M):
         start, count = int(hunk.group(1)), int(hunk.group(2) or 1)
         if count == 0:
-            continue          # solo borrados: no existen, no se cubren
+            continue          # deletions only: they do not exist, they are not coverable
         added.update(range(start, start + count))
     return added or None
 
-# --- diff contra los bloques del perfil --------------------------------------
-# Una linea tocada esta cubierta si pertenece a un bloque con count>0. Un bloque
-# de varias lineas marca todas: en Go un bloque es un grupo de sentencias, y si
-# se ejecuto una del grupo se ejecuto el grupo.
-#
-# Y una linea tocada SOLO cuenta si ademas esta en ALGUN bloque (count>0 o no).
-# `git diff` no distingue un statement de un comentario, de un `}` de cierre o de
-# una linea de import: son lineas añadidas igual. Contarlas como "sin cubrir"
-# haria que un fichero con 60 lineas de comentario y 3 statements saliera al 5%,
-# y que el gate fuera inalcanzable sin importar quantos tests escribas.
+# A touched line is covered when it belongs to a block with count>0, and a multi-line block marks all of them: in Go a block is a group of statements and if one of the group ran, the group ran.
+# And a touched line only counts if it is ALSO in some block (count>0 or not): `git diff` cannot tell a statement from a comment, a closing `}` or an import line, and counting those as "uncovered" would make a file with 60 comment lines and 3 statements read 5% and the gate unreachable no matter how many tests are written.
 diff_total = diff_cov = 0
-por_fichero = defaultdict(lambda: [0, 0])   # fichero -> [total, cubiertas]
-sin_cubrir = []
+per_file = defaultdict(lambda: [0, 0])   # file -> [total, covered]
+uncovered = []
 
 for f, bs in sorted(blocks.items()):
     touched = changed_lines(f)
     if not touched:
         continue
-    # Las lineas con statement segun el propio perfil: la unica fuente de verdad
-    # sobre que es ejecutable.
+    # Statement lines per the profile itself: the only source of truth on what is executable.
     ejecutable = {ln for (sl, sc, el, ec) in bs for ln in range(sl, el + 1)}
     touched = touched & ejecutable
     if not touched:
@@ -167,100 +125,81 @@ for f, bs in sorted(blocks.items()):
         for ln in touched:
             if sl <= ln <= el:
                 hit.add(ln)
-    # Cada linea tocada cuenta UNA vez, sin importar cuantos bloques la toquen:
-    # sin esto, una linea en el borde de tres bloques cuenta triple y el
-    # porcentaje del diff deja de ser un porcentaje de lineas.
+    # Each touched line counts ONCE however many blocks touch it: without this a line on the border of three blocks counts triple and the diff percentage stops being a percentage of lines.
     for ln in touched:
-        por_fichero[f][0] += 1
+        per_file[f][0] += 1
     for ln in hit:
-        por_fichero[f][1] += 1
+        per_file[f][1] += 1
     for ln in sorted(touched - hit):
-        sin_cubrir.append(f"{f}:{ln}")
+        uncovered.append(f"{f}:{ln}")
 
-diff_total = sum(v[0] for v in por_fichero.values())
-diff_cov = sum(v[1] for v in por_fichero.values())
+diff_total = sum(v[0] for v in per_file.values())
+diff_cov = sum(v[1] for v in per_file.values())
 
-print(f"## Cobertura\n")
-print(f"**Total del proyecto: {pct:.2f}%** ({covered}/{total_stmt} statements)")
+print(f"## Coverage\n")
+print(f"**Project total: {pct:.2f}%** ({covered}/{total_stmt} statements)")
 print(f"**Diff vs {base}: "
-      + (f"{(100.0 * diff_cov / diff_total if diff_total else 100.0):.2f}%** ({diff_cov}/{diff_total} lineas)"
-         if diff_total else "sin lineas .go tocadas**") + "")
+      + (f"{(100.0 * diff_cov / diff_total if diff_total else 100.0):.2f}%** ({diff_cov}/{diff_total} lines)"
+         if diff_total else "no .go lines touched**") + "")
 print()
 
-if por_fichero:
-    print("| Fichero | Diff |")
+if per_file:
+    print("| File | Diff |")
     print("| --- | --- |")
-    for f, (t, c) in sorted(por_fichero.items()):
+    for f, (t, c) in sorted(per_file.items()):
         print(f"| `{f}` | {100.0 * c / t:.1f}% ({c}/{t}) |")
     print()
 
-if sin_cubrir:
-    print("<details><summary>Lineas del diff sin cubrir "
-          f"({len(sin_cubrir)})</summary>")
+if uncovered:
+    print("<details><summary>Diff lines not covered "
+          f"({len(uncovered)})</summary>")
     print()
-    for s in sin_cubrir:
+    for s in uncovered:
         print(f"- `{s}`")
     print()
     print("</details>")
     print()
 
-# --- veredicto ---------------------------------------------------------------
-# Dos gates distintos, y por eso dos numeros distintos:
-#
-#   1. El DIFF al 100%. Quien toca el codigo tiene que testearlo. No le
-#      importa nada lo que pase en el resto del repo, y por eso las lineas
-#      viejas sin cubrir no bloquean un PR.
-#   2. El TOTAL con suelo. El diff solo mira lo nuevo: un PR puede meter codigo
-#      sin tests en un fichero que ya estaba cubierto y el diff no lo ve. El
-#      suelo es lo que impide que el conjunto se degrade, y solo puede subir.
-#
-# El suelo vive en un fichero del repo, no en el workflow: si es una excepcion
-# tiene nombre, se commitea y se ve en el diff. Aqui solo se COMPRA el suelo (el
-# total nunca baja del que hay) y se AVISA cuando el total sube, para que subir
-# el suelo sea una decision.
+# Two different gates, hence two different numbers: the DIFF at 100% (whoever touches the code has to test it, old uncovered lines cannot block a PR) and the TOTAL with a floor (the diff only looks at what is new, so a PR can add untested code to an already covered file without the diff noticing, and the floor is what keeps the whole from degrading, being able to only go up).
+# The floor lives in a repo file and not in the workflow: if it is an exception it gets a name, is committed and shows up in the diff; here the floor is only BOUGHT (the total never drops below it) and a higher total WARNS, so raising it stays a decision.
 diff_pct = 100.0 * diff_cov / diff_total if diff_total else 100.0
-fallos = []
+failures = []
 
 if diff_pct < min_pct:
-    fallos.append(f"el diff se queda en {diff_pct:.2f}%, por debajo del {min_pct:.0f}% pedido")
+    failures.append(f"the diff stops at {diff_pct:.2f}%, below the requested {min_pct:.0f}%")
 
 baseline_file = "scripts/coverage-floor"
-suelo = None
+floor = None
 if os.path.exists(baseline_file):
-    # El fichero lleva comentario explicativo arriba, asi que el numero es la
-    # ULTIMA linea no comentada y no vacia. Leer la primera palabra daria "#".
+    # The floor file carries an explanatory comment on top, so the number is the LAST non-empty non-comment line; reading the first word would give "#".
     with open(baseline_file) as fh:
         for l in fh:
             l = l.strip()
             if l and not l.startswith("#"):
-                suelo = float(l)
+                floor = float(l)
                 break
-    if suelo is None:
-        print(f"diff-coverage: {baseline_file} no tiene numero", file=sys.stderr)
+    if floor is None:
+        print(f"diff-coverage: {baseline_file} has no number", file=sys.stderr)
         sys.exit(2)
-    # La comparación va con la MISMA precision con la que se imprime el suelo, y
-    # con la que el total sale en el resumen. Comparar el float crudo contra un
-    # suelo escrito a dos decimales hace fallar el gate por un 0.001: con 1929/1960
-    # el total es 98.11800610376399, se imprime "98.12" y el suelo es "98.12", y
-    # aun asi 98.118 < 98.12. El suelo es un numero que se lee, no un float.
-    if round(pct, 2) < round(suelo, 2):
-        fallos.append(f"el total baja a {pct:.2f}%, por debajo del suelo de {suelo:.2f}% "
-                      f"(sube test, no bajes el suelo; si el suelo esta equivocado, "
-                      f"corrige scripts/coverage-floor en el MISMO commit)")
-    elif round(pct, 2) > round(suelo, 2):
-        print(f"aviso: el total esta en {pct:.2f}% y el suelo es {suelo:.2f}%. "
-              f"Sube scripts/coverage-floor a {pct:.2f} en este commit para que "
-              f"el ratchet no se quede viejo.", file=sys.stderr)
+    # The comparison uses the SAME precision the floor is printed with and the total is printed with: comparing the raw float against a two-decimal floor fails the gate over 0.001 (with 1929/1960 the total is 98.11800610376399, prints as "98.12" against a "98.12" floor, and 98.118 < 98.12); the floor is a number you read, not a float.
+    if round(pct, 2) < round(floor, 2):
+        failures.append(f"the total drops to {pct:.2f}%, below the floor of {floor:.2f}% "
+                      f"(raise the tests, do not lower the floor; if the floor is wrong, "
+                      f"fix scripts/coverage-floor in the SAME commit)")
+    elif round(pct, 2) > round(floor, 2):
+        print(f"warning: the total is {pct:.2f}% and the floor is {floor:.2f}%. "
+              f"Raise scripts/coverage-floor to {pct:.2f} in this commit so "
+              f"the ratchet does not go stale.", file=sys.stderr)
 else:
-    print(f"aviso: no hay {baseline_file}; el suelo del total no se comprueba",
+    print(f"warning: {baseline_file} is missing; the total floor is not checked",
           file=sys.stderr)
 
-for f in fallos:
+for f in failures:
     print(f"diff-coverage: {f}", file=sys.stderr)
 
-if fallos:
-    print(f"diff: {diff_pct:.2f}% (minimo {min_pct:.0f}%) · "
-          f"total: {pct:.2f}% (suelo {suelo if suelo is not None else 'ninguno'})")
+if failures:
+    print(f"diff: {diff_pct:.2f}% (minimum {min_pct:.0f}%) · "
+          f"total: {pct:.2f}% (floor {floor if floor is not None else 'none'})")
     sys.exit(1)
 print(f"diff-coverage: ok (diff {diff_pct:.2f}%, total {pct:.2f}%)")
 PY

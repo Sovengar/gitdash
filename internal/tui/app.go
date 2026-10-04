@@ -1,6 +1,4 @@
-// Package tui implementa el dashboard gitdash con Bubbletea v2:
-// tabla de repos con estado git vivo, filtros, fetch automático en
-// batches y acciones pull/push/editor.
+// Package tui implements the gitdash dashboard on Bubbletea v2.
 package tui
 
 import (
@@ -28,38 +26,29 @@ import (
 	"gitdash/internal/state"
 )
 
-// event es el mensaje unificado del canal de trabajo en background.
 type event interface{}
 
-// scanProjectsMsg anuncia los proyectos descubiertos (antes de recolectar).
 type scanProjectsMsg struct {
 	projects []discovery.Project
-	note     string // error agregado de roots ilegibles
+	note     string
 }
 
-// statusMsg entrega el snapshot vivo de un repo (streaming por repo).
 type statusMsg struct {
 	path string
 	snap gitstatus.Snapshot
 }
 
-// collectDoneMsg marca el fin de la recolección del scan.
 type collectDoneMsg struct{}
 
-// fetchStateMsg cambia el estado de fetch de una fila.
 type fetchStateMsg struct {
 	path  string
-	state string // fetching | ok | failed
+	state string
 	err   string
 }
 
-// fetchDoneMsg cierra un batch de fetch.
 type fetchDoneMsg struct{ ok, failed int }
 
-// actionMsg entrega el resultado de pull/push. cmd es el argv resuelto que se
-// ejecutó (la política de pull puede venir del gitconfig, así que la UI no
-// puede asumir los flags) y rebaseInProgress marca que el pull --rebase
-// dejó el repo con un rebase a medias en vez de fallar limpio.
+// cmd is the resolved argv (the pull policy can come from the gitconfig, so the UI cannot assume flags) and rebaseInProgress means the pull --rebase left the repo mid-rebase instead of failing clean.
 type actionMsg struct {
 	path, kind, cmd  string
 	output           string
@@ -67,54 +56,37 @@ type actionMsg struct {
 	rebaseInProgress bool
 }
 
-// worktreeRemovedMsg entrega el resultado de borrar un worktree: el nombre
-// visible, la salida combinada y el motivo real de git si falló. gen es el
-// token del intento: los resultados cuyo token ya no es el vigente se
-// descartan (se canceló con esc o fueron sustituidos).
+// gen is the attempt token: a result whose token is no longer current is discarded (cancelled with esc or superseded).
 type worktreeRemovedMsg struct {
 	parent, wtPath, name string
 	output, err          string
 	force                bool
 	gen                  int
-	// cmd es el argv resuelto (`git worktree remove [--force] <path>`): sin
-	// él el detail no puede enseñar qué se ejecutó, porque el kind no
-	// implica los flags.
-	cmd string
+	cmd                  string
 }
 
-// execDoneMsg marca la vuelta de un proceso con handoff de terminal:
-// editor, lazygit (tecla g) o shell interactiva (tecla !, vacío). action y
-// argv viajan para que el command log pueda registrar qué se lanzó: con el
-// handoff la salida no se captura, así que el argv es lo único que queda.
+// action and argv travel so the command log can record what was launched: a handoff captures no output, so the argv is all that is left.
 type execDoneMsg struct {
 	path, action string
 	argv         []string
 	err          error
 }
 
-// cmdResultMsg entrega la salida capturada de un comando `!`.
 type cmdResultMsg struct {
 	path, command, output, exit string
 }
 
-// notifyMsg alimenta un toast (el nivel clasifica color e icono).
 type notifyMsg struct {
 	text  string
 	level toastLevel
 }
 
-// tickMsg expira notificaciones y anima el spinner.
 type tickMsg struct{}
 
-// actionResult guarda la salida de la última acción por repo. cmd es el argv
-// resuelto: con la política de pull delegada en el gitconfig es la única forma
-// de que el usuario vea qué se ejecutó de verdad.
 type actionResult struct {
 	kind, cmd, output, err string
 }
 
-// pullOption es una variante del selector de la tecla `p`: la tecla, el kind,
-// su etiqueta y si es un pull de git (los que entran en PullKinds).
 type pullOption struct {
 	key   string
 	kind  string
@@ -122,13 +94,7 @@ type pullOption struct {
 	git   bool
 }
 
-// pullOptions es la fuente única de variantes del selector. Añadir una aquí la
-// propaga al prompt y a PullKinds: sin la tabla, una lista hardcodeada en otro
-// sitio se quedaba sin la variante nueva (bug latente).
-//
-// `pull_ai` NO es un pull de git: no entra en PullKinds (ese mapa alimenta
-// startActionCmd → gitstatus.Run y el guard de RebaseInProgress) y se resuelve
-// como handoff aparte.
+// Single source of the variants (a hardcoded list elsewhere silently missed a new one), and `pull_ai` is absent from PullKinds because it is not a pull of git but its own handoff.
 var pullOptions = []pullOption{
 	{"p", "pull", "default", true},
 	{"r", "pull_rebase", "rebase", true},
@@ -137,10 +103,7 @@ var pullOptions = []pullOption{
 	{"a", "pull_ai", "AI", false},
 }
 
-// PullKinds son las variantes de pull de git del selector de la tecla `p`. Cada
-// una existe porque la política por defecto vive en el gitconfig y hay que poder
-// pisarla sin editar la config de gitdash. Derivadas de pullOptions para que no
-// puedan desincronizarse.
+// Derived from pullOptions so the two cannot desync, and each variant exists so the gitconfig policy can be overridden without editing gitdash's config.
 var PullKinds = func() map[string]string {
 	kinds := make(map[string]string, len(pullOptions))
 	for _, o := range pullOptions {
@@ -151,7 +114,6 @@ var PullKinds = func() map[string]string {
 	return kinds
 }()
 
-// IsPullKind reporta si un kind es una variante de pull.
 func IsPullKind(kind string) bool {
 	for _, k := range PullKinds {
 		if k == kind {
@@ -161,26 +123,20 @@ func IsPullKind(kind string) bool {
 	return false
 }
 
-// visualOption es una variante del selector de la tecla `visual`: la tecla, el
-// subcomando de git-sim, su etiqueta y si necesita el ref del upstream.
 type visualOption struct {
 	key           string
-	sub           string // subcomando de git-sim: pull | merge | rebase
+	sub           string
 	label         string
 	needsUpstream bool
 }
 
-// visualOptions es la fuente única de variantes del selector visual. Añadir una
-// aquí la propaga al prompt y a las etiquetas: sin la tabla, una lista
-// hardcodeada en otro sitio se quedaría sin la variante nueva. NO entra en
-// PullKinds: son caminos distintos (aquí el proceso es git-sim, no git).
+// Single source of the variants, so a new one reaches the prompt and the labels; it is absent from PullKinds because git-sim is not git.
 var visualOptions = []visualOption{
 	{"p", "pull", "pull", false},
 	{"m", "merge", "merge", true},
 	{"r", "rebase", "rebase", true},
 }
 
-// visualOptionForKey resuelve la variante de git-sim para una tecla.
 func visualOptionForKey(key string) (visualOption, bool) {
 	for _, o := range visualOptions {
 		if o.key == key {
@@ -190,7 +146,6 @@ func visualOptionForKey(key string) (visualOption, bool) {
 	return visualOption{}, false
 }
 
-// visualOptionForSub resuelve la variante por su subcomando de git-sim.
 func visualOptionForSub(sub string) (visualOption, bool) {
 	for _, o := range visualOptions {
 		if o.sub == sub {
@@ -200,41 +155,30 @@ func visualOptionForSub(sub string) (visualOption, bool) {
 	return visualOption{}, false
 }
 
-// armedPull es el selector de variante de pull pendiente (nil = ninguno).
-// Captura el path al armar: la segunda tecla resuelve sobre esa fila, no sobre
-// la que esté bajo el cursor cuando llegue.
+// Captures the path when armed: the second key resolves on that row, not on whatever sits under the cursor by then.
 type armedPull struct {
 	path string
 }
 
-// armedVisual es el selector de preview visual (git-sim) pendiente (nil =
-// ninguno). Captura path, upstream y behind al armar para que el argv de la
-// variante y el guard de no-op sean deterministas respecto a la fila elegida,
-// no a la que esté bajo el cursor después.
+// Captures path, upstream and behind when armed so the variant argv and the no-op guard are decided by the chosen row, not by the cursor later.
 type armedVisual struct {
 	path     string
 	upstream string
-	behind   int // commits del upstream ausentes en HEAD, tal como los vio el scan
+	behind   int // commits the upstream is missing from HEAD, as the last scan saw them
 }
 
-// armedRemoval es la confirmación pendiente de borrado de un worktree (nil =
-// sin confirmación). Un único nivel de estado cubre los dos escalones: normal
-// y forzado (force=true).
 type armedRemoval struct {
 	wtPath string
 	parent string
-	name   string // basename visible del worktree
+	name   string
 	force  bool
 }
 
-// matches reporta si la confirmación apunta al mismo worktree (parent + path),
-// comparando paths normalizados.
 func (a armedRemoval) matches(parent, wtPath string) bool {
 	return filepath.Clean(a.parent) == filepath.Clean(parent) &&
 		filepath.Clean(a.wtPath) == filepath.Clean(wtPath)
 }
 
-// Model es el modelo raíz de la TUI.
 type Model struct {
 	cfg      config.Config
 	projects []discovery.Project
@@ -242,26 +186,17 @@ type Model struct {
 
 	store     *state.Store
 	cursor    int
-	offset    int // scroll de la tabla
+	offset    int
 	onlyDirty bool
 	search    string
 
-	// handoff cede la terminal a un proceso y devuelve el mensaje de salida.
-	// En produccion es tea.ExecProcess, que suspende el programa hasta que el
-	// proceso termina. Es un campo y no una llamada suelta porque el handoff es
-	// lo UNICO en la app que un test no puede ejecutar: suspende el programa, y
-	// con el programa suspendido no hay quien lo reanude. Inyectandolo, un test
-	// recibe el argv, no cede nada y devuelve el mensaje de salida el mismo, que
-	// es lo que el comando de la TUI vera al volver.
+	// A field and not a direct call because the handoff is the only thing a test cannot run (it suspends the program, and nobody resumes a suspended program); injecting it lets the test return the exit message without yielding.
 	handoff handoffFunc
 
 	searchActive bool
 	searchInput  textinput.Model
-	collapsed    map[string]bool // grupos plegados
+	collapsed    map[string]bool
 
-	// Expansión de worktrees por path canónico del repo principal.
-	// Ausente = plegado. Persiste en collapsed.json bajo namespace
-	// propio (polaridad inversa a las claves de grupo).
 	expanded map[string]bool
 
 	scanning bool
@@ -272,77 +207,45 @@ type Model struct {
 	spinner spinner.Model
 
 	fetchStates map[string]string
-	running     map[string]string // path → kind en curso (pull/push/collect)
+	running     map[string]string
 	lastAction  map[string]actionResult
 
 	toasts toastManager
 
-	// armed es la confirmación armada de borrado de worktree (nil = ninguna).
-	// Es estado efímero de sesión: no se persiste.
-	armed *armedRemoval
-	// pullArmed es el selector de variante de pull pendiente (nil = ninguno).
-	// Mismo carácter efímero que armed: se resuelve o se cancela con la
-	// siguiente tecla.
-	pullArmed *armedPull
-	// visualArmed es el selector de preview visual con git-sim (nil = ninguno).
-	// Efímero como pullArmed: la segunda tecla elige la variante o cancela.
+	armed       *armedRemoval
+	pullArmed   *armedPull
 	visualArmed *armedVisual
-	// removeGen/removeTokens correlacionan cada borrado en vuelo con su
-	// resultado. removeTokens mapea path del repo padre → token del intento
-	// vigente (el guard de "acción en curso" es por padre, así que el token
-	// también). removeGen es el contador monótono que los genera; un resultado
-	// cuyo token ya no es el vigente se descarta (cancelado con esc o
-	// sustituido).
+	// removeTokens maps parent repo path → current attempt token (the in-flight guard is per parent, so the token is too); a result whose token is no longer current is discarded.
 	removeGen    int
 	removeTokens map[string]int
 
 	width, height int
 
-	// Panel del command log (tecla l). Es un view mode: toma el cuerpo de la
-	// pantalla (tabla y ficha se sustituyen por el log) y se lee con j/k.
-	// logShowAll amplía el filtro a las lecturas del scan y al fetch
-	// automático; por defecto solo se ven las acciones del usuario. logCache
-	// evita re-copiar el ring en cada frame: se refresca solo cuando la
-	// última secuencia cambia.
+	// logCache avoids re-copying the ring on every frame: it refreshes only when the last sequence changes.
 	logOpen     bool
 	logShowAll  bool
 	logOffset   int
 	logCache    []cmdlog.Entry
 	logCacheSeq int
 
-	// Overlay de creación de PR/MR (tecla pr). pr == nil es "cerrado": es un
-	// view mode como el panel del log, no un estado armado de prefix-key
-	// (pullArmed, visualArmed), porque un formulario vive N pulsaciones. Abierto
-	// captura el teclado entero. prPending es el envío que el overlay aceptó y
-	// que todavía nadie ha ejecutado: la UI recoge, forge/tool corre.
+	// pr == nil is closed; it is a view mode like the log panel and not a prefix-key armed state, because a form lives for N keystrokes.
 	pr        *prDraft
 	prPending *prSubmission
 
-	// modo comando (tecla !): input de shell ejecutada en el repo con
-	// $SHELL -c; Enter con input vacío abre una shell interactiva. Se pinta al
-	// final de la ficha del panel, que es donde se leen las cosas del repo.
 	cmdOpen  bool
 	cmdInput textinput.Model
 
-	// lastCmd guarda la salida del último comando `!` por repo (uno en vuelo:
-	// capturado, queda visible hasta el próximo comando o cierre).
 	lastCmd map[string]cmdResult
 }
 
-// cmdResult es el resultado capturado de un comando `!`.
 type cmdResult struct {
 	command, output, exit string
 }
 
-// searchPlaceholder es el hint del filter input (/).
 const searchPlaceholder = "name/group…"
 
-// New construye el modelo con la config dada y pinta el cache si existe
-// (pintura instantánea; el rescan corre vía Init).
 func New(cfg config.Config) Model {
-	// El command log solo existe en la TUI: es donde hay teclas que
-	// auditar. --print no lo instala (no hay nada que consultar) y los
-	// tests lo sustituyen por el suyo.
+	// The command log only exists in the TUI, which is where there are keys to audit; --print does not install it and tests substitute their own.
 	cmdlog.SetRecorder(cmdlog.New(cmdlog.DefaultCap))
 	ctx, cancel := context.WithCancel(context.Background())
 	store, _ := state.NewStore()
@@ -366,24 +269,20 @@ func New(cfg config.Config) Model {
 	m.spinner = spinner.New(spinner.WithSpinner(spinner.Dot))
 	in := textinput.New()
 	in.Placeholder = searchPlaceholder
-	in.Prompt = "/" // el prompt pinta [/aquí][cursor], no "filter: "
+	in.Prompt = "/" // the prompt renders as [/here][cursor], not "filter: "
 
 	ci := textinput.New()
-	// El primer rune del placeholder queda bajo el cursor (bubbles v2
-	// placeholderView): espacio inicial para que el cursor no tape una letra.
-	ci.Placeholder = " npm test · git status… (enter vacío = shell interactiva)"
+	// The first placeholder rune sits under the cursor (bubbles v2 placeholderView), hence the leading space so the cursor does not cover a letter.
+	ci.Placeholder = " npm test · git status… (empty enter = interactive shell)"
 	ci.Prompt = "! "
 	m.cmdInput = ci
 	m.searchInput = in
-	m.scanning = true // el scan arranca en Init (spinner visible desde ya)
+	m.scanning = true
 
 	if path, err := cache.Path(); err == nil {
 		m.projects = cache.Load(path, cfg.Marker)
 	}
-	// Restaurar el estado de plegado persistido y la expansión de
-	// worktrees. La carga separa ambos espacios por prefijo: las
-	// claves con WorktreePrefix van a `expanded` (true = expandido), el
-	// resto a `collapsed` (true = plegado).
+	// The load splits both spaces by prefix: WorktreePrefix keys go to `expanded` (true = expanded), the rest to `collapsed` (true = collapsed).
 	if store != nil {
 		if persisted := store.LoadCollapsed(); persisted != nil {
 			m.loadPersisted(persisted)
@@ -392,9 +291,6 @@ func New(cfg config.Config) Model {
 	return m
 }
 
-// loadPersisted vuelca el mapa plano de collapsed.json en los dos espacios
-// de nombres del modelo: expansión de worktrees vs. plegado de
-// grupos. Fichero corrupto o ausente ya llega como nil.
 func (m *Model) loadPersisted(persisted map[string]bool) {
 	for k, v := range persisted {
 		if path, ok := strings.CutPrefix(k, state.WorktreePrefix); ok {
@@ -405,15 +301,11 @@ func (m *Model) loadPersisted(persisted map[string]bool) {
 	}
 }
 
-// NotifyConfig encola el aviso de carga de la config como toast. Sin esto, un
-// problema de config solo se vería por stderr —invisible detrás del alt screen—
-// y la tecla afectada parecería no hacer nada (p. ej. un `detail = "enter"` de
-// una config vieja).
+// Without this a config problem would only show on stderr (invisible behind the alt screen) and the affected key would look dead.
 func (m *Model) NotifyConfig(warn string) {
 	m.toasts.showWarning(warn)
 }
 
-// Init lanza el primer scan, la bomba de eventos y el tick.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.startScanCmd(),
@@ -423,7 +315,7 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// waitForEvent rearma la lectura del canal: un evento por Cmd (patrón tea).
+// Rearms the channel read after every consumed event (one event per tea.Cmd), otherwise only the first message ever arrives.
 func waitForEvent(ch <-chan event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -434,7 +326,6 @@ func waitForEvent(ch <-chan event) tea.Cmd {
 	}
 }
 
-// sendEvent publica en el canal respetando la cancelación.
 func sendEvent(ctx context.Context, ch chan<- event, ev event) {
 	select {
 	case ch <- ev:
@@ -446,11 +337,7 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-// ---- pipelines de fondo ----
-
-// startScanCmd lanza discovery + recolección streaming y, si
-// procede, el fetch automático al terminar. El guard de "un scan a la
-// vez" vive en el handler de la tecla r (New ya marca scanning=true).
+// The one-scan-at-a-time guard lives in the `r` key handler, since New already sets scanning=true.
 func (m *Model) startScanCmd() tea.Cmd {
 	m.scanning = true
 
@@ -479,17 +366,15 @@ func (m *Model) startScanCmd() tea.Cmd {
 	return nil
 }
 
-// fetchTargets devuelve los paths con upstream pendientes de fetch,
-// excluyendo los que ya están en curso.
 func (m *Model) fetchTargets() []string {
 	var paths []string
 	for _, p := range m.projects {
 		if !p.HasRepo {
-			continue // sin repo no hay fetch
+			continue
 		}
 		snap := m.states[p.Path]
 		if !snap.Status.HasUpstream || snap.Err != "" {
-			continue // sin upstream se saltan
+			continue
 		}
 		if m.fetchStates[p.Path] == "fetching" {
 			continue
@@ -499,14 +384,7 @@ func (m *Model) fetchTargets() []string {
 	return paths
 }
 
-// fetchBatchCmd lanza `git fetch --prune` en batches de fetch.concurrency
-// con timeout por fetch; tras cada fetch re-colecciona el estado. class
-// distingue el fetch que pidió una tecla del automático del scan: el argv es el
-// mismo en ambos y solo el origen los separa en el command log.
-//
-// Devuelve SIEMPRE nil: publica por el canal de eventos, así que el que
-// devuelve el Cmd no tiene nada que devolver. Los callers NO deben acumular su
-// resultado (una rama `if c != nil` sobre esto era código muerto).
+// class separates the keypress fetch from the automatic one (same argv, different origin) and the Cmd always returns nil, so callers must not accumulate the result: an `if c != nil` on it was dead code.
 func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 	if len(paths) == 0 {
 		return nil
@@ -556,19 +434,7 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 	return nil
 }
 
-// adquirirSlot toma un hueco del semáforo de fetch, o devuelve false si el
-// contexto se cancela antes de conseguirlo.
-//
-// Existe separada del `select` inline por una razón concreto: la rama
-// "cancelado esperando hueco" solo es alcanzable cuando hay MÁS repos que
-// huecos, y para provocarla desde un test había que Petersonellar una carrera
-// (cancelar mientras N goroutines esperan). Con la función suelta, el test
-// llena el semáforo, cancela y la decisión es determinista — y el contrato
-// ("un fetch cancelado ANTES de empezar no cuenta como fallo") queda escrito
-// donde se puede comprobar.
-//
-// El que ya tiene hueco no se queda sin hacer nada: eso es del context de la
-// llamada, que cancela el proceso de git en vuelo.
+// Split out from the inline select because the "cancelled while waiting for a slot" branch is only reachable with more repos than slots (provoking it needed a Peterson race), and with a free function the test fills the semaphore and cancels deterministically.
 func adquirirSlot(ctx context.Context, sem chan struct{}) bool {
 	select {
 	case sem <- struct{}{}:
@@ -578,12 +444,6 @@ func adquirirSlot(ctx context.Context, sem chan struct{}) bool {
 	}
 }
 
-// startActionCmd lanza pull/push capturado sobre un repo. Devuelve
-// además el texto de guard si la acción está bloqueada.
-//
-// El argv se resuelve aquí y viaja en el mensaje: con la política de pull en el
-// gitconfig, la UI no puede deducir qué se ejecutó, y un pull --rebase que
-// choca deja el repo a medias en vez de fallar limpio (rebaseInProgress).
 func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -592,8 +452,7 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	appCtx := m.ctx
 	events := m.events
 	args := m.cfg.CmdArgs(kind)
-	// El argv resuelto se compone en el hilo principal (lectura de cfg) para
-	// que el mensaje sea determinista respecto a la tecla que lo disparó.
+	// The resolved argv is composed on the main goroutine (reading cfg) so the message is deterministic with respect to the key that triggered it.
 	resolved := "git " + strings.Join(args, " ")
 	go func() {
 		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
@@ -601,8 +460,7 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 		out, err := gitstatus.Run(ctx, path, args...)
 		errStr := ""
 		if err != nil {
-			// El error del proceso es siempre "exit status 1"; el motivo real
-			// está en la salida combinada de git.
+			// The process error is always "exit status 1"; the real reason is in git's combined output.
 			errStr = gitstatus.FailureReason(out, err)
 		}
 		msg := actionMsg{path: path, kind: kind, cmd: resolved, output: out, err: errStr}
@@ -618,11 +476,6 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	return nil
 }
 
-// runAction ya no existe: el argv llega resuelto desde config y lo ejecuta
-// gitstatus.Run.
-
-// busyActionCmd devuelve el toast de "ya hay una acción en curso" en el repo,
-// o nil si está libre.
 func (m *Model) busyActionCmd(path string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -630,12 +483,7 @@ func (m *Model) busyActionCmd(path string) tea.Cmd {
 	return nil
 }
 
-// removeWorktreeCmd lanza el borrado de un worktree desde el repo padre.
-// Replica el patrón de startActionCmd: guard de acción en curso por path del
-// padre, goroutine con timeout, y tras el éxito publica además el snapshot del
-// padre para que la sub-fila desaparezca. No usa recollectCmd porque su guard
-// chocaría con el flag running de esta propia acción. token correlaciona el
-// resultado con el intento que lo lanzó.
+// It does not use recollectCmd because that guard would collide with the running flag of this very action; on success it also publishes the parent's snapshot so the sub-row disappears.
 func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, token int) tea.Cmd {
 	if cmd := m.busyActionCmd(parent); cmd != nil {
 		return cmd
@@ -650,8 +498,6 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 		out, err := gitstatus.RemoveWorktree(ctx, parent, wtPath, withForce)
 		errStr := ""
 		if err != nil {
-			// El error del proceso es "exit status 1"; el motivo real está en
-			// la salida combinada de git.
 			errStr = gitstatus.FailureReason(out, err)
 		}
 		sendEvent(appCtx, events, worktreeRemovedMsg{
@@ -666,7 +512,6 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 	return nil
 }
 
-// recollectCmd re-colecciona un solo repo (tecla R).
 func (m *Model) recollectCmd(path string) tea.Cmd {
 	if _, busy := m.running[path]; busy {
 		return nil
@@ -681,31 +526,17 @@ func (m *Model) recollectCmd(path string) tea.Cmd {
 	return nil
 }
 
-// toastCmd emite un toast efímero con el nivel dado (llega como notifyMsg).
 func (m *Model) toastCmd(level toastLevel, text string) tea.Cmd {
 	return func() tea.Msg { return notifyMsg{text: text, level: level} }
 }
 
-// handoffFunc cede la terminal a un proceso y, cuando vuelve, entrega el
-// mensaje que produce su error (nil si salio limpio). La firma es la de
-// tea.ExecProcess.
 type handoffFunc func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 
-// handoffDone construye el execDoneMsg de un handoff de terminal (editor,
-// lazygit, el comando AI, el preview visual, la shell).
-//
-// Vive en un metodo y no en el closure de tea.ExecProcess por dos razones. La
-// primera es que el cuerpo de ese closure solo se ejecuta cuando el proceso
-// TERMINA, y un test que cede la terminal para comprobarlo no se puede escribir
-// (mientras el handoff esta en curso el programa esta suspendido). La segunda es
-// que el log de comandos depende de que la accion y el argv sean los correctos:
-// son lo que el panel muestra despues, y un "editor" donde deberia decir
-// "lazygit" no se detecta por leer el codigo.
+// A method and not a closure inside tea.ExecProcess for two reasons: that closure only runs when the process ends and no test can lend the terminal to observe it (the program is suspended meanwhile), and the command log depends on the action and argv being right, since a "editor" where "lazygit" was meant is invisible in the code.
 func (m *Model) handoffDone(action, path string, argv []string, err error) tea.Msg {
 	return execDoneMsg{path: path, action: action, argv: argv, err: err}
 }
 
-// openEditorCmd abre $EDITOR en el repo con handoff de terminal.
 func (m *Model) openEditorCmd(path string) tea.Cmd {
 	argv := []string{m.cfg.Editor}
 	cmd := exec.Command(m.cfg.Editor)
@@ -715,9 +546,6 @@ func (m *Model) openEditorCmd(path string) tea.Cmd {
 	})
 }
 
-// openLazygitCmd abre lazygit en el repo con handoff de terminal (tecla g).
-// Requiere intérprete instalado; al salir re-colecciona el estado (lazygit
-// puede hacer pull/commit/push).
 func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	if _, err := exec.LookPath("lazygit"); err != nil {
 		return m.toastCmd(toastWarning, "lazygit not installed")
@@ -734,14 +562,7 @@ func (m *Model) openLazygitCmd(path string) tea.Cmd {
 	})
 }
 
-// aiVars arma los placeholders de contexto ({branch}, {behind}, …) del comando
-// AI desde el snapshot vivo del repo. Los resuelve la TUI porque config no
-// puede importar gitstatus (ciclo) y el snapshot es de aquí.
-//
-// Un worktree sin marcador no tiene snapshot propio: la rama sale del inventario
-// del padre (`git worktree list`), la MISMA fuente que la sub-fila, y el resto no
-// se inventa (un `{state}` "no upstream" sería falso). Los placeholders no se
-// resuelven si el dato no existe: quedan literales en el argv.
+// The TUI resolves the vars (config cannot import gitstatus), and a worktree with no marker has no snapshot: its branch comes from the parent's worktree list and the rest is left literal instead of invented.
 func (m *Model) aiVars(path string) map[string]string {
 	snap, ok := m.effectiveSnapshot(path)
 	if !ok {
@@ -761,10 +582,7 @@ func (m *Model) aiVars(path string) map[string]string {
 	}
 }
 
-// effectiveSnapshot resuelve el snapshot de un path como la ficha: si el path
-// es un proyecto descubierto (worktree con marcador incluido), el snapshot se
-// indexa por el path del proyecto, no por el de la sub-fila —pueden diferir en
-// symlinks o barras finales—; si no, por el path tal cual.
+// A discovered project is indexed by the project path and not the row's, because the two can differ (symlinks, trailing slashes).
 func (m *Model) effectiveSnapshot(path string) (gitstatus.Snapshot, bool) {
 	if p, ok := m.discoveredByPath(path); ok {
 		snap, ok := m.states[p.Path]
@@ -774,10 +592,6 @@ func (m *Model) effectiveSnapshot(path string) (gitstatus.Snapshot, bool) {
 	return snap, ok
 }
 
-// worktreeFor busca en los snapshots de los repos principales el worktree con
-// ese path. Es la misma fuente que usan las sub-filas (el `git worktree list`
-// del padre), para que los placeholders AI de un worktree sin marcador digan lo
-// mismo que la fila.
 func (m *Model) worktreeFor(path string) (gitstatus.Worktree, bool) {
 	clean := filepath.Clean(path)
 	for _, p := range m.projects {
@@ -790,21 +604,10 @@ func (m *Model) worktreeFor(path string) (gitstatus.Worktree, bool) {
 	return gitstatus.Worktree{}, false
 }
 
-// pullAIArgv resuelve el argv del handoff AI: la plantilla de la config global
-// con el prompt del marcador (un único elemento) y los placeholders de contexto
-// del repo. Se separa de startPullAICmd para poder comprobar la resolución sin
-// ejecutar el handoff.
 func (m *Model) pullAIArgv(path, prompt string) []string {
 	return config.BuildAIArgv(m.cfg.AICommand("pull"), prompt, m.aiVars(path))
 }
 
-// startPullAICmd resuelve prompt y comando y lanza el comando AI como handoff
-// de terminal (variante `a` del selector de pull). Sin prompt, sin comando o
-// sin binario termina en toast y NO hay handoff: no se inventa un ejecutable.
-//
-// El ejecutable sale SOLO de la config global; el marcador commiteado (input no
-// confiable) aporta solo el texto del prompt, y ese texto viaja como un único
-// elemento de argv — nunca interpolado en un `sh -c`.
 func (m *Model) startPullAICmd(path string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -821,8 +624,7 @@ func (m *Model) startPullAICmd(path string) tea.Cmd {
 	}
 	argv := m.pullAIArgv(path, prompt)
 	if argv[0] == "" {
-		// Primer campo de la plantilla resuelto a vacío (p. ej. "{branch}" sin
-		// rama): LookPath daría un " not installed" que no explica nada.
+		// First field resolved to empty (e.g. "{branch}" with no branch): LookPath would answer " not installed", which explains nothing.
 		return m.toastCmd(toastWarning, "ai command: empty executable")
 	}
 	if _, err := exec.LookPath(argv[0]); err != nil {
@@ -831,10 +633,6 @@ func (m *Model) startPullAICmd(path string) tea.Cmd {
 	return m.openPullAICmd(path, argv)
 }
 
-// openPullAICmd lanza el comando AI con handoff de terminal. Mismo patrón que
-// lazygit: la terminal es del hijo (sin captura de salida ni timeout), y al
-// volver execDoneMsg registra el exec (Dur=0) y re-colecta el estado, porque el
-// comando pudo cambiarlo.
 func (m *Model) openPullAICmd(path string, argv []string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -847,13 +645,7 @@ func (m *Model) openPullAICmd(path string, argv []string) tea.Cmd {
 	})
 }
 
-// visualMediaDir resuelve (y crea si falta) el directorio de medios de git-sim
-// bajo la caché XDG de gitdash: <caché>/gitdash/git-sim.
-//
-// Es obligatorio, no cosmético: sin `--media-dir` git-sim escribe
-// `git-sim_media/` dentro del repo y gitdash lo marcaría dirty (mira `git
-// status` real). Si el dir no se puede crear, quien llama debe abortar con
-// toast: lanzar igualmente ensuciaría el repo.
+// Mandatory, not cosmetic: without `--media-dir` git-sim writes `git-sim_media/` into the repo and gitdash would mark it dirty, so an uncreatable dir must abort with a toast.
 func visualMediaDir() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -866,10 +658,6 @@ func visualMediaDir() (string, error) {
 	return dir, nil
 }
 
-// visualArgv compone el argv exacto del handoff: el subcomando de git-sim y,
-// solo para las variantes que lo exigen (merge/rebase), el ref del upstream.
-// `pull` no lleva argumento posicional (git-sim simula la operación sin ref
-// explícito). El `--media-dir` va SIEMPRE, en todas las variantes.
 func visualArgv(sub, upstream, mediaDir string) []string {
 	argv := []string{"git-sim", "--media-dir", mediaDir, sub}
 	if o, ok := visualOptionForSub(sub); ok && o.needsUpstream && upstream != "" {
@@ -878,13 +666,6 @@ func visualArgv(sub, upstream, mediaDir string) []string {
 	return argv
 }
 
-// startVisualCmd lanza el handoff de git-sim para la variante elegida. Sin
-// binario en PATH o con el media-dir no creable termina en toast y NO hay
-// handoff: no se inventa un ejecutable ni se arriesga a ensuciar el repo.
-//
-// Sigue el patrón de lazygit: la terminal es del hijo (sin captura ni timeout),
-// `m.running[path]` marca la acción en curso y al volver execDoneMsg registra
-// el exec (Dur=0) con el argv real y re-colecta el estado.
 func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -905,28 +686,12 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	})
 }
 
-// commandTimeout es el límite de un comando `!` capturado. Función y no const por
-// lo mismo que actionTimeout: una const de paquete no genera bloque de
-// cobertura y su mutante de ARITHMETIC_BASE quedaría NOT COVERED para siempre.
+// A function, not a const: Go does not instrument constant expressions, so a package const would leave its ARITHMETIC_BASE mutant permanently NOT COVERED.
 func commandTimeout() time.Duration { return 5 * time.Minute }
 
-// actionTimeout es el plazo de una acción de git (pull, push, fetch, worktree
-// remove). El valor literal va en una función y no en la llamada por un motivo
-// concreto: escrito como `120 * time.Second` dentro del `WithTimeout`, el mutante
-// de ARITHMETIC_BASE lo convierte en `120 / time.Second`, o sea un plazo de CERO.
-// Con deadline 0 cada gitstatus.Run falla de golpe y las dos acciones devuelven
-// un error instantáneo, en bucle, sobre todos los repos: un cuelgue del dashboard
-// que ningún test ve porque el test tampoco cuelga, solo se equivoca.
-//
-// Que sea una FUNCIÓN y no una `const` de paquete es por lo mismo, y por otra
-// razón: Go no instrumenta las expresiones de constante, así que una const no
-// genera bloque de cobertura y su mutante de ARITHMETIC_BASE sale NOT COVERED
-// para siempre, TestPlazosEnSegundos o no. Dentro de una función sí se
-// instrumenta, y el mutante pasa a ejecutarse —y a morir— en vez de esconderse.
+// The literal lives in a function on purpose: written inline in WithTimeout, the ARITHMETIC_BASE mutant turns the deadline into `120 / time.Second`, i.e. zero, and then every gitstatus.Run fails instantly in a loop over all repos.
 func actionTimeout() time.Duration { return 120 * time.Second }
 
-// runShellCmd ejecuta el comando en el repo con el shell dado, capturando
-// stdout+stderr juntos; devuelve la salida y el código de salida.
 func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout())
 	defer cancel()
@@ -945,11 +710,7 @@ func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) 
 	return out.String(), 0
 }
 
-// openCmdCmd lanza el comando tipeado con `!` en el directorio del repo con
-// $SHELL -c y captura la salida: queda visible en el detail hasta el
-// próximo comando (y el anterior, nvim-style, no handoff de terminal, así no se
-// pierde de vista). Aliases y config del shell quedan cargados; las
-// abreviaciones de fish no aplican porque no hay sesión de edición.
+// Not a terminal handoff (nvim-style, so the previous output stays visible until the next command) but still through $SHELL -c, which is what loads the user's aliases and rc.
 func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -961,8 +722,7 @@ func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	go func() {
 		start := time.Now()
 		out, code := runShellCmd(appCtx, path, shell, command)
-		// El comando `!` no se clasifica (su salida es arbitraria, no de
-		// git): en el log queda el argv y el código de salida.
+		// The `!` command is not classified (its output is arbitrary, not git's): the log keeps the argv and the exit code.
 		cmdlog.RecordExec(cmdlog.Entry{
 			Repo:   m.nameOf(path),
 			Dir:    path,
@@ -980,11 +740,7 @@ func (m *Model) openCmdCmd(path, command string) tea.Cmd {
 	return nil
 }
 
-// userShell resuelve la shell de los handoffs: la del usuario ($SHELL), que es
-// lo que hace que la sesión cargue sus aliases y su rc, y /bin/sh solo si no
-// hay ninguna. Vive aparte porque la usan DOS caminos (el comando `!` y la
-// shell interactiva) y porque el handoff interactivo no se puede ejercitar en
-// un test: tea.ExecProcess no corre sin TTY.
+// $SHELL (the user's) so the session loads their aliases and rc, /bin/sh only as fallback; split out because two paths use it and the interactive handoff cannot be exercised in a test (tea.ExecProcess needs a TTY).
 func userShell() string {
 	if shell := os.Getenv("SHELL"); shell != "" {
 		return shell
@@ -992,9 +748,6 @@ func userShell() string {
 	return "/bin/sh"
 }
 
-// openShellCmd abre una shell interactiva ($SHELL) en el repo con handoff
-// de terminal: la sesión carga config.fish/.bashrc, así que abreviaciones,
-// aliases y aliases de fish funcionan (tecla ! con input vacío).
 func (m *Model) openShellCmd(path string) tea.Cmd {
 	shell := userShell()
 	if _, err := exec.LookPath(shell); err != nil {
@@ -1011,9 +764,6 @@ func (m *Model) openShellCmd(path string) tea.Cmd {
 	})
 }
 
-// execExit traduce el error de un handoff de terminal al código de salida que
-// merece el command log: el real si el proceso llegó a correr, -1 si ni
-// siquiera arrancó.
 func execExit(err error) int {
 	if err == nil {
 		return 0
@@ -1025,21 +775,14 @@ func execExit(err error) int {
 	return -1
 }
 
-// logIntent deja en el command log la tecla que el usuario acaba de pulsar y
-// sobre qué repo. Sin esta línea el log solo diría "git pull", y no se podría
-// distinguir "pulsé p y elegí rebase" de "el gitconfig decidió por mí" — que
-// es justo la pregunta que el log responde.
-//
-// Una intención sin exec detrás significa que la acción se rechazó después
-// (el repo ya tenía una acción en curso, lazygit no está instalado, la fila no
-// es un repo): el motivo está en el toast del mismo momento.
+// Without this line the log would only say "git pull", and "I pressed p and picked rebase" could not be told from "the gitconfig decided for me".
 func (m *Model) logIntent(key, action string) {
 	if cmdlog.Active() == nil {
 		return
 	}
 	r, ok := m.selected()
 	if !ok && actionNeedsRow(action) {
-		return // sin fila no se despacha nada
+		return
 	}
 	entry := cmdlog.Entry{Class: cmdlog.ClassAction, Key: key, Action: action}
 	if ok {
@@ -1049,10 +792,6 @@ func (m *Model) logIntent(key, action string) {
 	cmdlog.RecordIntent(entry)
 }
 
-// nameOf devuelve el nombre visible de un path: el nombre del
-// proyecto descubierto, el basename para un worktree (aunque tenga marcador
-// propio, la notificación usa el directorio) y el path absoluto en último
-// término si no es resoluble.
 func (m *Model) nameOf(path string) string {
 	for _, p := range m.projects {
 		if p.Path == path {
@@ -1068,10 +807,6 @@ func (m *Model) nameOf(path string) string {
 	return filepath.Base(path)
 }
 
-// syncOf resuelve la sync branch efectiva de un path: override del
-// marcador > global. El segundo valor dice si esa referencia admite el
-// fallback al otro nombre habitual de la rama principal (solo cuando nadie
-// la declaró). Proyectos no descubiertos → global.
 func (m *Model) syncOf(path string) (string, bool) {
 	for _, p := range m.projects {
 		if p.Path == path {
@@ -1082,17 +817,11 @@ func (m *Model) syncOf(path string) (string, bool) {
 	return m.cfg.SyncBranch, !m.cfg.SyncBranchExplicit
 }
 
-// saveCollapsed persiste el estado de plegado y de expansión a disco
-// (best-effort: no bloquear la UI). Se llama tras cada toggle. Compone los
-// dos espacios de nombres: claves de grupo tal cual y la
-// expansión de worktrees bajo WorktreePrefix.
 func (m *Model) saveCollapsed() {
 	if m.store == nil {
 		return
 	}
-	// Sin pista de capacidad: el mapa lleva un puñado de grupos, y sumarlas
-	// (collapsed+expanded) como pista se convertía en un tamaño NEGATIVO
-	// —panic de runtime— al tener más worktrees expandidos que grupos plegados.
+	// No capacity hint: the map holds a handful of groups, and hinting with collapsed+expanded turned negative (runtime panic) with more expanded worktrees than collapsed groups.
 	combined := make(map[string]bool)
 	for k, v := range m.collapsed {
 		combined[k] = v
@@ -1103,16 +832,11 @@ func (m *Model) saveCollapsed() {
 	_ = m.store.SaveCollapsed(combined)
 }
 
-// selectedEntry devuelve la entrada navegable bajo el cursor, si la hay.
 func (m *Model) selectedEntry() (tableEntry, bool) {
 	return entryAt(m.entries(), m.cursor)
 }
 
-// selected devuelve la fila (con path resoluble) bajo el cursor, si la hay.
-// Los headers de grupo no seleccionan repo: ok=false. Una
-// sub-fila de worktree se resuelve a una fila sintética con
-// el path del worktree y HasRepo=true, de forma que TODAS las operaciones
-// (que leen r.project.Path/HasRepo/MarkerErr) operan sobre el worktree.
+// A worktree sub-row resolves to a synthetic row with the worktree path and HasRepo=true, so every operation reading r.project.Path/HasRepo/MarkerErr acts on the worktree.
 func (m *Model) selected() (row, bool) {
 	e, ok := m.selectedEntry()
 	if !ok {
@@ -1128,10 +852,6 @@ func (m *Model) selected() (row, bool) {
 	}
 }
 
-// worktreeRow sintetiza la fila operable de un worktree. Si el
-// worktree fue descubierto con marcador (dedupe), reutiliza su
-// proyecto y su snapshot vivo; si no, un proyecto mínimo con HasRepo=true y
-// MarkerErr vacío para satisfacer los guards de las operaciones.
 func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
 	if p, ok := m.discoveredByPath(wt.Path); ok {
 		snap := m.states[p.Path]
@@ -1145,9 +865,6 @@ func (m *Model) worktreeRow(wt gitstatus.Worktree) row {
 	}}
 }
 
-// discoveredByPath busca el proyecto descubierto que corresponde a un path
-// de worktree (dedupe), comparando paths normalizados para tolerar
-// symlinks o barras finales.
 func (m *Model) discoveredByPath(path string) (discovery.Project, bool) {
 	clean := filepath.Clean(path)
 	for _, p := range m.projects {

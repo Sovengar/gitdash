@@ -10,9 +10,7 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// installRecorder instala un recorder limpio para el test y lo desactiva al
-// terminar. El recorder es global porque los exec de git están en este paquete
-// y no en la TUI: enhebrarlo por Collect/StreamPool/Fetch/Run no aportaría nada.
+// The recorder is global because gitdash's git execs are in this package and not in the TUI: threading it through Collect/StreamPool/Fetch/Run would add nothing.
 func installRecorder(t *testing.T) *cmdlog.Recorder {
 	t.Helper()
 	rec := cmdlog.New(cmdlog.DefaultCap)
@@ -21,20 +19,16 @@ func installRecorder(t *testing.T) *cmdlog.Recorder {
 	return rec
 }
 
-// lastEntry devuelve la última entrada del log.
 func lastEntry(t *testing.T, rec *cmdlog.Recorder) cmdlog.Entry {
 	t.Helper()
 	entries := rec.Entries()
 	if len(entries) == 0 {
-		t.Fatal("el command log está vacío: el exec no se registró")
+		t.Fatal("the command log is empty: the exec was not recorded")
 	}
 	return entries[len(entries)-1]
 }
 
-// Un pull con la política del gitconfig del usuario: el argv no dice nada del
-// resultado, pero la clasificación sí. Aquí el repo está detrás del upstream y
-// sin config de rebase alguna, así que integra con fast-forward.
-func TestRunRegistraArgvYResultado(t *testing.T) {
+func TestRunRecordsArgvAndResult(t *testing.T) {
 	rec := installRecorder(t)
 	dir, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 1, "up")
@@ -49,7 +43,7 @@ func TestRunRegistraArgvYResultado(t *testing.T) {
 		t.Errorf("Command() = %q, want %q", got, want)
 	}
 	if e.Repo != filepath.Base(dir) {
-		t.Errorf("Repo = %q, want %q (basename del dir)", e.Repo, filepath.Base(dir))
+		t.Errorf("Repo = %q, want %q (the dir's basename)", e.Repo, filepath.Base(dir))
 	}
 	if e.Dir != dir {
 		t.Errorf("Dir = %q, want %q", e.Dir, dir)
@@ -64,39 +58,33 @@ func TestRunRegistraArgvYResultado(t *testing.T) {
 		t.Errorf("Outcome = %q, want %q", e.Outcome, "fast-forward")
 	}
 	if e.Dur <= 0 {
-		t.Error("Dur sin medir: la duración es parte del registro")
+		t.Error("Dur left unmeasured: the duration is part of the record")
 	}
 	if e.Intent {
-		t.Error("Intent = true en una ejecución")
+		t.Error("Intent = true in an execution")
 	}
 }
 
-// Un pull que choca registra el código de salida real (no siempre 1: git
-// devuelve 128 en los fallos fatales) y el motivo clasificado.
-func TestRunRegistraFallo(t *testing.T) {
+func TestRunRecordsFailure(t *testing.T) {
 	rec := installRecorder(t)
 	dir, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 1, "up")
-	// Commit local además del remoto: ahora sí hay divergencia, y --ff-only
-	// no puede reconciliarla.
 	testutil.CommitFiles(t, dir, map[string]string{"local.txt": "local"}, "local")
 	testutil.FetchLocal(t, dir)
 
 	if _, err := Run(context.Background(), dir, "pull", "--ff-only"); err == nil {
-		t.Fatal("pull --ff-only sobre un repo divergido debería fallar")
+		t.Fatal("pull --ff-only over a diverged repo should fail")
 	}
 	e := lastEntry(t, rec)
 	if e.Exit == 0 {
-		t.Error("Exit = 0 en un pull fallido")
+		t.Error("Exit = 0 in a failed pull")
 	}
 	if e.Outcome != "diverged" {
 		t.Errorf("Outcome = %q, want %q", e.Outcome, "diverged")
 	}
 }
 
-// Fetch es el único exec cuyo origen no se deduce del argv: la misma llamada
-// la hace el scan automático y la tecla f. Por eso la clase la trae quien llama.
-func TestFetchRegistraLaClaseQueLePasan(t *testing.T) {
+func TestFetchRecordsTheClassItWasGiven(t *testing.T) {
 	rec := installRecorder(t)
 	dir, origin := testutil.NewRepo(t, true)
 	testutil.PushUpstreamCommits(t, origin, 1, "up")
@@ -116,10 +104,8 @@ func TestFetchRegistraLaClaseQueLePasan(t *testing.T) {
 	}
 }
 
-// Collect lanza cuatro lecturas por repo. Se registran (para poder auditar por
-// qué un behind tarda) pero como ClassRead, que el panel oculta por defecto:
-// con 60 repos serían 240 líneas por scan.
-func TestCollectRegistraLasLecturasComoRead(t *testing.T) {
+// They are recorded (so it can be audited why a behind took long) but as ClassRead, which the panel hides by default: with 60 repos that would be 240 lines per scan.
+func TestCollectRecordsTheReadsAsRead(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
@@ -127,15 +113,13 @@ func TestCollectRegistraLasLecturasComoRead(t *testing.T) {
 
 	entries := rec.Entries()
 	if len(entries) < 3 {
-		t.Fatalf("entradas = %d, want >= 3 (status, log, worktree list…)", len(entries))
+		t.Fatalf("entries = %d, want >= 3 (status, log, worktree list…)", len(entries))
 	}
 	for _, e := range entries {
 		if e.Class != cmdlog.ClassRead {
-			t.Errorf("Class = %v, want %v para %q", e.Class, cmdlog.ClassRead, e.Command())
+			t.Errorf("Class = %v, want %v for %q", e.Class, cmdlog.ClassRead, e.Command())
 		}
 	}
-	// Las lecturas no se clasifican: no hay "resultado" que deducir de un
-	// status. El panel enseña su código de salida.
 	for _, e := range entries {
 		if e.Outcome != "" {
 			t.Errorf("Outcome = %q en la lectura %q, want \"\"", e.Outcome, e.Command())
@@ -148,15 +132,11 @@ func TestCollectRegistraLasLecturasComoRead(t *testing.T) {
 		}
 	}
 	if !sawStatus {
-		t.Errorf("no se registró el status; hubo: %v", entries)
+		t.Errorf("the status was not recorded; there was: %v", entries)
 	}
 }
 
-// El remote se lee ON DEMAND (al abrir un PR), no en el scan: por eso es el
-// único verbo de lectura que no sale de Collect. Y sale por runGit, así que
-// deja entrada en el command log como ClassRead (es una lectura, aunque la
-// pulse una persona).
-func TestRemoteURLSalePorRunGitYQuedaEnElLog(t *testing.T) {
+func TestRemoteURLExitsForRunGitAndStaysInTheLog(t *testing.T) {
 	rec := installRecorder(t)
 	dir, origin := testutil.NewRepo(t, true)
 
@@ -165,7 +145,7 @@ func TestRemoteURLSalePorRunGitYQuedaEnElLog(t *testing.T) {
 		t.Fatalf("RemoteURL: %v", err)
 	}
 	if got != origin {
-		t.Errorf("RemoteURL = %q, want %q (el origin del repo)", got, origin)
+		t.Errorf("RemoteURL = %q, want %q (the repo's origin)", got, origin)
 	}
 	e := lastEntry(t, rec)
 	if want := "git remote get-url origin"; e.Command() != want {
@@ -179,9 +159,8 @@ func TestRemoteURLSalePorRunGitYQuedaEnElLog(t *testing.T) {
 	}
 }
 
-// La URL viene recortada: el remoto de git trae el salto de línea, y sin
-// TrimSpace el host que se busca en el mapa de forges no casaría con ninguno.
-func TestRemoteURLRecortaLaSalida(t *testing.T) {
+// The URL comes trimmed: git's remote output carries the newline, and without TrimSpace the host looked up in the forge map would match nothing.
+func TestRemoteURLClipsTheOutput(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 
 	got, err := RemoteURL(context.Background(), dir)
@@ -189,25 +168,21 @@ func TestRemoteURLRecortaLaSalida(t *testing.T) {
 		t.Fatalf("RemoteURL: %v", err)
 	}
 	if got != strings.TrimSpace(got) || strings.ContainsAny(got, "\n\r") {
-		t.Errorf("RemoteURL = %q, want la URL sin saltos", got)
+		t.Errorf("RemoteURL = %q, want the URL without line breaks", got)
 	}
 }
 
-// Un repo sin `origin` falla con el motivo de git: el toast lo necesita para
-// decir qué falta en vez de un "no se pudo" sin más.
-func TestRemoteURLSinRemoteFallaConElMotivo(t *testing.T) {
-	dir, _ := testutil.NewRepo(t, false) // sin upstream ni remote
+func TestRemoteURLWithoutRemoteFailsWithTheReason(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false) // no upstream and no remote
 
 	if _, err := RemoteURL(context.Background(), dir); err == nil {
-		t.Fatal("RemoteURL en un repo sin origin debería fallar")
+		t.Fatal("RemoteURL in a repo with no origin should fail")
 	} else if !strings.Contains(err.Error(), "remote") {
-		t.Errorf("err = %q, want el motivo de git sobre el remote", err)
+		t.Errorf("err = %q, want git's reason about the remote", err)
 	}
 }
 
-// Y no aparece en Collect: el scan no gana un `git remote get-url` por repo y
-// por ciclo solo para un dato que casi nadie mira.
-func TestCollectNoLeeElRemote(t *testing.T) {
+func TestCollectNotReadsTheRemote(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
@@ -215,13 +190,11 @@ func TestCollectNoLeeElRemote(t *testing.T) {
 
 	for _, e := range rec.Entries() {
 		if strings.Contains(e.Command(), "remote") {
-			t.Errorf("Collect lanzó una lectura de remote: %q", e.Command())
+			t.Errorf("Collect issued a remote read: %q", e.Command())
 		}
 	}
 }
 
-// RemoveWorktreeArgv es la fuente única del argv: el log y RemoveWorktree no
-// pueden discrepar, que es lo único que hace fiable el log.
 func TestRemoveWorktreeArgv(t *testing.T) {
 	got := strings.Join(append([]string{"git"}, RemoveWorktreeArgv("/tmp/wt", false)...), " ")
 	if want := "git worktree remove /tmp/wt"; got != want {
@@ -233,24 +206,19 @@ func TestRemoveWorktreeArgv(t *testing.T) {
 	}
 }
 
-// El log no debe romper la app si no hay recorder (--print, o un test que no
-// lo instaló): Collect tiene que seguir funcionando igual.
-func TestExecSinRecorderNoRompe(t *testing.T) {
+func TestExecWithoutRecorderNotBreaks(t *testing.T) {
 	cmdlog.SetRecorder(nil)
 	dir, _ := testutil.NewRepo(t, true)
 	snap := Collect(context.Background(), dir, "main", false)
 	if snap.Err != "" {
-		t.Fatalf("Collect sin recorder falló: %s", snap.Err)
+		t.Fatalf("Collect with no recorder failed: %s", snap.Err)
 	}
 	if _, err := Run(context.Background(), dir, "status"); err != nil {
-		t.Fatalf("Run sin recorder falló: %v", err)
+		t.Fatalf("Run with no recorder failed: %v", err)
 	}
 }
 
-// Fetch sin args usa el default `fetch --prune`. No se deduce del resultado
-// (un `git` a secas sale con 0 sin hacer nada), así que lo que lo ata es el argv
-// registrado: sin default, el log mentiría sobre lo que se ejecutó.
-func TestFetchSinArgsUsaElDefault(t *testing.T) {
+func TestFetchWithoutArgsUsesTheDefault(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
@@ -266,61 +234,52 @@ func TestFetchSinArgsUsaElDefault(t *testing.T) {
 	}
 }
 
-// Un exec que falla sin escribir nada en stderr (el caso real: el contexto se
-// cancela a mitad del scan) tiene que conservar el motivo del error de proceso.
-// Si no, el Snapshot llega a la UI con un motivo vacío y el usuario no ve por
-// qué desapareció el repo.
-func TestExecSinStderrConservaElMotivo(t *testing.T) {
+// An exec that fails writing nothing to stderr (the real case: the context is cancelled mid-scan) must keep the process error as its reason, otherwise the Snapshot reaches the UI with an empty reason and the user cannot see why the repo disappeared.
+func TestExecWithoutStderrKeepsTheReason(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, true)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // nadie va a escribir en stderr
+	cancel()
 
 	_, err := runGit(ctx, dir, cmdlog.ClassRead, "status")
 	if err == nil {
-		t.Fatal("runGit con contexto cancelado debería fallar")
+		t.Fatal("runGit with a cancelled context should fail")
 	}
 	if !strings.Contains(err.Error(), context.Canceled.Error()) {
-		t.Errorf("err = %q, want el motivo del proceso (context canceled)", err)
+		t.Errorf("err = %q, want the process reason (context canceled)", err)
 	}
-	// El mismo camino desde Collect: el error viaja en el Snapshot.
 	snap := Collect(ctx, dir, "", false)
 	if snap.Err == "" {
-		t.Fatal("Collect con contexto cancelado sin Err")
+		t.Fatal("Collect with a cancelled context and no Err")
 	}
 	if !strings.Contains(snap.Err, context.Canceled.Error()) {
-		t.Errorf("snap.Err = %q, want el motivo del proceso", snap.Err)
+		t.Errorf("snap.Err = %q, want the process reason", snap.Err)
 	}
 }
 
-// Un exec que no llegó a salir (contexto cancelado) no tiene código de salida de
-// git: se registra como -1, que es "no salió", no como 1, que en el panel se
-// leería como un fallo real de git.
-func TestExecSinCodigoDeSalidaSeRegistraComoMenosUno(t *testing.T) {
+// An exec that never started (cancelled context) has no git exit code: it is recorded as -1, meaning "did not run", and not as 1, which the panel would read as a real git failure.
+func TestExecWithoutCodeOfOutputIsRecordsAsLessOne(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	if _, err := runGit(ctx, dir, cmdlog.ClassRead, "status"); err == nil {
-		t.Fatal("runGit con contexto cancelado debería fallar")
+		t.Fatal("runGit with a cancelled context should fail")
 	}
 	if e := lastEntry(t, rec); e.Exit != -1 {
-		t.Errorf("Exit = %d, want -1 (no llegó a salir)", e.Exit)
+		t.Errorf("Exit = %d, want -1 (it never ran)", e.Exit)
 	}
 }
 
-// firstLine recorta a la primera línea sin partirse en los bordes: sin salto de
-// línea devuelve la cadena entera, y un "\n" inicial es una primera línea vacía
-// (no "sin recorte").
 func TestFirstLine(t *testing.T) {
 	casos := []struct{ in, want string }{
-		{"sin salto", "sin salto"},
+		{"no break", "no break"},
 		{"", ""},
-		{"una\ndos", "una"},
-		{"\nprimera", ""},
+		{"one\ntwo", "one"},
+		{"\nfirst", ""},
 		{"\n", ""},
-		{"con\r\n", "con\r"},
-		{"tres\nlíneas\ny más", "tres"},
+		{"with\r\n", "with\r"},
+		{"three\nlines\nand more", "three"},
 	}
 	for _, c := range casos {
 		if got := firstLine(c.in); got != c.want {
@@ -329,20 +288,17 @@ func TestFirstLine(t *testing.T) {
 	}
 }
 
-// Un argv vacío es alcanzable desde la config del usuario (`[commands] pull = ""`
-// → CmdArgs → strings.Fields → []) y la TUI SIEMPRE tiene recorder instalado:
-// sin esta guarda, `Action: args[0]` revienta la goroutine de la acción y con
-// ella la app entera. Se registra con verbo vacío, no con un panic.
-func TestExecSinArgsNoRevienta(t *testing.T) {
+// An empty argv is reachable from user config (`[commands] pull = ""` → CmdArgs → strings.Fields → []) and the TUI ALWAYS has a recorder installed, so without this guard `Action: args[0]` blows up the action goroutine and with it the whole app; it is recorded with an empty verb, not with a panic.
+func TestExecWithoutArgsNotPanics(t *testing.T) {
 	rec := installRecorder(t)
 	dir, _ := testutil.NewRepo(t, true)
 
 	if _, err := Run(context.Background(), dir); err == nil {
-		t.Fatal("git sin argumentos debería fallar")
+		t.Fatal("git with no arguments should fail")
 	}
 	e := lastEntry(t, rec)
 	if e.Action != "" {
-		t.Errorf("Action = %q, want vacío (no hay verbo que nombrar)", e.Action)
+		t.Errorf("Action = %q, want empty (no verb to name)", e.Action)
 	}
 	if len(e.Argv) != 1 || e.Argv[0] != "git" {
 		t.Errorf("Argv = %v, want [git]", e.Argv)

@@ -1,11 +1,4 @@
-// Package discovery descubre proyectos por fichero marcador en los roots
-// configurados.
-//
-// Un directorio es proyecto si contiene el marcador (default .gitdash.toml).
-// El repo git se resuelve en la MISMA carpeta del marcador: .git directorio
-// = repo normal, .git fichero (gitdir:) = worktree, ausencia = proyecto sin
-// repo. El walk es ilimitado en profundidad pero poda directorios ocultos,
-// excluidos y ilegibles.
+// Package discovery finds projects by marker file; the repo is resolved in the marker's own folder, never by walking up to .git.
 package discovery
 
 import (
@@ -22,22 +15,19 @@ import (
 	"gitdash/internal/config"
 )
 
-// Project es un proyecto descubierto por el marcador.
 type Project struct {
-	Path           string // ruta absoluta (carpeta del marcador)
-	Name           string // name del marcador o nombre del directorio
-	PrimaryGroup   string // primary_group del marcador o ""
-	SecondaryGroup string // secondary_group del marcador; "" = sin segundo nivel
-	SyncBranch     string // sync_branch del marcador; "" = usar la global
-	HasRepo        bool   // existe .git (directorio o fichero)
-	IsWorktree     bool   // .git es un fichero gitdir:
-	MainRepo       string // repo principal si IsWorktree ("" = no aplica)
-	MarkerErr      string // error de parseo del marcador
+	Path           string
+	Name           string
+	PrimaryGroup   string
+	SecondaryGroup string
+	SyncBranch     string
+	HasRepo        bool
+	IsWorktree     bool
+	MainRepo       string
+	MarkerErr      string
 }
 
-// Scan recorre los roots de la config y devuelve los proyectos ordenados
-// por ruta. Los roots ilegibles se reportan como error agregado sin abortar
-// el resto.
+// Unreadable roots are reported as one aggregated error instead of aborting the scan.
 func Scan(cfg config.Config) ([]Project, error) {
 	var projects []Project
 	var errs []string
@@ -50,15 +40,13 @@ func Scan(cfg config.Config) ([]Project, error) {
 		}
 		info, err := os.Stat(abs)
 		if err != nil || !info.IsDir() {
-			errs = append(errs, fmt.Sprintf("root ilegible: %s", root))
+			errs = append(errs, fmt.Sprintf("unreadable root: %s", root))
 			continue
 		}
 		projects = append(projects, scanRoot(abs, cfg)...)
 	}
 
-	// slices.SortFunc en vez de sort.Slice: el comparador de tres vías es el
-	// idiomático y evita el `i, j` indexado (que además esconde la comparación
-	// de paths dentro de la closure).
+	// slices.SortFunc instead of sort.Slice: the three-way comparator is idiomatic and hides no path comparison inside a closure.
 	slices.SortFunc(projects, func(a, b Project) int { return strings.Compare(a.Path, b.Path) })
 
 	var err error
@@ -68,12 +56,7 @@ func Scan(cfg config.Config) ([]Project, error) {
 	return projects, err
 }
 
-// scanRoot hace el walk de un root con podas.
-//
-// NO devuelve error, y no por descuido: `filepath.WalkDir` solo propaga lo que
-// le devuelve su callback, y este se traga todo (los errores de lectura caen en
-// `return nil`). Devolver un `error` aquí era una rama que ningún test podía
-// matar y que mutation reportaba como cobertura muerta.
+// No error return on purpose: WalkDir only propagates what its callback returns, and this one swallows everything, so an error would be an unkillable branch.
 func scanRoot(root string, cfg config.Config) []Project {
 	exclude := make(map[string]bool, len(cfg.Exclude))
 	for _, name := range cfg.Exclude {
@@ -83,7 +66,7 @@ func scanRoot(root string, cfg config.Config) []Project {
 	var projects []Project
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // ilegible: se salta sin abortar
+			return nil
 		}
 		if !d.IsDir() {
 			return nil
@@ -93,14 +76,12 @@ func scanRoot(root string, cfg config.Config) []Project {
 		}
 		if hasMarker(path, cfg.Marker) {
 			projects = append(projects, inspect(path, cfg.Marker))
-			// seguimos descendiendo: proyectos anidados válidos
 		}
 		return nil
 	})
 	return projects
 }
 
-// inspect clasifica un directorio con marcador.
 func inspect(dir, marker string) Project {
 	p := Project{
 		Path: dir,
@@ -109,13 +90,12 @@ func inspect(dir, marker string) Project {
 
 	metadata, err := parseMarker(filepath.Join(dir, marker))
 	if err != nil {
-		p.MarkerErr = err.Error() // visible, sin excluir
+		p.MarkerErr = err.Error()
 	} else {
 		if metadata.Name != "" {
 			p.Name = metadata.Name
 		}
 		p.PrimaryGroup = metadata.PrimaryGroup
-		// Secondary sin primary se ignora (cae en ungrouped)
 		if metadata.PrimaryGroup != "" {
 			p.SecondaryGroup = metadata.SecondaryGroup
 		}
@@ -128,39 +108,27 @@ func inspect(dir, marker string) Project {
 	case gitFile:
 		p.HasRepo = true
 		p.IsWorktree = true
-		p.MainRepo = main // para plegar wt bajo su repo principal
+		p.MainRepo = main
 	default:
-		// Sin repo, queda visible con HasRepo=false
 	}
 	return p
 }
 
-// markerMeta son los metadatos opcionales del marcador.
-// la clave `group` desaparece (cambio duro, sin fallback).
+// The old `group` key is gone with no fallback: hard rename on purpose.
 type markerMeta struct {
 	Name           string `toml:"name"`
 	PrimaryGroup   string `toml:"primary_group"`
 	SecondaryGroup string `toml:"secondary_group"`
-	SyncBranch     string `toml:"sync_branch"` // override de la sync branch
-	// AI es el namespace [ai.<acción>]: solo el prompt (dato). El ejecutable
-	// vive en la config global, nunca en el marcador commiteado. `inspect` lo
-	// ignora a propósito: el prompt no se guarda en Project (se relee on demand
-	// y así no engorda repos.json ni queda obsoleto).
+	SyncBranch     string `toml:"sync_branch"`
+	// [ai.<action>] carries the prompt only; the executable lives in the global config, never in the committed marker.
 	AI map[string]markerAIAction `toml:"ai"`
 }
 
-// markerAIAction es la tabla [ai.<acción>] del marcador.
 type markerAIAction struct {
 	Prompt string `toml:"prompt"`
 }
 
-// MarkerPrompt lee el prompt de la acción AI indicada desde el marcador de dir.
-// No lo guarda en Project: la TUI lo pide al pulsar la tecla, así que una
-// edición del marcador se nota sin rescan y el cache no se ensucia.
-//
-// Un directorio sin marcador (p. ej. un worktree sintético sin el suyo) no es
-// un error: devuelve vacío. Un marcador ilegible o malformado sí lo es, para
-// que la TUI avise en vez de lanzar a ciegas.
+// A missing marker is not an error (empty prompt) but an unreadable or malformed one is, so the TUI warns instead of launching blind.
 func MarkerPrompt(dir, marker, action string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, marker))
 	if err != nil {
@@ -176,8 +144,6 @@ func MarkerPrompt(dir, marker, action string) (string, error) {
 	return meta.AI[action].Prompt, nil
 }
 
-// parseMarker lee name/primary_group/secondary_group del marcador; campos
-// ausentes = vacío.
 func parseMarker(path string) (markerMeta, error) {
 	var meta markerMeta
 	raw, err := os.ReadFile(path)
@@ -190,13 +156,11 @@ func parseMarker(path string) (markerMeta, error) {
 	return meta, nil
 }
 
-// hasMarker comprueba la existencia del fichero marcador en dir.
 func hasMarker(dir, marker string) bool {
 	info, err := os.Stat(filepath.Join(dir, marker))
 	return err == nil && !info.IsDir()
 }
 
-// gitKind clasifica la ruta .git de un proyecto.
 type gitKind int
 
 const (
@@ -205,8 +169,6 @@ const (
 	gitFile
 )
 
-// classifyGit distingue repo normal de worktree. Devuelve el path
-// del repo principal cuando .git es un fichero gitdir: (`<main>/.git/...`).
 func classifyGit(gitPath string) (gitKind, string) {
 	info, err := os.Lstat(gitPath)
 	if err != nil {
@@ -221,14 +183,12 @@ func classifyGit(gitPath string) (gitKind, string) {
 	}
 	if rest, ok := strings.CutPrefix(string(raw), "gitdir:"); ok {
 		main := strings.TrimSpace(rest)
-		// worktrees registrados: <main>/.git/worktrees/<nombre>
 		main = filepath.Dir(filepath.Dir(main))
 		return gitFile, filepath.Dir(main)
 	}
 	return gitNone, ""
 }
 
-// isHidden reporta si un nombre de directorio está oculto.
 func isHidden(name string) bool {
 	return strings.HasPrefix(name, ".")
 }

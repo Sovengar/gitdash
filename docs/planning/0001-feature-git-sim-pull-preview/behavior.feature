@@ -1,134 +1,134 @@
-# Comportamiento esperado de "git-sim pull preview".
-# Fuente única de comportamiento, para verificación del usuario.
-# NO es Cucumber: sin step definitions, sin runner. Keywords en inglés.
-# Descripciones en el idioma del repo (español).
+# Expected behaviour of "git-sim pull preview".
+# Single source of behaviour, for the user's verification.
+# It is NOT Cucumber: no step definitions, no runner. Keywords in English.
+# Descriptions in the repo's language (English).
 #
-# Convención de teclas: las teclas son las de la config por defecto.
-#   v = visual (armado), p/m/r = variantes del selector visual.
-#   p sigue siendo pull, r sigue siendo rescan: las variantes visuales
-#   se consumen ANTES del enrutado normal mientras el selector está armado.
+# Key convention: the keys are the default config's ones.
+#   v = visual (arming), p/m/r = variants of the visual selector.
+#   p is still pull and r is still rescan: the visual variants
+#   are consumed BEFORE the normal routing while the selector is armed.
 
-Feature: Preview visual de pull/merge/rebase con git-sim
+Feature: Visual pull/merge/rebase preview with git-sim
 
-  # --- Disparo y armado ---------------------------------------------------
+  # --- Trigger and arming -------------------------------------------------
 
-  Scenario: La tecla visual arma el selector sin ejecutar nada
-    Given la fila del cursor es un repo git con upstream
-    When el usuario pulsa `v`
-    Then se arma el selector visual con el path y el upstream de esa fila
-    And no se lanza ningún proceso
-    And la sección de keybinds muestra el aviso del selector visual
-    And las hints se sustituyen por ese aviso
+  Scenario: The visual key arms the selector without running anything
+    Given the cursor's row is a git repo with an upstream
+    When the user presses `v`
+    Then the visual selector is armed with that row's path and upstream
+    And no process is launched
+    And the keybinds section shows the visual selector's warning
+    And the hints are replaced by that warning
 
-  Scenario: Sin fila bajo el cursor no se arma
-    Given el cursor está sobre un header de grupo (o la tabla vacía)
-    When el usuario pulsa `v`
-    Then aparece un toast de "no git repo — nothing to do"
-    And no se arma el selector visual
+  Scenario: With no row under the cursor it does not arm
+    Given the cursor is on a group header (or the table is empty)
+    When the user presses `v`
+    Then a "no git repo — nothing to do" toast appears
+    And the visual selector is not armed
 
-  Scenario: Sobre una fila sin repo no se arma
-    Given la fila del cursor es un proyecto sin repo git
-    When el usuario pulsa `v`
-    Then aparece un toast de "no git repo — nothing to do"
-    And no se arma el selector visual
+  Scenario: On a row with no repo it does not arm
+    Given the cursor's row is a project with no git repo
+    When the user presses `v`
+    Then a "no git repo — nothing to do" toast appears
+    And the visual selector is not armed
 
-  Scenario: Una tecla que no es variante cancela el armado y sigue su curso
-    Given el selector visual está armado
-    When el usuario pulsa una tecla que no es `p`, `m`, `r` ni `esc`
-    Then el selector se desarma
-    And esa tecla se procesa como cualquier otra tecla del dashboard
+  Scenario: A key that is not a variant cancels the arming and carries on
+    Given the visual selector is armed
+    When the user presses a key that is not `p`, `m`, `r` nor `esc`
+    Then the selector is disarmed
+    And that key is processed like any other dashboard key
 
-  Scenario: El armado sobrevive a la fila correcta aunque el cursor se mueva
-    Given el selector visual está armado sobre el repo A
-    When llegara a resolverse la variante
-    Then el gateway apunta al path y upstream capturados al armar (repo A),
-      no a la fila que estuviera bajo el cursor después
+  Scenario: The arming keeps the right row even if the cursor moves
+    Given the visual selector is armed on repo A
+    When the variant comes to be resolved
+    Then the gateway points at the path and upstream captured when arming (repo A),
+      not at whatever row was under the cursor afterwards
 
-  # --- Variantes ----------------------------------------------------------
+  # --- Variants -----------------------------------------------------------
 
-  Scenario: La variante p lanza git-sim pull sin argumentos posicionales
-    Given el selector visual está armado sobre un repo
-    When el usuario pulsa `p`
-    Then se lanza el handoff de `git-sim` con argv
-      ["git-sim", "--media-dir", <caché>/gitdash/git-sim, "pull"]
-    And el selector se desarma
+  Scenario: The p variant launches git-sim pull with no positional arguments
+    Given the visual selector is armed on a repo
+    When the user presses `p`
+    Then the `git-sim` handoff is launched with argv
+      ["git-sim", "--media-dir", <cache>/gitdash/git-sim, "pull"]
+    And the selector is disarmed
 
-  Scenario: La variante m lanza git-sim merge con el upstream de la rama
-    Given el selector visual está armado sobre un repo con upstream `origin/main`
-    When el usuario pulsa `m`
-    Then se lanza el handoff de `git-sim` con argv
-      ["git-sim", "--media-dir", <caché>/gitdash/git-sim, "merge", "origin/main"]
-    And el selector se desarma
+  Scenario: The m variant launches git-sim merge with the branch's upstream
+    Given the visual selector is armed on a repo with upstream `origin/main`
+    When the user presses `m`
+    Then the `git-sim` handoff is launched with argv
+      ["git-sim", "--media-dir", <cache>/gitdash/git-sim, "merge", "origin/main"]
+    And the selector is disarmed
 
-  Scenario: La variante r lanza git-sim rebase con el upstream de la rama
-    Given el selector visual está armado sobre un repo con upstream `origin/main`
-    When el usuario pulsa `r`
-    Then se lanza el handoff de `git-sim` con argv
-      ["git-sim", "--media-dir", <caché>/gitdash/git-sim, "rebase", "origin/main"]
-    And el selector se desarma
+  Scenario: The r variant launches git-sim rebase with the branch's upstream
+    Given the visual selector is armed on a repo with upstream `origin/main`
+    When the user presses `r`
+    Then the `git-sim` handoff is launched with argv
+      ["git-sim", "--media-dir", <cache>/gitdash/git-sim, "rebase", "origin/main"]
+    And the selector is disarmed
 
-  Scenario: Sin upstream, merge y rebase no lanzan nada
-    Given el selector visual está armado sobre un repo SIN upstream de su rama
-    When el usuario pulsa `m` o `r`
-    Then aparece un toast de "no upstream"
-    And no se lanza ningún handoff
+  Scenario: With no upstream, merge and rebase launch nothing
+    Given the visual selector is armed on a repo with NO branch upstream
+    When the user presses `m` or `r`
+    Then a "no upstream" toast appears
+    And no handoff is launched
 
-  Scenario: Sin upstream, la variante p sí se permite
-    Given el selector visual está armado sobre un repo SIN upstream de su rama
-    When el usuario pulsa `p`
-    Then se lanza el handoff de `git-sim pull`
-    # git-sim pull simula la operación; no exige un ref explícito como merge/rebase.
+  Scenario: With no upstream, the p variant is allowed
+    Given the visual selector is armed on a repo with NO branch upstream
+    When the user presses `p`
+    Then the `git-sim pull` handoff is launched
+    # git-sim pull simulates the operation; it does not require an explicit ref like merge/rebase.
 
-  # --- Salida y flags -----------------------------------------------------
+  # --- Output and flags ---------------------------------------------------
 
-  Scenario: El media-dir siempre apunta a la caché de gitdash, nunca al repo
-    Given cualquier variante visual
-    Then el argv incluye `--media-dir <caché XDG de gitdash>/git-sim`
-    And el directorio se crea si no existe
-    And el repo NO queda con `git-sim_media/` dentro (no se marca dirty)
+  Scenario: The media-dir always points at gitdash's cache, never the repo
+    Given any visual variant
+    Then the argv includes `--media-dir <gitdash's XDG cache>/git-sim`
+    And the directory is created if it does not exist
+    And the repo is NOT left with `git-sim_media/` inside (it is not marked dirty)
 
-  Scenario: No se desactiva el auto-open ni se anima
-    Given cualquier variante visual
-    Then el argv NO incluye `-d` (el auto-open de git-sim queda activo)
-    And el argv NO incluye `--animate`
+  Scenario: Auto-open is not disabled and nothing is animated
+    Given any visual variant
+    Then the argv does NOT include `-d` (git-sim's auto-open stays active)
+    And the argv does NOT include `--animate`
 
-  # --- Handoff y command log ---------------------------------------------
+  # --- Handoff and command log ---------------------------------------------
 
-  Scenario: Sin el binario en PATH solo hay toast
-    Given el selector visual está armado y `git-sim` no está en PATH
-    When el usuario elige una variante
-    Then aparece un toast de "git-sim not installed"
-    And no hay handoff de terminal
+  Scenario: With the binary missing from PATH there is only a toast
+    Given the visual selector is armed and `git-sim` is not in PATH
+    When the user picks a variant
+    Then a "git-sim not installed" toast appears
+    And there is no terminal handoff
 
-  Scenario: Si el media-dir no se puede crear, no se lanza nada
-    Given el directorio de caché de git-sim no se puede crear
-    When el usuario elige una variante
-    Then aparece un toast de error
-    And no se lanza el handoff (lanzarlo ensuciaría el repo)
+  Scenario: If the media-dir cannot be created, nothing is launched
+    Given git-sim's cache directory cannot be created
+    When the user picks a variant
+    Then an error toast appears
+    And the handoff is not launched (launching it would dirty the repo)
 
-  Scenario: Al volver del handoff se registra el exec y se re-colecta
-    Given se lanzó un handoff de `git-sim`
-    When el hijo termina y la terminal vuelve a gitdash
-    Then el command log registra un exec con el argv REAL resuelto
-      (incluye `--media-dir` y el ref) y Dur=0
-    And la intención (tecla + variante + repo) quedó registrada al elegir
-    And se re-colecta el estado del repo
+  Scenario: On return from the handoff the exec is recorded and it re-collects
+    Given a `git-sim` handoff was launched
+    When the child finishes and the terminal returns to gitdash
+    Then the command log records an exec with the REAL resolved argv
+      (including `--media-dir` and the ref) and Dur=0
+    And the intent (key + variant + repo) was recorded when it was chosen
+    And the repo's state is re-collected
 
-  Scenario: El selector visual no consulta ni bloquea por rebase en curso
-    Given el repo tiene un rebase a medias
-    When el usuario elige una variante visual
-    Then el handoff se lanza igualmente
-    # git-sim no muta el repo real: previsualizar un rebase es justo lo útil ahí.
+  Scenario: The visual selector neither consults nor blocks on a rebase in progress
+    Given the repo has a mid-rebase
+    When the user picks a visual variant
+    Then the handoff is launched all the same
+    # git-sim does not mutate the real repo: previewing a rebase is exactly what is useful there.
 
-  # --- Config y hints -----------------------------------------------------
+  # --- Config and hints ---------------------------------------------------
 
-  Scenario: La acción visual es configurable y aparece en las hints
-    Given la config por defecto
-    Then `visual` existe en los keybindings por defecto con tecla `v`
-    And las hints incluyen "v visual" (etiqueta sin la tecla dentro)
-    And una config vieja que use una acción inexistente sigue avisando
+  Scenario: The visual action is configurable and shows up in the hints
+    Given the default config
+    Then `visual` exists in the default keybindings with the key `v`
+    And the hints include "v visual" (label without the key inside)
+    And an old config using a nonexistent action still warns
 
-  Scenario: El aviso del selector se pinta por el punto único de keybinds
-    Given el selector visual está armado
-    Then promptLine() devuelve el aviso del selector visual
-    And keybindsLines() es 1 (el aviso sustituye a las hints)
+  Scenario: The selector's warning is painted through keybinds' single point
+    Given the visual selector is armed
+    Then promptLine() returns the visual selector's warning
+    And keybindsLines() is 1 (the warning replaces the hints)

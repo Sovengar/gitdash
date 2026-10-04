@@ -8,15 +8,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestRenderWithTitleAnchoExactoYGrifos(t *testing.T) {
+func TestRenderWithTitleWidthExactAndGlyphs(t *testing.T) {
 	out := RenderWithTitle(Rounded(), lipgloss.Color("238"), " gitdash ", "hola", 20)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
-		t.Fatalf("líneas = %d, want 3 (borde + contenido + borde)", len(lines))
+		t.Fatalf("lines = %d, want 3 (border + content + border)", len(lines))
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != 20 {
-			t.Errorf("línea %d ancho = %d, want 20: %q", i, w, l)
+			t.Errorf("line %d width = %d, want 20: %q", i, w, l)
 		}
 	}
 	top := ansi.Strip(lines[0])
@@ -24,7 +24,7 @@ func TestRenderWithTitleAnchoExactoYGrifos(t *testing.T) {
 		t.Errorf("esquinas superiores incorrectas: %q", top)
 	}
 	if !strings.Contains(top, " gitdash ") {
-		t.Errorf("título no embebido en la línea superior: %q", top)
+		t.Errorf("title not embedded in the top line: %q", top)
 	}
 	bot := ansi.Strip(lines[2])
 	if !strings.HasPrefix(bot, "╰") || !strings.HasSuffix(bot, "╯") {
@@ -32,219 +32,184 @@ func TestRenderWithTitleAnchoExactoYGrifos(t *testing.T) {
 	}
 }
 
-// Sin color de borde no se emite NINGÚN escape: el estilo del borde solo existe
-// si hay un color. `ansi.Style` con un color nil no es "sin estilo", es un
-// `\x1b[39m` (fg por defecto) alrededor de cada trozo, así que este caso
-// distingue un borde sin pintar de uno pintado de blanco.
-func TestRenderSinColorNoEmiteANSI(t *testing.T) {
-	out := RenderWithTitle(Rounded(), nil, " titulo ", "contenido", 24)
+// Without a border color NO escape is emitted at all: the border style only exists if there is a color, and `ansi.Style` with a nil color is not "no style" but a `\x1b[39m` (default fg) around each chunk, so this case tells an unpainted border from a white one.
+func TestRenderWithoutColorNotEmitsANSI(t *testing.T) {
+	out := RenderWithTitle(Rounded(), nil, " title ", "content", 24)
 	if strings.Contains(out, "\x1b[") {
-		t.Errorf("borde sin color emitió ANSI: %q", out)
+		t.Errorf("a colourless border emitted ANSI: %q", out)
 	}
-	if !strings.Contains(ansi.Strip(out), " titulo ") {
-		t.Errorf("el título se perdió al no pintar: %q", out)
+	if !strings.Contains(ansi.Strip(out), " title ") {
+		t.Errorf("the title was lost by not painting: %q", out)
 	}
 }
 
-// El relleno horizontal de la línea de borde es el del Border (fill), no un
-// espacio: un borde sin fill propio tiene que caer a un espacio, y uno con fill
-// lo conserva.
-func TestRenderUsaElFillDelBorder(t *testing.T) {
-	t.Run("fill propio", func(t *testing.T) {
+func TestRenderUsesTheFillOfTheBorder(t *testing.T) {
+	t.Run("own fill", func(t *testing.T) {
 		out := RenderWithTitle(Rounded(), nil, " t ", "c", 12)
 		top := ansi.Strip(strings.Split(out, "\n")[0])
 		if !strings.Contains(top, "─") {
-			t.Errorf("relleno del borde = %q, want el fill ─ del Border", top)
+			t.Errorf("border fill = %q, want the Border's ─ fill", top)
 		}
 	})
-	t.Run("fill vacío", func(t *testing.T) {
+	t.Run("empty fill", func(t *testing.T) {
 		b := lipgloss.Border{TopLeft: "|", Top: "", TopRight: "|", BottomLeft: "|", Bottom: "", BottomRight: "|", Left: "!", Right: "!"}
 		out := RenderWithTitle(b, nil, "", "c", 10)
 		lines := strings.Split(out, "\n")
 		if got := ansi.Strip(lines[0]); got != "|        |" {
-			t.Errorf("línea superior = %q, want | + espacios + |", got)
+			t.Errorf("top line = %q, want | + spaces + |", got)
 		}
 		if got := ansi.Strip(lines[1]); got != "!c       !" {
-			t.Errorf("línea de contenido = %q, want bordes laterales del Border", got)
+			t.Errorf("content line = %q, want the Border's side borders", got)
 		}
 	})
 }
 
-// El contenido más ancho que el interior se recorta, no se re-envuelve.
-func TestRenderWithTitleRecortaSinWrap(t *testing.T) {
-	largo := strings.Repeat("x", 100)
-	out := RenderWithTitle(Rounded(), nil, "", largo, 12)
+func TestRenderWithTitleClipsWithoutWrap(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	out := RenderWithTitle(Rounded(), nil, "", long, 12)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
-		t.Fatalf("líneas = %d, want 3 (el recorte no añade líneas)", len(lines))
+		t.Fatalf("lines = %d, want 3 (clipping adds no lines)", len(lines))
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != 12 {
-			t.Errorf("línea %d ancho = %d, want 12", i, w)
+			t.Errorf("line %d width = %d, want 12", i, w)
 		}
 	}
 	if got := ansi.StringWidth(ansi.Strip(lines[1])); got != 12 {
-		t.Errorf("contenido recortado ancho = %d, want 12", got)
+		t.Errorf("clipped content width = %d, want 12", got)
 	}
 }
 
-// El recorte es ANSI-safe: la secuencia de color del contenido no se corrompe.
-func TestRenderWithTitleRecorteANSI(t *testing.T) {
-	contenido := "\x1b[31m" + strings.Repeat("ab", 40) + "\x1b[0m"
-	out := RenderWithTitle(Rounded(), nil, "", contenido, 10)
+func TestRenderWithTitleClippingANSI(t *testing.T) {
+	content := "\x1b[31m" + strings.Repeat("ab", 40) + "\x1b[0m"
+	out := RenderWithTitle(Rounded(), nil, "", content, 10)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
-		t.Fatalf("líneas = %d, want 3", len(lines))
+		t.Fatalf("lines = %d, want 3", len(lines))
 	}
 	if w := ansi.StringWidth(lines[1]); w != 10 {
-		t.Errorf("ancho ANSI = %d, want 10: %q", w, lines[1])
+		t.Errorf("ANSI width = %d, want 10: %q", w, lines[1])
 	}
 	if !strings.Contains(lines[1], "\x1b[") {
-		t.Errorf("se perdió el ANSI del contenido: %q", lines[1])
+		t.Errorf("the content's ANSI was lost: %q", lines[1])
 	}
 }
 
-func TestRenderWithTitleWidthMinimo(t *testing.T) {
-	out := RenderWithTitle(Rounded(), nil, "titulo largo", "x", 1)
+func TestRenderWithTitleWidthMinimum(t *testing.T) {
+	out := RenderWithTitle(Rounded(), nil, "long title", "x", 1)
 	for i, l := range strings.Split(out, "\n") {
 		if w := ansi.StringWidth(l); w != 2 {
-			t.Errorf("línea %d ancho = %d, want 2 (clamp)", i, w)
+			t.Errorf("line %d width = %d, want 2 (clamp)", i, w)
 		}
 	}
 }
 
-func TestRenderWithTitleContenidoVacio(t *testing.T) {
+func TestRenderWithTitleContentEmpty(t *testing.T) {
 	out := RenderWithTitle(Rounded(), nil, "", "", 8)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
-		t.Fatalf("líneas = %d, want 3", len(lines))
+		t.Fatalf("lines = %d, want 3", len(lines))
 	}
-	if got := ansi.Strip(lines[1]); got != "│      │" { // interior = 8-2
-		t.Errorf("línea interior vacía = %q, want borde + relleno interior", got)
+	if got := ansi.Strip(lines[1]); got != "│      │" { // inner width = 8-2
+		t.Errorf("empty inner line = %q, want border + inner fill", got)
 	}
 }
 
-// La leyenda inferior se embebe en la línea de borde inferior.
-func TestRenderWithTitlesLeyendaInferior(t *testing.T) {
-	out := RenderWithTitles(Rounded(), nil, " arriba ", AlignLeft, " abajo ", AlignRight, "c", 24)
+func TestRenderWithTitlesLegendLower(t *testing.T) {
+	out := RenderWithTitles(Rounded(), nil, " top ", AlignLeft, " bottom ", AlignRight, "c", 24)
 	lines := strings.Split(out, "\n")
 	bot := ansi.Strip(lines[len(lines)-1])
-	if !strings.Contains(bot, " abajo ") {
+	if !strings.Contains(bot, " bottom ") {
 		t.Errorf("leyenda inferior ausente: %q", bot)
 	}
 	if !strings.HasSuffix(bot, "╯") {
-		t.Errorf("esquina inferior derecha ausente: %q", bot)
+		t.Errorf("bottom right corner missing: %q", bot)
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w != 24 {
-			t.Errorf("línea %d ancho = %d, want 24", i, w)
+			t.Errorf("line %d width = %d, want 24", i, w)
 		}
 	}
 }
 
-// La alineación del título dentro de la línea de borde: lo que decide dónde cae
-// el texto entre los dos rellenos. El caso raro es el hueco IMPAR, porque ahí la
-// división entera y el reparto se separan (con 3 de hueco, al centro es 1 a la
-// izquierda y 2 a la derecha: el resto va a la derecha).
-func TestRenderWithTitlesAlineaElTitulo(t *testing.T) {
-	// El interior es width-2: con width 9 son 7 celdas, y un título de 4 deja
-	// un hueco de 3. Impar a propósito, que es el caso que discrimina.
+// The ODD gap is the rare case, because there the integer division and the split diverge (with a gap of 3, the centre leaves 1 on the left and 2 on the right: the remainder goes right).
+func TestRenderWithTitlesAlignsTheTitle(t *testing.T) {
+	// The inner width is width-2: with width 9 that is 7 cells and a 4-cell title leaves a gap of 3, odd on purpose because that is the discriminating case.
 	const width = 9
-	// El borde redondeado: ╭ ╮ ╰ ╯, y el relleno es ─.
 	for _, c := range []struct {
-		nombre     string
+		name       string
 		align      int
 		wantTop    string
 		wantBottom string
 	}{
-		{"izquierda: el hueco entero a la derecha", AlignLeft, "╭hola───╮", "╰───────╯"},
-		{"centro: 1 a la izquierda y 2 a la derecha (impar)", AlignCenter, "╭─hola──╮", "╰───────╯"},
-		{"derecha: el hueco entero a la izquierda", AlignRight, "╭───hola╮", "╰───────╯"},
+		{"left: the whole gap on the right", AlignLeft, "╭hola───╮", "╰───────╯"},
+		{"centre: 1 on the left and 2 on the right (odd)", AlignCenter, "╭─hola──╮", "╰───────╯"},
+		{"right: the whole gap on the left", AlignRight, "╭───hola╮", "╰───────╯"},
 	} {
 		out := RenderWithTitles(Rounded(), nil, "hola", c.align, "", c.align, "x", width)
-		lineas := strings.Split(out, "\n")
-		if len(lineas) != 3 {
-			t.Fatalf("%s: %d líneas, want 3 (borde + contenido + borde):\n%s",
-				c.nombre, len(lineas), out)
+		lines := strings.Split(out, "\n")
+		if len(lines) != 3 {
+			t.Fatalf("%s: %d lines, want 3 (border + content + border):\n%s",
+				c.name, len(lines), out)
 		}
-		if got := lineas[0]; got != c.wantTop {
-			t.Errorf("%s: línea superior = %q, want %q", c.nombre, got, c.wantTop)
+		if got := lines[0]; got != c.wantTop {
+			t.Errorf("%s: top line = %q, want %q", c.name, got, c.wantTop)
 		}
-		if got := lineas[2]; got != c.wantBottom {
-			t.Errorf("%s: línea inferior = %q, want %q", c.nombre, got, c.wantBottom)
+		if got := lines[2]; got != c.wantBottom {
+			t.Errorf("%s: bottom line = %q, want %q", c.name, got, c.wantBottom)
 		}
 	}
 }
 
-// Las dos líneas de borde son independientes: el título de arriba puede estar a
-// un lado y la leyenda de abajo al otro, y eso es justo lo que el panel del log
-// hace (título a la izquierda, leyenda a la derecha).
-func TestRenderWithTitlesAlineaCadaLineaPorSeparado(t *testing.T) {
-	// "T" mide 1 sobre un interior de 7: el hueco es 6.
+func TestRenderWithTitlesAlignsEachLineForSeforte(t *testing.T) {
 	out := RenderWithTitles(Rounded(), nil, "T", AlignLeft, "B", AlignRight, "x", 9)
-	lineas := strings.Split(out, "\n")
-	if got := lineas[0]; got != "╭T──────╮" {
-		t.Errorf("línea superior = %q, want ╭T──────╮", got)
+	lines := strings.Split(out, "\n")
+	if got := lines[0]; got != "╭T──────╮" {
+		t.Errorf("top line = %q, want ╭T──────╮", got)
 	}
-	if got := lineas[2]; got != "╰──────B╯" {
-		t.Errorf("línea inferior = %q, want ╰──────B╯", got)
+	if got := lines[2]; got != "╰──────B╯" {
+		t.Errorf("bottom line = %q, want ╰──────B╯", got)
 	}
 }
 
-// Sin título, la línea de borde es todo relleno: no hay nada que alinear, y una
-// alineación cualquiera no puede dejar un hueco.
-func TestRenderWithTitlesSinTituloNoDejaHueco(t *testing.T) {
+func TestRenderWithTitlesWithoutTitleNotLeavesGap(t *testing.T) {
 	for _, align := range []int{AlignLeft, AlignCenter, AlignRight, 99} {
 		out := RenderWithTitles(Rounded(), nil, "", align, "", align, "x", 9)
-		lineas := strings.Split(out, "\n")
-		if got := lineas[0]; got != "╭───────╮" {
-			t.Errorf("align=%d sin título: línea superior = %q, want ╭───────╮", align, got)
+		lines := strings.Split(out, "\n")
+		if got := lines[0]; got != "╭───────╮" {
+			t.Errorf("align=%d without a title: top line = %q, want ╭───────╮", align, got)
 		}
-		if got := lineas[2]; got != "╰───────╯" {
-			t.Errorf("align=%d sin título: línea inferior = %q, want ╰───────╯", align, got)
+		if got := lines[2]; got != "╰───────╯" {
+			t.Errorf("align=%d without a title: bottom line = %q, want ╰───────╯", align, got)
 		}
 	}
 }
 
-// contentLines recorta el contenido al ancho INTERIOR, lo rellena y le pega los
-// bordes a los lados; asi la linea final mide innerWidth + 2.
-//
-// El carácter de borde vacío se sustituye por un espacio. La razón es el ancho:
-// con el borde en "" la caja dibujaría una línea de una celda menos en ese lado
-// y se veria torcida. El caso se fuerza llamando a la función con los bordes
-// vacíos, que es lo que hace Render cuando el estilo no los trae.
-func TestContentLinesSustituyeBordesVacios(t *testing.T) {
+// The empty border character is replaced by a space, and the reason is width: with the border at "" the box would draw a line one cell short on that side and would look crooked. The case is forced by calling the function with empty borders, which is what Render does when the style does not bring them.
+func TestContentLinesReplacesBordersEmpty(t *testing.T) {
 	got := contentLines(nil, "", "", "hola", 12)
 	if len(got) != 1 {
-		t.Fatalf("contentLines devolvio %d lineas, want 1", len(got))
+		t.Fatalf("contentLines returned %d lines, want 1", len(got))
 	}
-	// Mismo ancho que con bordes de verdad (12 + 2), pero los dos celdas del
-	// borde son espacios en vez de caracteres de marco.
 	if want := " hola         "; got[0] != want {
-		t.Errorf("linea = %q, want %q (los bordes vacios son un espacio cada uno)", got[0], want)
+		t.Errorf("line = %q, want %q (the empty borders are one space each)", got[0], want)
 	}
 	if w := ansi.StringWidth(got[0]); w != 14 {
-		t.Errorf("ancho = %d, want 14 (12 de interior + 2 bordes)", w)
+		t.Errorf("width = %d, want 14 (12 of interior + 2 borders)", w)
 	}
-	// Con bordes de verdad, los mismos caracteres de marco. Ojo al ancho: la
-	// linea con bordes mide UNA celda MENOS con el mismo innerWidth, porque el
-	// caracter de marco se cuenta una vez y el espacio tambien, pero el recorte
-	// del interior se hizo antes de pegarlos. Lo que importa es que ninguna de
-	// las dos desborda: una caja con una celda de menos en un lado se ve torcida.
 	got = contentLines(nil, "|", "|", "hola", 12)
 	if got[0] != "|hola        |" {
-		t.Errorf("linea con bordes = %q, want los bordes de marco", got[0])
+		t.Errorf("line with borders = %q, want the frame borders", got[0])
 	}
 }
 
-// Y un contenido más ancho que el interior se recorta, no desborda: es lo que
-// impide que un texto largo rompa la caja y empuje el borde de la derecha.
-func TestContentLinesRecortaLoQueNoCabe(t *testing.T) {
-	got := contentLines(nil, "|", "|", "demasiado largo para 6", 6)
+func TestContentLinesClipsWhatDoesNotFit(t *testing.T) {
+	got := contentLines(nil, "|", "|", "too long for 6", 6)
 	if w := ansi.StringWidth(got[0]); w != 8 {
-		t.Errorf("ancho = %d, want 8 (6 de interior + 2 bordes)", w)
+		t.Errorf("width = %d, want 8 (6 of interior + 2 borders)", w)
 	}
-	if strings.Contains(got[0], "para") {
-		t.Errorf("la linea no se recorto: %q", got[0])
+	if strings.Contains(got[0], "for") {
+		t.Errorf("the line was not clipped: %q", got[0])
 	}
 }

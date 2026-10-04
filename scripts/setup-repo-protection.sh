@@ -1,49 +1,35 @@
 #!/usr/bin/env bash
 #
-# setup-repo-protection.sh — configura de forma idempotente el ruleset de
-# protección (nombre `protect-<rama>`, p. ej. `protect-main`), el ajuste de
-# merge del repo y las labels que referencia dependabot.yml.
+# setup-repo-protection.sh — idempotently configures the protection ruleset
+# (named `protect-<branch>`, e.g. `protect-main`), the repo's merge setting and
+# the labels referenced by dependabot.yml.
 #
-# Política (ver el plan / descripción del PR para el razonamiento):
-#   - bloquea el borrado de la rama      (`deletion`)
-#   - bloquea los force-push             (`non_fast_forward`)
-#   - exige PR para mergear              (`pull_request`, 0 approvals -> dev solo)
-#   - exige los checks de CI             (`required_status_checks`, strict = false)
+# Policy (see the PR description for the reasoning):
+#   - blocks branch deletion            (`deletion`)
+#   - blocks force-pushes               (`non_fast_forward`)
+#   - requires a PR to merge            (`pull_request`, 0 approvals -> solo dev)
+#   - requires the CI checks            (`required_status_checks`, strict = false)
 #
-# `strict_required_status_checks_policy` es deliberadamente false: exigir la
-# rama al día antes de mergear forzaría un rebase en cada PR concurrente. No
-# queremos rebases forzados.
+# `strict_required_status_checks_policy` is deliberately false: requiring the branch to be up to date before merging would force a rebase on every concurrent PR, and forced rebases are not wanted.
+# The required check contexts are DERIVED FROM REALITY: they are read from the check runs of the most recently updated PR's head, so the gate is never configured against check names that do not exist.
+# BYPASS — an accepted, deliberate consequence, NOT something to "fix": the repo's admin role keeps `bypass_mode: always`, so an admin can merge red PRs and push or force-push `main`, bypassing every rule above; the gate is absolute only for non-admin actors (strict mode with no escape hatch = drop `bypass_actors` and deactivate the ruleset temporarily for hotfixes).
+# Labels: dependabot.yml references `dependencies` and `ci`, and GitHub silently drops undefined labels, so this script creates them when missing (idempotent; a renamed label is recreated under the new name).
 #
-# Los contexts de los checks requeridos se DERIVAN DE LA REALIDAD: se leen de
-# los check runs del head del PR actualizado más recientemente, de modo que el
-# gate nunca se configura contra nombres de check que no existen.
+# Requires: gh (authenticated, repo admin) and jq.
 #
-# BYPASS — consecuencia aceptada, deliberada; NO "arreglar": el rol de admin del
-# repo mantiene `bypass_mode: always`. El admin puede por tanto mergear PRs en
-# rojo y pushear o force-pushear `main`, saltándose todas las reglas de arriba.
-# El gate es absoluto solo para actores no-admin. Modo estricto (sin válvula de
-# escape) = quitar `bypass_actors` y desactivar el ruleset temporalmente para
-# hotfixes.
-#
-# Labels: dependabot.yml referencia `dependencies` y `ci`. GitHub descarta en
-# silencio las labels no definidas, así que este script las crea si faltan
-# (idempotente; una label renombrada se recrea con el nombre nuevo).
-#
-# Requiere: gh (autenticado, admin del repo) y jq.
-#
-# Uso:
+# Usage:
 #   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test,"Mutation (diff)"] [--sha <commit>]
 #
-# Variables de entorno:
-#   RULESET_NAME=protect-<rama>   BRANCH=<default del repo>   GH_ACTIONS_APP_ID=15368
+# Environment variables:
+#   RULESET_NAME=protect-<branch>   BRANCH=<repo default>   GH_ACTIONS_APP_ID=15368
 
 set -euo pipefail
 
-# GitHub Actions es la integración que reporta nuestros check runs de CI.
+# GitHub Actions is the integration that reports our CI check runs.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
 REQUIRED_DEFAULT=(Build Lint Test "Mutation (diff)")
 
-# Labels referenciadas por .github/dependabot.yml, como "nombre|color|descripción".
+# Labels referenced by .github/dependabot.yml, as "name|colour|description".
 LABELS=(
   "dependencies|0366d6|Dependency updates"
   "ci|0e8a16|CI / build pipeline"
@@ -54,7 +40,7 @@ OPT_CONTEXTS=""
 OPT_SHA=""
 
 usage() {
-  # Imprime el bloque de comentario inicial (todo tras el shebang).
+  # Prints the initial comment block (everything after the shebang).
   awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
   exit 0
 }
@@ -65,58 +51,53 @@ while [ $# -gt 0 ]; do
     --contexts) OPT_CONTEXTS="${2:-}"; shift 2 ;;
     --sha) OPT_SHA="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
-    *) echo "argumento desconocido: $1" >&2; exit 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 for bin in gh jq; do
-  command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: se requiere '$bin' y no está instalado." >&2; exit 1; }
+  command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: '$bin' is required and is not installed." >&2; exit 1; }
 done
 
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
-[ -n "$REPO" ] || { echo "ERROR: no se pudo resolver owner/repo (ejecuta dentro del repositorio)." >&2; exit 1; }
+[ -n "$REPO" ] || { echo "ERROR: could not resolve owner/repo (run it inside the repository)." >&2; exit 1; }
 
-# La rama por defecto se deriva del repo; BRANCH (entorno) la sobreescribe.
+# The default branch is derived from the repo; BRANCH (env) overrides it.
 BRANCH="${BRANCH:-$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)}"
-[ -n "$BRANCH" ] && [ "$BRANCH" != "null" ] || { echo "ERROR: no se pudo resolver la rama por defecto de ${REPO}." >&2; exit 1; }
+[ -n "$BRANCH" ] && [ "$BRANCH" != "null" ] || { echo "ERROR: could not resolve the default branch of ${REPO}." >&2; exit 1; }
 
-# El nombre del ruleset se deriva de la rama (protect-<rama>), de modo que el
-# script sirva igual para repos cuya rama por defecto no sea `main`.
+# The ruleset name derives from the branch (protect-<branch>), so the script also works on repos whose default branch is not `main`.
 RULESET_NAME="${RULESET_NAME:-protect-${BRANCH}}"
 
-# find_ruleset_id imprime el id del ruleset llamado RULESET_NAME, o nada.
-# La lista es paginada (per_page=100) para que una colección grande no haga
-# perder el ruleset existente y crear un duplicado. Un fallo de gh es fatal: un
-# error transitorio jamás debe leerse como "no existe ruleset". `jq -s` aglutina
-# los arrays por página que emite `gh api --paginate`.
+# find_ruleset_id prints the id of the RULESET_NAME ruleset, or nothing.
+# The list is paginated (per_page=100) so a large collection does not lose the existing ruleset and create a duplicate; a gh failure is fatal, because a transient error must never read as "no ruleset exists".
+# `jq -s` gathers the per-page arrays emitted by `gh api --paginate`.
 find_ruleset_id() {
   local json
   if ! json="$(gh api "repos/${REPO}/rulesets?per_page=100" --paginate)"; then
-    echo "ERROR: no se pudieron listar los rulesets de ${REPO}." >&2
+    echo "ERROR: could not list the rulesets of ${REPO}." >&2
     exit 1
   fi
   printf '%s' "$json" | jq -s -r --arg name "$RULESET_NAME" \
     '[.[][] | select(.name == $name) | .id] | first // empty'
 }
 
-# ensure_label NOMBRE COLOR DESCRIPCIÓN — crea la label solo si falta, de modo
-# que los renombrados se detectan y las existentes quedan intactas.
+# ensure_label NAME COLOUR DESCRIPTION — creates the label only when missing, so renames are detected and existing ones stay intact.
 ensure_label() {
   local name="$1" color="$2" desc="$3" existing=""
   if existing="$(gh api "repos/${REPO}/labels/${name}" --jq '.name' 2>/dev/null)" && [ -n "$existing" ]; then
-    echo "==> La label '${name}' ya existe"
+    echo "==> The label '${name}' already exists"
     return 0
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "--- haría POST repos/${REPO}/labels { name: ${name}, color: ${color} } ---"
+    echo "--- would POST repos/${REPO}/labels { name: ${name}, color: ${color} } ---"
     return 0
   fi
   gh api -X POST "repos/${REPO}/labels" \
     -f "name=${name}" -f "color=${color}" -f "description=${desc}" >/dev/null
-  echo "==> Label '${name}' creada"
+  echo "==> Label '${name}' created"
 }
 
-# ensure_labels aplica la tabla LABELS.
 ensure_labels() {
   local spec name color desc
   for spec in "${LABELS[@]}"; do
@@ -125,24 +106,19 @@ ensure_labels() {
   done
 }
 
-echo "==> Repositorio: ${REPO}"
+echo "==> Repository: ${REPO}"
 echo "==> Ruleset:     ${RULESET_NAME} (target=refs/heads/${BRANCH}, enforcement=active)"
 
-# ---------------------------------------------------------------------------
-# 1. Verifica el app id de GitHub Actions en vez de confiar en el valor fijo.
-# ---------------------------------------------------------------------------
+# 1. Verify GitHub Actions' app id instead of trusting the fixed value.
 actual_app_id="$(gh api /apps/github-actions --jq '.id')"
 if [ "$actual_app_id" != "$GH_ACTIONS_APP_ID" ]; then
-  echo "ERROR: el app id de GitHub Actions es '${actual_app_id}', se esperaba '${GH_ACTIONS_APP_ID}'." >&2
-  echo "       Actualiza GH_ACTIONS_APP_ID antes de continuar." >&2
+  echo "ERROR: GitHub Actions' app id is '${actual_app_id}', expected '${GH_ACTIONS_APP_ID}'." >&2
+  echo "       Update GH_ACTIONS_APP_ID before continuing." >&2
   exit 1
 fi
-echo "==> App id de GitHub Actions verificado: ${GH_ACTIONS_APP_ID}"
+echo "==> GitHub Actions app id verified: ${GH_ACTIONS_APP_ID}"
 
-# ---------------------------------------------------------------------------
-# 2. Resuelve los contexts de los checks requeridos.
-#    Por defecto: se derivan de los check runs reales del head del último PR.
-# ---------------------------------------------------------------------------
+# 2. Resolve the required check contexts (by default derived from the real check runs of the most recently updated PR's head).
 contexts=()
 if [ -n "$OPT_CONTEXTS" ]; then
   IFS=',' read -r -a names <<< "$OPT_CONTEXTS"
@@ -150,47 +126,45 @@ if [ -n "$OPT_CONTEXTS" ]; then
     name="$(printf '%s' "$name" | xargs)"
     [ -n "$name" ] && contexts+=("$name")
   done
-  echo "==> Contexts de check (override explícito): ${contexts[*]}"
+  echo "==> Check contexts (explicit override): ${contexts[*]}"
 else
   sha="${OPT_SHA}"
   if [ -z "$sha" ]; then
     sha="$(gh api "repos/${REPO}/pulls?state=all&sort=updated&direction=desc&per_page=1" --jq '.[0].head.sha' 2>/dev/null || true)"
   fi
   if [ -z "$sha" ] || [ "$sha" = "null" ]; then
-    echo "ERROR: no hay SHA de head de PR para derivar los nombres de check requeridos." >&2
-    echo "       Abre un PR cuya CI haya corrido, o pasa --sha <commit> o --contexts con los cuatro checks." >&2
+    echo "ERROR: there is no PR head SHA to derive the required check names from." >&2
+    echo "       Open a PR whose CI has run, or pass --sha <commit> or --contexts with the four checks." >&2
     exit 1
   fi
-  echo "==> Derivando contexts de los check runs de ${sha}"
+  echo "==> Deriving contexts from the check runs of ${sha}"
   observed="$(gh api "repos/${REPO}/commits/${sha}/check-runs?per_page=100" --jq '.check_runs[].name' 2>/dev/null || true)"
   if [ -z "$observed" ]; then
-    echo "ERROR: no se encontraron check runs en ${sha}. Puede que la CI aún no haya corrido." >&2
+    echo "ERROR: no check runs found at ${sha}. The CI may not have run yet." >&2
     exit 1
   fi
   for req in "${REQUIRED_DEFAULT[@]}"; do
     match="$(printf '%s\n' "$observed" | grep -Fx "$req" | head -n1 || true)"
     if [ -z "$match" ]; then
-      echo "ERROR: no se encontró el check '${req}' en ${sha}." >&2
-      echo "       Check runs observados:" >&2
+      echo "ERROR: the check '${req}' was not found at ${sha}." >&2
+      echo "       Observed check runs:" >&2
       while IFS= read -r line; do
         [ -n "$line" ] && printf '         %s\n' "$line" >&2
       done <<< "$observed"
-      echo "       Se rechaza configurar un ruleset contra checks inexistentes." >&2
+      echo "       Refusing to configure a ruleset against nonexistent checks." >&2
       exit 1
     fi
     contexts+=("$match")
   done
-  echo "==> Contexts de check (derivados de runs observados): ${contexts[*]}"
+  echo "==> Check contexts (derived from observed runs): ${contexts[*]}"
 fi
 
 if [ "${#contexts[@]}" -eq 0 ]; then
-  echo "ERROR: no se resolvió ningún context de status check." >&2
+  echo "ERROR: no status check context was resolved." >&2
   exit 1
 fi
 
-# Construye el array required_status_checks, fijando cada context a la
-# integración de GitHub Actions para que solo los checks reportados por Actions
-# satisfagan el gate.
+# Each context is pinned to the GitHub Actions integration so only checks reported by Actions satisfy the gate.
 checks_json="["
 first=1
 for ctx in "${contexts[@]}"; do
@@ -200,16 +174,9 @@ for ctx in "${contexts[@]}"; do
 done
 checks_json+="]"
 
-# ---------------------------------------------------------------------------
-# 3. Construye el payload del ruleset.
+# 3. Build the ruleset payload.
 #
-# NOTA sobre `bypass_actors`: el rol de admin del repo (actor_id 5) mantiene
-# `bypass_mode: "always"` a propósito — es la válvula de escape aprobada por el
-# dueño. Consecuencia aceptada (deliberada): un admin puede mergear PRs en rojo
-# y pushear o force-pushear `main`, así que el ruleset es absoluto solo para
-# actores no-admin. Aplicación estricta (sin válvula) = quitar `bypass_actors` y
-# desactivar el ruleset explícitamente durante un hotfix.
-# ---------------------------------------------------------------------------
+# NOTE on `bypass_actors`: the repo's admin role (actor_id 5) keeps `bypass_mode: "always"` on purpose — it is the escape hatch the owner approved. Accepted consequence (deliberate): an admin can merge red PRs and push or force-push `main`, so the ruleset is absolute only for non-admin actors (strict application with no valve = drop `bypass_actors` and deactivate the ruleset explicitly during a hotfix).
 payload="$(cat <<JSON
 {
   "name": "${RULESET_NAME}",
@@ -256,58 +223,48 @@ payload="$(cat <<JSON
 JSON
 )"
 
-# Falla rápido si el JSON generado está malformado.
+# Fail fast if the generated JSON is malformed.
 printf '%s' "$payload" | jq -e . >/dev/null
 
-# ---------------------------------------------------------------------------
-# 4. Busca un ruleset existente con este nombre (idempotencia).
-# ---------------------------------------------------------------------------
+# 4. Look for an existing ruleset with this name (idempotency).
 existing_id="$(find_ruleset_id)"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "==> DRY RUN — no se realizará ninguna mutación."
+  echo "==> DRY RUN — no mutation will be performed."
   if [ -n "$existing_id" ]; then
-    echo "--- haría PUT repos/${REPO}/rulesets/${existing_id} ---"
+    echo "--- would PUT repos/${REPO}/rulesets/${existing_id} ---"
   else
-    echo "--- haría POST repos/${REPO}/rulesets ---"
+    echo "--- would POST repos/${REPO}/rulesets ---"
   fi
   printf '%s\n' "$payload"
-  echo "--- haría PATCH repos/${REPO} { \"delete_branch_on_merge\": true } ---"
+  echo "--- would PATCH repos/${REPO} { \"delete_branch_on_merge\": true } ---"
   ensure_labels
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# 5. Crea o actualiza el ruleset (JSON por stdin).
-# ---------------------------------------------------------------------------
+# 5. Create or update the ruleset (JSON via stdin).
 if [ -n "$existing_id" ]; then
-  echo "==> Actualizando ruleset existente id=${existing_id}"
+  echo "==> Updating the existing ruleset id=${existing_id}"
   printf '%s' "$payload" | gh api -X PUT "repos/${REPO}/rulesets/${existing_id}" --input - >/dev/null
 else
-  echo "==> Creando ruleset"
+  echo "==> Creating the ruleset"
   printf '%s' "$payload" | gh api -X POST "repos/${REPO}/rulesets" --input - >/dev/null
 fi
 
 ruleset_id="$(find_ruleset_id)"
 if [ -z "$ruleset_id" ]; then
-  echo "ERROR: ruleset '${RULESET_NAME}' no encontrado tras la escritura." >&2
+  echo "ERROR: ruleset '${RULESET_NAME}' not found after writing." >&2
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# 6. Ajuste del repo: borra la rama head al mergear un PR.
-# ---------------------------------------------------------------------------
+# 6. Repo setting: delete the head branch when a PR is merged.
 gh api -X PATCH "repos/${REPO}" -f delete_branch_on_merge=true >/dev/null
-echo "==> Ajuste de repo delete_branch_on_merge=true aplicado"
+echo "==> Repo setting delete_branch_on_merge=true applied"
 
-# ---------------------------------------------------------------------------
-# 6b. Labels de dependabot — creadas solo si faltan (idempotente).
-# ---------------------------------------------------------------------------
+# 6b. Dependabot labels — created only if missing (idempotent).
 ensure_labels
 
-# ---------------------------------------------------------------------------
-# 7. Resumen de auditoría — relee el ruleset desde la API.
-# ---------------------------------------------------------------------------
+# 7. Audit summary — re-reads the ruleset from the API.
 readback="$(gh api "repos/${REPO}/rulesets/${ruleset_id}")"
 echo
 echo "================= RULESET AUDIT ================="
@@ -343,4 +300,4 @@ for spec in "${LABELS[@]}"; do
   fi
 done
 echo "================================================="
-echo "==> Hecho. ruleset_id=${ruleset_id}"
+echo "==> Done. ruleset_id=${ruleset_id}"

@@ -1,5 +1,3 @@
-// Tests de la creación de PR/MR: la ejecución de lo que el overlay recogió.
-// Estilo del repo: modelo directo (New + Update + inspección), sin teatest.
 package tui
 
 import (
@@ -22,10 +20,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// prRepo crea un repo git real con origin apuntando a la URL dada ("" = sin
-// remoto) y devuelve su path. Tiene que existir de verdad: la acción lee
-// `git remote get-url origin` en ese directorio, así que un path simulado
-// fallaría antes de llegar al forge.
 func prRepo(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,8 +30,6 @@ func prRepo(t *testing.T, remote string) string {
 	return dir
 }
 
-// prModel monta el modelo sobre ese repo con el cursor en su fila, y devuelve
-// el recorder del command log (que New instala).
 func prModel(t *testing.T, dir string) (Model, *cmdlog.Recorder) {
 	t.Helper()
 	p := proj(filepath.Base(dir), dir, true)
@@ -46,11 +38,7 @@ func prModel(t *testing.T, dir string) (Model, *cmdlog.Recorder) {
 	return cursorOn(t, m, dir), cmdlog.Active()
 }
 
-// forgeStub escribe una CLI de forge falsa en un directorio propio, lo pone
-// primero en el PATH y devuelve el fichero donde el stub vuelca su argv. La CLI
-// real no se puede ejercitar sin red ni token: lo que se prueba es lo que
-// gitdash hace alrededor —el argv que compone, el que ejecuta y lo que
-// registra—, y el stub es lo que cierra ese círculo sin salir a la red.
+// A real forge CLI cannot be exercised without network or token: what is tested is what gitdash does around it (the argv it builds, the one it runs and what it records), and the stub closes that circle without going out to the network.
 func forgeStub(t *testing.T, name, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -63,9 +51,6 @@ func forgeStub(t *testing.T, name, body string) string {
 	return argvFile
 }
 
-// sinBinario deja el PATH con lo justo para leer el remoto y nada más: git por
-// symlink (la lectura del remote lo necesita) y ninguna CLI de forge, que es lo
-// que hace alcanzable el camino de LookPath.
 func sinBinario(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,9 +64,6 @@ func sinBinario(t *testing.T) {
 	t.Setenv("PATH", dir)
 }
 
-// prConfig carga un config.toml de verdad y devuelve su sección [forge.*]: el
-// camino completo (LoadFrom → mapa de hosts y prefijos → argv) es lo que hay
-// que probar, no el mapa montado a mano.
 func prConfig(t *testing.T, toml string) config.Config {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), config.FileName)
@@ -95,17 +77,13 @@ func prConfig(t *testing.T, toml string) config.Config {
 	return cfg
 }
 
-// prEnvíaPR lleva el modelo desde el dashboard hasta la creación lanzada: abre
-// el overlay, escribe el título y envía, incluido el salto a prStartMsg. El Cmd
-// que devuelve es el que llega al runtime después, que en el caso de un repo
-// ocupado es el aviso de "ya hay una acción en curso".
 func prEnvíaPR(t *testing.T, m Model, title string) (Model, tea.Cmd) {
 	t.Helper()
 	m = openPROverlay(t, m)
 	m = typeText(m, title)
 	m, cmd := press(m, prSubmitKey)
 	if cmd == nil {
-		t.Fatal("el submit no devolvió cmd")
+		t.Fatal("the submit returned no cmd")
 	}
 	msg := cmd()
 	if _, ok := msg.(prStartMsg); !ok {
@@ -115,9 +93,7 @@ func prEnvíaPR(t *testing.T, m Model, title string) (Model, tea.Cmd) {
 	return out.(Model), start
 }
 
-// awaitPR espera el desenlace y, si hubo ejecución, también el statusMsg del
-// recollect que la acompaña: sin esperarlo, ese Collect sigue vivo cuando el
-// test acaba y puede registrar sus lecturas en el recorder del siguiente.
+// Without waiting for it, that Collect is still alive when the test ends and can log its reads into the next test's recorder.
 func awaitPR(t *testing.T, m *Model) prResultMsg {
 	t.Helper()
 	var res prResultMsg
@@ -137,8 +113,6 @@ func awaitPR(t *testing.T, m *Model) prResultMsg {
 	return res
 }
 
-// prExec devuelve la entrada de ejecución de la acción pr, o nil. Se busca por
-// acción y no por posición: el recollect deja lecturas detrás.
 func prExec(rec *cmdlog.Recorder) *cmdlog.Entry {
 	var got *cmdlog.Entry
 	for _, e := range rec.Entries() {
@@ -151,7 +125,6 @@ func prExec(rec *cmdlog.Recorder) *cmdlog.Entry {
 	return got
 }
 
-// lastToast devuelve el texto del último aviso vivo, o "" si no hay ninguno.
 func lastToast(m Model) string {
 	ts := m.toasts.toasts
 	if len(ts) == 0 {
@@ -160,41 +133,31 @@ func lastToast(m Model) string {
 	return ts[len(ts)-1].text
 }
 
-// toastBlock devuelve los avisos pintados tal como los ve el usuario: con su
-// icono, que es lo que sale de su nivel.
 func toastBlock(m Model) string {
 	return strings.Join(m.toasts.lines(), "\n")
 }
 
-// --- el ciclo completo ---
-
-// El camino entero: overlay → submit → gh ejecutado → exec registrada con el
-// argv resuelto. Es el test que ata las tres piezas (config, forge, tool) al
-// dashboard; sin él cada una pasaría por su lado y no se crearía nada.
-func TestPRCreacionCompletaRegistraElArgvResuelto(t *testing.T) {
+func TestPRCreationCompletesRecordsTheArgvResolved(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/42")
 	m, rec := prModel(t, dir)
 
 	m, _ = prEnvíaPR(t, m, "Add the sync branch base")
 	if m.running[dir] != "pr" {
-		t.Fatalf("running = %q, want pr (la creación bloquea la segunda pulsación)", m.running[dir])
+		t.Fatalf("running = %q, want pr (the creation blocks the second press)", m.running[dir])
 	}
 
 	res := awaitPR(t, &m)
 	if res.reject != "" {
-		t.Fatalf("la creación se rechazó: %s", res.reject)
+		t.Fatalf("the creation was rejected: %s", res.reject)
 	}
 	if res.err != nil {
-		t.Fatalf("gh falló: %v", res.err)
+		t.Fatalf("gh failed: %v", res.err)
 	}
 
-	// El argv que registra el log es el que se ejecutó, y sale del REMOTE del
-	// repo: sin -R, gh deduciría el destino y el PR podría acabar creado en
-	// otro sitio sin que nada fallara.
 	e := prExec(rec)
 	if e == nil {
-		t.Fatal("no se registró el exec de la creación")
+		t.Fatal("the creation's exec was not recorded")
 	}
 	want := []string{
 		"gh", "pr", "create",
@@ -213,41 +176,33 @@ func TestPRCreacionCompletaRegistraElArgvResuelto(t *testing.T) {
 	if e.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", e.Exit)
 	}
-	// A diferencia de los handoffs, aquí SÍ se mide: el proceso corre detrás con
-	// la salida capturada, así que su duración existe.
 	if e.Dur <= 0 {
-		t.Error("Dur sin medir: la creación no es un handoff de terminal")
+		t.Error("Dur left unmeasured: the creation is not a terminal handoff")
 	}
 	if e.Repo != filepath.Base(dir) || e.Dir != dir {
 		t.Errorf("Repo/Dir = %q/%q, want %q/%q", e.Repo, e.Dir, filepath.Base(dir), dir)
 	}
-	// Y el proceso llegó a correr de verdad, con esos mismos argumentos.
 	ran, err := os.ReadFile(argvFile)
 	if err != nil {
-		t.Fatalf("el stub no dejó su argv: %v", err)
+		t.Fatalf("the stub left no argv behind: %v", err)
 	}
 	if got := strings.Split(strings.TrimRight(string(ran), "\n"), "\n"); got[0] != "pr" || got[1] != "create" {
-		t.Errorf("argv ejecutado = %v, want el de gh pr create", got)
+		t.Errorf("executed argv = %v, want gh pr create's", got)
 	}
-	// Al volver, el repo queda libre y el aviso lleva la URL: es lo que el
-	// usuario quiere del toast.
 	if m.running[dir] != "" {
-		t.Errorf("el repo sigue ocupado: %q", m.running[dir])
+		t.Errorf("the repo is still busy: %q", m.running[dir])
 	}
 	if got := lastToast(m); !strings.Contains(got, "https://github.com/acme/widget/pull/42") {
-		t.Errorf("toast = %q, want la URL del PR", got)
+		t.Errorf("toast = %q, want the PR's URL", got)
 	}
 }
 
-// La pulsación deja intención en el log. Sin esa línea, el panel solo diría que
-// corrió un gh y no de dónde salió la orden: con la política de pull delegada en
-// el gitconfig, el log existe justo para eso.
-func TestPRDejaIntencionEnElLog(t *testing.T) {
+func TestPRLeavesIntentInTheLog(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	awaitPR(t, &m)
 
 	var intent *cmdlog.Entry
@@ -258,42 +213,37 @@ func TestPRDejaIntencionEnElLog(t *testing.T) {
 		}
 	}
 	if intent == nil {
-		t.Fatal("la acción pr no dejó intención en el log")
+		t.Fatal("the pr action left no intent in the log")
 	}
 	if intent.Key != "O" {
-		t.Errorf("Key = %q, want O (la tecla de la acción)", intent.Key)
+		t.Errorf("Key = %q, want O (the action's key)", intent.Key)
 	}
 	if intent.Dir != dir {
-		t.Errorf("Dir = %q, want el repo de la fila", intent.Dir)
+		t.Errorf("Dir = %q, want the row's repo", intent.Dir)
 	}
 }
 
-// Con el log abierto la tecla de PR no hace nada: el formulario ocuparía el
-// cuerpo y el panel ya lo ocupa. Y no deja ni una intención fantasma de algo que
-// no ocurrió.
-func TestPRNoAbreConElLogAbierto(t *testing.T) {
+func TestPRNotOpensWithTheLogOpen(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
-	m, _ = press(m, "l") // abre el panel del log
+	m, _ = press(m, "l") // opens the log panel
 	before := len(rec.Entries())
 
 	m, cmd := press(m, "O")
 
 	if m.pr != nil {
-		t.Error("se abrió el overlay con el panel del log abierto")
+		t.Error("the overlay opened with the log panel open")
 	}
 	if cmd != nil {
-		t.Errorf("la tecla launchó algo: %v", cmd())
+		t.Errorf("the key launched something: %v", cmd())
 	}
 	if len(rec.Entries()) != before {
-		t.Error("la tecla dejó una entrada en el log por algo que no ocurrió")
+		t.Error("the key left a log entry for something that did not happen")
 	}
 }
 
-// El head del PR es la branch del repo: sin -H, gh deduciría la rama y el PR
-// podría salir contra otra.
-func TestPRElHeadSaleDelSnapshot(t *testing.T) {
+func TestPRTheHeadExitsOfTheSnapshot(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
@@ -301,51 +251,38 @@ func TestPRElHeadSaleDelSnapshot(t *testing.T) {
 	snap.Status.Branch = "feat/pr"
 	m.states[dir] = snap
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	awaitPR(t, &m)
 
 	e := prExec(rec)
 	if e == nil {
-		t.Fatal("no se registró el exec")
+		t.Fatal("the exec was not recorded")
 	}
 	if !containsPair(e.Argv, "-H", "feat/pr") {
 		t.Errorf("argv = %v, want -H feat/pr", e.Argv)
 	}
 }
 
-// --- el argv no confiable ---
-
-// El argv del panel lleva el título y el cuerpo, que escribió una persona: si
-// una secuencia de escape llegara a pintarse, el panel inyectaría en la
-// terminal. El registro guarda el argv CRUDO (es lo que se ejecutó) y lo sanea
-// quien PINTA, así que la comprobación es sobre la vista.
-func TestPRElArgvDelPanelVaSaneado(t *testing.T) {
-	// Dos caminos distintos hacia el mismo límite. El pegado con un OSC (que
-	// secuestra el título de la terminal) no pasa por ningún filtro: el widget
-	// de bubbles quita los caracteres de control pero no las secuencias, y el
-	// panel no puede depender de que todos los caminos filtren. Los caracteres
-	// de formato (Cf: bidi, zero-width) sí llegan por el camino real del
-	// formulario, porque no son de control.
+func TestPRTheArgvOfThePanelGoesSanitized(t *testing.T) {
+	// Two different paths to the same limit. A paste with an OSC (which hijacks the terminal title) goes through no filter at all: the bubbles widget strips control characters but not sequences, and the panel cannot rely on every path filtering. Format characters (Cf: bidi, zero-width) do arrive through the form's real path, because they are not control characters.
 	casos := []struct {
-		nombre   string
+		name     string
 		title    string
-		visible  string   // la parte del título que tiene que verse igual
-		pegado   bool     // el título entra por el envío, no por el input
-		injected []string // lo que NO puede aparecer en la vista
+		visible  string   // the part of the title that must still be visible
+		pegado   bool     // the title arrives via the submission, not via the input
+		injected []string // what must NOT appear in the view
 	}{
 		{"osc", "\x1b]0;secuestrado\x07rojo final", "rojo final", true, []string{"\x1b]0;"}},
-		{"bidi", "titulo\u202Emid\u202C", "titulo", false, []string{"\u202e", "\u202c"}},
+		{"bidi", "title\u202Emid\u202C", "title", false, []string{"\u202e", "\u202c"}},
 		{"zero-width", "antes\u200Bdespues", "antes", false, []string{"\u200b"}},
 	}
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			dir := prRepo(t, "git@github.com:acme/widget.git")
 			forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/7")
 			m, rec := prModel(t, dir)
 
 			if c.pegado {
-				// El envío entra ya publicado: es el camino de un pegado que
-				// ningún widget filtró.
 				m.prPending = &prSubmission{path: dir, params: forge.Params{
 					Title: c.title, Base: "main", Head: "main",
 				}}
@@ -357,90 +294,77 @@ func TestPRElArgvDelPanelVaSaneado(t *testing.T) {
 				var cmd tea.Cmd
 				m, cmd = press(m, prSubmitKey)
 				if cmd == nil {
-					t.Fatal("el submit no devolvió cmd")
+					t.Fatal("the submit returned no cmd")
 				}
 				out, _ := m.Update(cmd())
 				m = out.(Model)
 			}
 			awaitPR(t, &m)
 
-			// El argv se ejecutó tal cual: el registro no miente sobre lo que
-			// corrió (y el texto llegó al argv, que es lo que hace meaningful
-			// la comprobación de la vista).
 			e := prExec(rec)
 			if e == nil {
-				t.Fatal("no se registró el exec")
+				t.Fatal("the exec was not recorded")
 			}
 			if !containsPair(e.Argv, "-t", c.title) {
-				t.Fatalf("argv = %v, want el título íntegro como un elemento", e.Argv)
+				t.Fatalf("argv = %v, want the whole title as one element", e.Argv)
 			}
 
-			m, _ = press(m, "l") // abre el panel del log
+			m, _ = press(m, "l") // opens the log panel
 			painted := m.View().Content
 			for _, s := range c.injected {
 				if strings.Contains(painted, s) {
-					t.Errorf("el texto no confiable %q llegó a la vista", s)
+					t.Errorf("the untrusted text %q reached the view", s)
 				}
 			}
-			// Y el argv se sigue viendo: el saneo quita lo peligroso, no la
-			// línea entera. La parte visible del título (la que queda antes de
-			// la secuencia) tiene que estar, o la comprobación anterior sería
-			// vacuía por un recorte de columna.
 			visible := stripANSI(painted)
 			if !strings.Contains(visible, "pr create") {
-				t.Errorf("el panel no pintó el argv:\n%s", visible)
+				t.Errorf("the panel did not paint the argv:\n%s", visible)
 			}
 			if !strings.Contains(visible, c.visible) {
-				t.Errorf("el saneo se llevó el argv entero:\n%s", visible)
+				t.Errorf("the sanitising took the whole argv away:\n%s", visible)
 			}
 		})
 	}
 }
 
-// --- cuando no se puede crear ---
-
-// Sin remote no hay destino: toast que dice qué configurar, y NADA ejecutado
-// (ni proceso, ni entrada en el log, ni recollect).
-func TestPRSinRemoteNoEjecutaNada(t *testing.T) {
-	dir := prRepo(t, "") // repo sin origin
+func TestPRWithoutRemoteNotRunsNothing(t *testing.T) {
+	dir := prRepo(t, "") // repo without origin
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.reject == "" {
-		t.Fatal("sin remote debería rechazarse")
+		t.Fatal("without a remote it should be rejected")
 	}
 	if !strings.Contains(res.reject, "no origin remote") {
-		t.Errorf("aviso = %q, want menciona el remote que falta", res.reject)
+		t.Errorf("notice = %q, want it to mention the missing remote", res.reject)
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec sin remote")
+		t.Error("an exec was recorded with no remote")
 	}
 	if _, err := os.Stat(argvFile); err == nil {
-		t.Error("la CLI se ejecutó sin remote")
+		t.Error("the CLI ran with no remote")
 	}
 	if m.running[dir] != "" {
-		t.Errorf("el repo quedó ocupado: %q", m.running[dir])
+		t.Errorf("the repo was left busy: %q", m.running[dir])
 	}
 	if got := lastToast(m); !strings.Contains(got, "no origin remote") {
-		t.Errorf("toast = %q, want el aviso de remote", got)
+		t.Errorf("toast = %q, want the remote warning", got)
 	}
 }
 
-// Un host que no está declarado en [forge.*] no es un forge: se dice QUÉ
-// hacer, porque si no la acción falla en silencio y parece un bug.
-func TestPRForgeDesconocidoNoEjecutaNada(t *testing.T) {
+func TestPRForgeUnknownNotRunsNothing(t *testing.T) {
 	dir := prRepo(t, "git@git.example.com:acme/widget.git")
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.reject == "" {
-		t.Fatal("un host sin declarar debería rechazarse")
+		t.Fatal("an undeclared host should be rejected")
 	}
 	for _, want := range []string{"no forge", "[forge.github]", "[forge.gitlab]"} {
 		if !strings.Contains(res.reject, want) {
@@ -448,66 +372,56 @@ func TestPRForgeDesconocidoNoEjecutaNada(t *testing.T) {
 		}
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec con un forge desconocido")
+		t.Error("an exec was recorded with an unknown forge")
 	}
 	if _, err := os.Stat(argvFile); err == nil {
-		t.Error("la CLI se ejecutó sin forge conocido")
+		t.Error("the CLI ran with no known forge")
 	}
 }
 
-// Sin gh (ni glab) instalado se avisa, como con lazygit, y no se inventa un
-// ejecutable.
-func TestPRSinBinarioNoEjecutaNada(t *testing.T) {
+func TestPRWithoutBinaryNotRunsNothing(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	sinBinario(t)
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if !strings.Contains(res.reject, "gh not installed") {
 		t.Errorf("aviso = %q, want \"gh not installed\"", res.reject)
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec sin binario")
+		t.Error("an exec was recorded with no binary")
 	}
 	if m.running[dir] != "" {
-		t.Errorf("el repo quedó ocupado: %q", m.running[dir])
+		t.Errorf("the repo was left busy: %q", m.running[dir])
 	}
 }
 
-// Con una acción ya en curso, el segundo envío no relanza: el aviso lo dice y
-// el envío se consume (no se queda en cola para ejecutarse más tarde).
-func TestPRNoRelanzaConElRepoOcupado(t *testing.T) {
+func TestPRNotRelaunchWithTheRepoBusy(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 	m.running[dir] = "lazygit"
 
-	m, cmd := prEnvíaPR(t, m, "un título")
+	m, cmd := prEnvíaPR(t, m, "a title")
 	m = applyNotify(m, cmd)
 
 	if m.running[dir] != "lazygit" {
-		t.Errorf("running = %q, want la acción original intacta", m.running[dir])
+		t.Errorf("running = %q, want the original action untouched", m.running[dir])
 	}
 	if m.prPending != nil {
-		t.Error("el envío quedó en cola: se ejecutaría más tarde sin pedirlo")
+		t.Error("the submit was queued: it would run later without being asked")
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec con el repo ocupado")
+		t.Error("an exec was recorded with the repo busy")
 	}
 	if got := lastToast(m); !strings.Contains(got, "already running") {
-		t.Errorf("toast = %q, want el aviso de acción en curso", got)
+		t.Errorf("toast = %q, want the action-in-progress warning", got)
 	}
 }
 
-// --- la instancia self-managed ---
-
-// El caso que motiva la config de forges: un GitLab en /git/. El argv sale
-// contra `glab mr create` y el proyecto es la ruta DENTRO de la instancia, sin
-// el prefijo de subcarpeta (que no es parte de la ruta del proyecto). Todo el
-// camino, desde el config.toml escrito a mano.
-func TestPRGitLabSelfManagedQuitaElPrefijoDeSubcarpeta(t *testing.T) {
+func TestPRGitLabSelfManagedRemovesThePrefixOfSubfolder(t *testing.T) {
 	dir := prRepo(t, "git@git.example.com:grupo/sub/widget.git")
 	argvFile := forgeStub(t, "glab", "echo https://git.example.com/git/grupo/sub/widget/-/merge_requests/3")
 	m, rec := prModel(t, dir)
@@ -518,23 +432,23 @@ host = "git.example.com"
 api_base = "/git/api/v4/"
 `).Forges
 
-	m, _ = prEnvíaPR(t, m, "Corregir la subcarpeta")
+	m, _ = prEnvíaPR(t, m, "Fix the subfolder")
 
 	res := awaitPR(t, &m)
 	if res.reject != "" {
-		t.Fatalf("la creación se rechazó: %s", res.reject)
+		t.Fatalf("the creation was rejected: %s", res.reject)
 	}
 	if res.err != nil {
-		t.Fatalf("glab falló: %v", res.err)
+		t.Fatalf("glab failed: %v", res.err)
 	}
 
 	e := prExec(rec)
 	if e == nil {
-		t.Fatal("no se registró el exec")
+		t.Fatal("the exec was not recorded")
 	}
 	want := []string{
 		"glab", "mr", "create",
-		"-t", "Corregir la subcarpeta",
+		"-t", "Fix the subfolder",
 		"-d", "",
 		"-b", "main",
 		"-s", "main",
@@ -543,135 +457,111 @@ api_base = "/git/api/v4/"
 	if !reflect.DeepEqual(e.Argv, want) {
 		t.Errorf("argv = %#v\nwant %#v", e.Argv, want)
 	}
-	// glab no tiene --hostname en `mr create`: la instancia se elige con
-	// GITLAB_HOST, que es lo que evita que hable con gitlab.com. El stub no
-	// lo comprueba (eso lo prueba forge/tool), pero el proceso tiene que haber
-	// salido con ese argv.
 	ran, err := os.ReadFile(argvFile)
 	if err != nil {
-		t.Fatalf("el stub no dejó su argv: %v", err)
+		t.Fatalf("the stub left no argv behind: %v", err)
 	}
 	if got := strings.Split(strings.TrimRight(string(ran), "\n"), "\n"); got[0] != "mr" {
-		t.Errorf("argv ejecutado = %v, want el de glab mr create", got)
+		t.Errorf("executed argv = %v, want glab mr create's", got)
 	}
 }
 
-// --- el fallo de la CLI ---
-
-// Un fallo de gh sale con su motivo por stderr: el toast lo enseña (el de
-// tool.Error, no su Error() completo, que repetiría el argv entero) y el log
-// registra el código de salida real.
-func TestPRFalloDeLaCLIToastConElMotivo(t *testing.T) {
+func TestPRFailureOfTheCLIToastWithTheReason(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo 'could not create PR: head branch already exists' >&2\nexit 1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.err == nil {
-		t.Fatal("la creación debía fallar")
+		t.Fatal("the creation should have failed")
 	}
 	if got := lastToast(m); !strings.Contains(got, "head branch already exists") {
-		t.Errorf("toast = %q, want el motivo de la CLI", got)
+		t.Errorf("toast = %q, want the CLI's reason", got)
 	}
 	e := prExec(rec)
 	if e == nil {
-		t.Fatal("el fallo no se registró en el log")
+		t.Fatal("the failure was not recorded in the log")
 	}
 	if e.Exit != 1 {
 		t.Errorf("Exit = %d, want 1", e.Exit)
 	}
 	if m.running[dir] != "" {
-		t.Errorf("el repo quedó ocupado: %q", m.running[dir])
+		t.Errorf("the repo was left busy: %q", m.running[dir])
 	}
 }
 
-// --- el nivel del aviso ---
-
-// El desenlace se avisa con el NIVEL que le toca, no solo con el texto: el
-// nivel es lo que elige el icono y el color, y un fallo pintado con el ✓ del
-// éxito es peor que no avisar, porque el usuario no vuelve a mirar. Las dos
-// ramas se comprueban, que es lo que las ata al resultado: con una sola, un
-// `== toastSuccess` invertido seguiría pintando bien la mitad de los casos.
-func TestPRElAvisoDelDesenlaceLlevaSuNivel(t *testing.T) {
+// A failure painted with the ✓ of success is worse than not warning, because the user does not look again; both branches are checked, which is what ties them to the result, since with only one an inverted `== toastSuccess` would keep painting half the cases right.
+func TestPRTheWarningOfTheOutcomeCarriesItsLevel(t *testing.T) {
 	casos := []struct {
-		nombre string
-		stub   string
-		want   toastLevel
+		name string
+		stub string
+		want toastLevel
 	}{
-		{"éxito", "echo https://github.com/acme/widget/pull/42", toastSuccess},
-		{"fallo", "echo 'could not create PR: head branch already exists' >&2\nexit 1", toastError},
+		{"success", "echo https://github.com/acme/widget/pull/42", toastSuccess},
+		{"failure", "echo 'could not create PR: head branch already exists' >&2\nexit 1", toastError},
 	}
 	for _, c := range casos {
-		t.Run(c.nombre, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			dir := prRepo(t, "git@github.com:acme/widget.git")
 			forgeStub(t, "gh", c.stub)
 			m, _ := prModel(t, dir)
 
-			m, _ = prEnvíaPR(t, m, "un título")
+			m, _ = prEnvíaPR(t, m, "a title")
 			res := awaitPR(t, &m)
 			if res.reject != "" {
-				t.Fatalf("la creación se rechazó: %s", res.reject)
+				t.Fatalf("the creation was rejected: %s", res.reject)
 			}
 			if c.want == toastError && res.err == nil {
-				t.Fatal("la creación debía fallar")
+				t.Fatal("the creation should have failed")
 			}
 			if c.want == toastSuccess && res.err != nil {
-				t.Fatalf("la creación no debía fallar: %v", res.err)
+				t.Fatalf("the creation should not have failed: %v", res.err)
 			}
 
 			ts := m.toasts.toasts
 			if len(ts) == 0 {
-				t.Fatal("no quedó ningún aviso")
+				t.Fatal("no notice was left")
 			}
 			last := ts[len(ts)-1]
 			if last.level != c.want {
-				t.Errorf("nivel del aviso = %v (%s), want %v", last.level, last.text, c.want)
+				t.Errorf("notice level = %v (%s), want %v", last.level, last.text, c.want)
 			}
-			// Y el icono que sale en la vista es el de ese nivel: el nivel es
-			// un campo interno, lo que el usuario ve es el aviso pintado.
 			painted := stripANSI(toastBlock(m))
 			if !strings.Contains(painted, toastIcon(c.want)) {
-				t.Errorf("el aviso no lleva el icono de %v:\n%s", c.want, painted)
+				t.Errorf("the notice does not carry the %v icon:\n%s", c.want, painted)
 			}
 			otro := toastSuccess
 			if c.want == toastSuccess {
 				otro = toastError
 			}
 			if strings.Contains(painted, toastIcon(otro)) {
-				t.Errorf("el aviso pintado lleva el icono del nivel contrario:\n%s", painted)
+				t.Errorf("the painted notice carries the opposite level's icon:\n%s", painted)
 			}
 		})
 	}
 }
 
-// --- la tecla del aviso ---
-
-// El aviso del overlay nombra la tecla por la config: con `pr` rebindeada, un
-// aviso escrito a mano dejaría al usuario leyendo una tecla que ya no abre nada.
-func TestPRPromptNombraLaTeclaDeLaConfig(t *testing.T) {
+func TestPRPromptNamesTheKeyOfTheConfig(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m.cfg.Keybindings["pr"] = "W"
 
 	got := m.prPrompt()
 
 	if !strings.Contains(got, "W opens") {
-		t.Errorf("el aviso no nombra la tecla configurada:\n%s", got)
+		t.Errorf("the notice does not name the configured key:\n%s", got)
 	}
 	if strings.Contains(got, "O opens") {
-		t.Errorf("el aviso nombra la tecla por defecto:\n%s", got)
+		t.Errorf("the notice names the default key:\n%s", got)
 	}
-	// Y se ve en la sección de keybinds, que es donde se pinta.
 	kb := sectionContent(t, stripANSI(m.View().Content), "keybinds")
 	if !strings.Contains(kb, "W opens") {
-		t.Errorf("keybinds sin la tecla configurada:\n%s", kb)
+		t.Errorf("keybinds without the configured key:\n%s", kb)
 	}
 }
 
-// El envío sin título no lanza nada: el aviso de validación va en el panel y no
-// se llega a prCreateCmd.
-func TestPREnvioInvalidoNoLanza(t *testing.T) {
+func TestPRSendInvalidNotLaunches(t *testing.T) {
 	dir := prRepo(t, "git@github.com:acme/widget.git")
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
@@ -680,18 +570,16 @@ func TestPREnvioInvalidoNoLanza(t *testing.T) {
 	m, cmd := press(m, prSubmitKey)
 
 	if cmd != nil {
-		t.Errorf("un envío inválido lanzó algo: %v", cmd())
+		t.Errorf("an invalid submit launched something: %v", cmd())
 	}
 	if m.prPending != nil {
-		t.Error("se publicó un envío sin título")
+		t.Error("a submit with no title was published")
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec de un envío inválido")
+		t.Error("an exec was recorded for an invalid submit")
 	}
 }
 
-// containsPair dice si el argv tiene el flag seguido de su valor (los flags van
-// sueltos, como elementos, nunca pegados al valor).
 func containsPair(argv []string, flag, value string) bool {
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] == flag && argv[i+1] == value {
@@ -701,154 +589,124 @@ func containsPair(argv []string, flag, value string) bool {
 	return false
 }
 
-// --- el aviso de un remote que no se pudo leer ---
-
-// prGitReason saca el motivo real del error de gitstatus, que llega con el argv
-// delante ("git [remote get-url origin]: fatal: ..."). Sin esa limpieza el
-// toast repetiría el comando entero, que es justo lo que no se quiere enseñar.
-// Y el caso normal —no hay remote— se queda sin motivo: el prefijo del aviso ya
-// dice qué hacer.
-func TestPRGitReasonSacaElMotivoDelArgv(t *testing.T) {
+func TestPRGitReasonGetsTheReasonOfTheArgv(t *testing.T) {
 	casos := []struct {
-		nombre string
-		err    string
-		want   string
+		name string
+		err  string
+		want string
 	}{
 		{
-			"sin remote no hay motivo: el aviso ya lo dice",
+			"with no remote there is no reason: the notice already says it",
 			"git [remote get-url origin]: No such remote 'origin'",
 			"",
 		},
 		{
-			"un repo roto enseña su motivo, sin el argv",
+			"a broken repo shows its reason, without the argv",
 			"git [remote get-url origin]: fatal: not a git repository",
 			"fatal: not a git repository",
 		},
 		{
-			"git ausente también (el motivo viene de exec, sin el prefijo)",
+			"git absent too (the reason comes from exec, without the prefix)",
 			"exec: \"git\": executable file not found in $PATH",
 			"exec: \"git\": executable file not found in $PATH",
 		},
 		{
-			"un motivo con git delante pero sin la llave se deja entero",
+			"a reason with git in front but no brace is left whole",
 			"git something rare",
 			"git something rare",
 		},
 		{
-			// El prefijo solo se recorta cuando aparece: un motivo que lo
-			// contenga más tarde (no al principio) no se toca.
-			"la llave en medio no recorta",
+			"a brace in the middle does not trim",
 			"wrapped: git [x]: detail",
 			"wrapped: git [x]: detail",
 		},
 	}
 	for _, c := range casos {
 		if got := prGitReason(errors.New(c.err)); got != c.want {
-			t.Errorf("%s: prGitReason = %q, want %q", c.nombre, got, c.want)
+			t.Errorf("%s: prGitReason = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
 
-// prRemoteReject compone el aviso: sin remote, qué hacer; con otro motivo, el
-// motivo entero. Un toast que mezclara los dos casos dejaría al usuario
-// configurando un remote que sí existe.
-func TestPRRemoteRejectDistingueElCasoNormal(t *testing.T) {
+// A toast mixing both cases would leave the user configuring a remote that does exist.
+func TestPRRemoteRejectDistinguishesTheCaseNormal(t *testing.T) {
 	casos := []struct {
-		nombre string
-		err    string
-		want   string
+		name string
+		err  string
+		want string
 	}{
 		{
-			"no hay remote: la acción, no el error de git",
+			"no remote: the action, not git's error",
 			"git [remote get-url origin]: No such remote 'origin'",
 			"no origin remote in widget — configure one first",
 		},
 		{
-			"otro motivo: el motivo, con el prefijo de lectura",
+			"another reason: the reason, with the read prefix",
 			"git [remote get-url origin]: fatal: not a git repository",
 			"widget: cannot read origin — fatal: not a git repository",
 		},
 	}
 	for _, c := range casos {
 		if got := prRemoteReject("widget", errors.New(c.err)); got != c.want {
-			t.Errorf("%s: prRemoteReject = %q, want %q", c.nombre, got, c.want)
+			t.Errorf("%s: prRemoteReject = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
 
-// prURL busca el enlace en cualquier línea de la salida, porque gh puede
-// imprimir texto antes. Y sin enlace, el aviso lo dice sin inventar uno.
-func TestPRURLYNotaDelDesenlace(t *testing.T) {
+func TestPRURLYNoteOfTheOutcome(t *testing.T) {
 	casos := []struct {
-		nombre string
-		out    string
-		want   string
+		name string
+		out  string
+		want string
 	}{
-		{"la URL es la primera línea", "https://github.com/a/b/pull/1\n", "https://github.com/a/b/pull/1"},
-		{"gh deja texto antes", "Creating pull request...\nhttps://github.com/a/b/pull/7\n", "https://github.com/a/b/pull/7"},
-		{"http también vale", "http://g.c/a/b/-/merge_requests/2", "http://g.c/a/b/-/merge_requests/2"},
-		{"sin URL no hay nada que devolver", "todo listo\n", ""},
-		{"una ruta que no es URL no se confunde", "para verlo: /a/b/pull/9\n", ""},
-		{"el http va pegado a otra cosa no cuenta", "verhttp://x\n", ""},
-		// Una barra de más o de menos NO es una URL: el prefijo tiene que ser
-		// el de verdad, entero. Con un prefijo truncado, una línea de basura se
-		// cuela en el aviso como si fuera el enlace del PR.
-		{"https con una barra de menos no es una URL", "https:/g.c/a/b\n", ""},
+		{"the URL is the first line", "https://github.com/a/b/pull/1\n", "https://github.com/a/b/pull/1"},
+		{"gh leaves text before", "Creating pull request...\nhttps://github.com/a/b/pull/7\n", "https://github.com/a/b/pull/7"},
+		{"http also works", "http://g.c/a/b/-/merge_requests/2", "http://g.c/a/b/-/merge_requests/2"},
+		{"with no URL there is nothing to return", "all good\n", ""},
+		{"a path that is not a URL is not mistaken for one", "to see it: /a/b/pull/9\n", ""},
+		{"http glued to something else does not count", "verhttp://x\n", ""},
+		{"https with one slash missing is not a URL", "https:/g.c/a/b\n", ""},
 	}
 	for _, c := range casos {
 		if got := prURL(c.out); got != c.want {
-			t.Errorf("%s: prURL = %q, want %q", c.nombre, got, c.want)
+			t.Errorf("%s: prURL = %q, want %q", c.name, got, c.want)
 		}
 	}
 
 	nivel, msg := prNote("widget", prResultMsg{out: "https://github.com/a/b/pull/1"})
 	if nivel != toastSuccess || !strings.Contains(msg, "https://github.com/a/b/pull/1") {
-		t.Errorf("éxito sin enlace visible: (%v, %q)", nivel, msg)
+		t.Errorf("success with no visible link: (%v, %q)", nivel, msg)
 	}
-	// Sin URL el aviso sigue siendo de éxito: la CLI dijo que lo creó, y lo
-	// que NO puede hacer es inventar el hueco del enlace ("created — " con nada
-	// detrás es un aviso que parece truncado).
 	if nivel, msg := prNote("widget", prResultMsg{out: "hecho"}); nivel != toastSuccess || strings.Contains(msg, "http") || strings.Contains(msg, "—") {
-		t.Errorf("salida sin URL: (%v, %q), want toast de éxito sin enlace", nivel, msg)
+		t.Errorf("output with no URL: (%v, %q), want a success toast with no link", nivel, msg)
 	}
-	// El fallo enseña el motivo de la CLI, y no su argv con el título dentro.
-	cerr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "titulo secreto", "-b", "cuerpo largo"}, ExitCode: 1, Msg: "no commits between main and feat"}
+	cerr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "secret title", "-b", "long body"}, ExitCode: 1, Msg: "no commits between main and feat"}
 	nivel, msg = prNote("widget", prResultMsg{err: cerr})
 	if nivel != toastError {
-		t.Errorf("fallo: nivel = %v, want error", nivel)
+		t.Errorf("failure: nivel = %v, want error", nivel)
 	}
 	if !strings.Contains(msg, "no commits between main and feat") {
-		t.Errorf("el fallo no enseña el motivo: %q", msg)
+		t.Errorf("the failure does not show the reason: %q", msg)
 	}
-	if strings.Contains(msg, "titulo secreto") || strings.Contains(msg, "cuerpo largo") {
-		t.Errorf("el fallo repite el argv con el cuerpo dentro: %q", msg)
+	if strings.Contains(msg, "secret title") || strings.Contains(msg, "long body") {
+		t.Errorf("the failure repeats the argv with the body inside: %q", msg)
 	}
-	// Un error que no viene del Runner (plazo agotado) también dice algo.
 	if _, msg := prNote("widget", prResultMsg{err: errors.New("context deadline exceeded")}); !strings.Contains(msg, "deadline") {
-		t.Errorf("un error suelto no llega al aviso: %q", msg)
+		t.Errorf("a loose error does not reach the notice: %q", msg)
 	}
 }
 
-// Sin un envío en curso, `prCreateCmd` no tiene nada que hacer. El caso sale de
-// la propia forma del seam: el overlay publica el envío y el Cmd se ejecuta un
-// tick después, así que entre uno y otro puede llegar el rescan que reponte la
-// cola. Sin esta guarda, ese tick ejecutaría el último envío otra vez.
-func TestPRCreateCmdSinEnvioNoHaceNada(t *testing.T) {
+// The case comes from the seam's own shape: the overlay publishes the submission and the Cmd runs one tick later, so a rescan can requeue in between, and without this guard that tick would run the last submission again.
+func TestPRCreateCmdWithoutSendNotMakesNothing(t *testing.T) {
 	m, _ := prModel(t, prRepo(t, "git@github.com:acme/widget.git"))
 	m.prPending = nil
 	if cmd := m.prCreateCmd(); cmd != nil {
-		t.Errorf("prCreateCmd sin envío = %v, want nil", cmd)
+		t.Errorf("prCreateCmd with no submit = %v, want nil", cmd)
 	}
 }
 
-// Un proveedor DECLARADO en la config pero no soportado no es el mismo caso que
-// un host desconocido: aquí el remote sí resuelve (el host está en el mapa), pero
-// no hay puerta — ni binario ni argv. Es alcanzable por la API: `Config.Forges`
-// es un campo exportado, así que un consumidor puede dejar un proveedor que el
-// loader de TOML habría descartado (config.LoadFrom avisa y lo ignora). Por eso
-// el guard de prCreateCmd no es código muerto, y por eso tiene test: sin él, un
-// argv vacío llegaría al Runner.
-func TestPRForgeEnElMapaSinPuertaNoEjecutaNada(t *testing.T) {
+// Reachable through the API: `Config.Forges` is an exported field, so a consumer can leave a provider the TOML loader would have discarded (config.LoadFrom warns and ignores it), which is why prCreateCmd's guard is not dead code and why it has a test: without it an empty argv would reach the Runner.
+func TestPRForgeInTheMapWithoutDoorNotRunsNothing(t *testing.T) {
 	dir := prRepo(t, "git@bit.example.com:acme/widget.git")
 	argvFile := forgeStub(t, "gh", "echo https://bit.example.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
@@ -856,16 +714,16 @@ func TestPRForgeEnElMapaSinPuertaNoEjecutaNada(t *testing.T) {
 		"bitbucket": {Enabled: true, Host: "bit.example.com"},
 	}
 
-	m, _ = prEnvíaPR(t, m, "un título")
+	m, _ = prEnvíaPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if !strings.Contains(res.reject, "has no PR support in gitdash") {
-		t.Errorf("aviso = %q, want que nombre que no hay soporte de PR", res.reject)
+		t.Errorf("notice = %q, want it to name that there is no PR support", res.reject)
 	}
 	if prExec(rec) != nil {
-		t.Error("se registró un exec para un forge sin puerta")
+		t.Error("an exec was recorded for a forge with no door")
 	}
 	if _, err := os.Stat(argvFile); err == nil {
-		t.Error("la CLI se ejecutó para un forge sin puerta")
+		t.Error("the CLI ran for a forge with no door")
 	}
 }

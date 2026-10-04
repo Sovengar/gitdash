@@ -1,8 +1,4 @@
-// Package gitstatus recolecta el estado git de los repos vía subprocess.
-// Un solo `git status --porcelain=v2 --branch` por repo da
-// branch, upstream, ahead/behind y ficheros cambiados; `git log` aporta
-// actividad y commits recientes. Sin librerías git: el binario git es la
-// única dependencia.
+// Package gitstatus reads git state through subprocesses: no git library, the git binary is the only dependency.
 package gitstatus
 
 import (
@@ -23,34 +19,27 @@ import (
 	"gitdash/internal/discovery"
 )
 
-// syncFallbackBranch es el nombre con el que se prueba la referencia cuando
-// la global no existe en el repo. "main" es el default de `git init` desde
-// 2020, pero media vida de repos sigue en "master": el fallback está ahí
-// para que esos repos no vivan con "main —" en la columna SYNC ni con un
-// `glab mr create -b main` que el servidor rechaza.
+// syncFallbackBranch is probed when the configured sync ref is missing: many repos still live on master.
 const syncFallbackBranch = "master"
 
-// Snapshot es el estado completo y vivo de un repo, listo para la UI.
 type Snapshot struct {
 	Status     Status
 	Files      []FileEntry
-	Commits    []Commit   // últimos 5
-	LastCommit int64      // epoch del último commit (0 si sin commits)
-	Worktrees  []Worktree // worktrees del repo, sin el principal
-	SyncBranch string     // sync branch usada en la comparación
-	SyncBehind int        // commits de sync ausentes en HEAD
-	SyncKnown  bool       // comparación vs sync calculable
-	Err        string     // "" = recolección ok
+	Commits    []Commit
+	LastCommit int64
+	Worktrees  []Worktree
+	SyncBranch string
+	SyncBehind int
+	SyncKnown  bool
+	Err        string
 }
 
-// Worktree es un worktree registrado del repo, listo para el detalle.
 type Worktree struct {
-	Path   string // ruta absoluta del worktree
-	Branch string // nombre de la rama ("x"), o "" si detached/bare
-	Head   string // sha corto de HEAD ("" si vacío/prunable)
+	Path   string
+	Branch string
+	Head   string
 }
 
-// State deriva el estado visible considerando errores y proyectos sin repo.
 func (s Snapshot) State(hasRepo bool) State {
 	if s.Err != "" {
 		return StateError
@@ -61,12 +50,7 @@ func (s Snapshot) State(hasRepo bool) State {
 	return s.Status.Derive()
 }
 
-// Collect recolecta el estado del repo en dir, con la desviación vs la
-// sync branch dada ("" = sin comparación). allowFallback permite probar
-// syncFallbackBranch cuando la dada no existe, y es lo que decide si la
-// referencia que se muestra pasa a ser esa: solo lo hace nadie la declaró
-// (ver SyncForAllowsFallback). Nunca falla duro: el error (si lo hay) viaja
-// dentro del Snapshot para verse en la UI.
+// Collect never fails hard: the error travels inside the Snapshot so the UI can still render the repo.
 func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Snapshot {
 	var snap Snapshot
 
@@ -80,25 +64,20 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 	snap.Status, snap.Files = st, files
 
 	if syncBranch != "" {
-		// La rama resuelta se rellena siempre (visible en UI
-		// aunque la comparación falle → "<rama> —").
+		// Filled even when the comparison fails: the UI still shows the branch name.
 		snap.SyncBranch = syncBranch
 		n, ok := syncBehind(ctx, dir, syncBranch)
 		if !ok && allowFallback && syncBranch != syncFallbackBranch {
-			// Nadie declaró esta referencia, así que se puede probar la otra.
-			// Vive AQUÍ, en el fallo de la comparación, y no antes: `main`
-			// resuelve en cada repo moderno, y un `rev-list` de más por repo
-			// y por ciclo solo se paga donde hace falta (los repos en master).
+			// The fallback probe lives here and not earlier: main resolves in every modern repo, so an extra rev-list per repo per cycle would only be paid where it is needed.
 			n, ok = syncBehind(ctx, dir, syncFallbackBranch)
 			if ok {
-				snap.SyncBranch = syncFallbackBranch // la que resuelve es la que se muestra
+				snap.SyncBranch = syncFallbackBranch
 			}
 		}
 		if ok {
-			snap.SyncBehind = n // commits de sync ausentes en HEAD
+			snap.SyncBehind = n
 			snap.SyncKnown = true
 		}
-		// sync ref inexistente o error: SyncKnown=false → "<rama> —" en UI
 	}
 
 	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s")
@@ -106,20 +85,15 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 		snap.Commits = ParseLog(string(logOut))
 		snap.LastCommit = lastCommitWhen(snap.Commits)
 	}
-	// Un repo sin commits es legítimo: el error de log se ignora.
+	// A repo with no commits is legitimate, so the log error is ignored.
 
-	// Inventario de worktrees (sin el repo principal).
 	if wtOut, err := runGit(ctx, dir, cmdlog.ClassRead, "worktree", "list", "--porcelain"); err == nil {
 		snap.Worktrees = ParseWorktrees(string(wtOut), dir)
 	}
 	return snap
 }
 
-// lastCommitWhen devuelve la fecha del commit más reciente, o 0 si el log vino
-// vacío. Existe como función aparte porque la rama vacía solo se alcanza con un
-// git que sale con 0 y no imprime nada (un repo sin commits sale con error, así
-// que el test tiene que alcanzarla sin subprocess: con la guarda en medio del
-// camino de error, nadie la cubría).
+// Split out because the empty-log branch is only reachable with a git that exits 0 and prints nothing, which no fixture produces.
 func lastCommitWhen(commits []Commit) int64 {
 	if len(commits) == 0 {
 		return 0
@@ -127,43 +101,26 @@ func lastCommitWhen(commits []Commit) int64 {
 	return commits[0].When
 }
 
-// syncBehind cuenta los commits de sync ausentes en HEAD con
-// `git rev-list --count HEAD..<sync>`: valen para ramas y detached,
-// y respectan el merge-base (no es un diff de tips). Cualquier error
-// (ref inexistente, repo roto) devuelve known=false.
 func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
 	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--count", "HEAD.."+sync)
 	if err != nil {
 		return 0, false
 	}
-	// El `known` sale de la conversión, no de una rama: `rev-list --count` o
-	// falla (y entonces err != nil, el caso de arriba) o imprime un entero, así
-	// que un `if err != nil { return 0, false }` aquí era inalcanzable y
-	//mutation lo contaba como cobertura muerta. La protección sigue estando: si
-	// algún día saliera otra cosa, se devuelve known=false en vez de un 0.
+	// known comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to known=false.
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	return n, err == nil
 }
 
-// normalizeBranch completa la rama para detached con el sha corto.
 func normalizeBranch(st Status) string {
 	if st.Detached && st.Branch == "" && len(st.OID) >= 7 {
-		return st.OID[:7] // "<sha-corto> (detached)" en UI
+		return st.OID[:7]
 	}
 	return st.Branch
 }
 
-// StreamPool recolecta los snapshots de todos los proyectos en paralelo
-// (máximo concurrency a la vez) invocando emit por cada uno. defaultSync es
-// la sync branch global: cada proyecto puede sobrescribirla desde el
-// marcador. Bloquea hasta terminar o cancelarse por contexto.
-//
-// emit se invoca concurrentemente desde hasta `concurrency` goroutines: el
-// callback DEBE ser seguro para uso concurrente (p.ej. mutex o canal).
+// emit runs in up to `concurrency` goroutines, so it MUST be safe for concurrent use.
 func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync string, defaultExplicit bool, concurrency int, emit func(path string, snap Snapshot)) {
-	// El pool usa entre 1 y 4 workers por CPU: acotado por abajo para no
-	// colgarse con un 0 en la config, y por arriba para no lanzar miles de git
-	// de golpe si alguien pone concurrency = 99999.
+	// Clamped to 1..4 workers per CPU: a bogus 0 or 99999 in the config must not wedge or flood the machine with git processes.
 	concurrency = min(max(concurrency, 1), runtime.NumCPU()*4)
 
 	var wg sync.WaitGroup
@@ -179,7 +136,7 @@ func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync s
 				return
 			}
 			if !p.HasRepo {
-				emit(p.Path, Snapshot{}) // estado no-repo inmediato
+				emit(p.Path, Snapshot{})
 				return
 			}
 			emit(p.Path, Collect(ctx, p.Path, SyncFor(p, defaultSync), SyncForAllowsFallback(p, defaultExplicit)))
@@ -188,8 +145,6 @@ func StreamPool(ctx context.Context, projects []discovery.Project, defaultSync s
 	wg.Wait()
 }
 
-// SyncFor resuelve la sync branch efectiva de un proyecto:
-// override del marcador > global.
 func SyncFor(p discovery.Project, defaultSync string) string {
 	if p.SyncBranch != "" {
 		return p.SyncBranch
@@ -197,21 +152,12 @@ func SyncFor(p discovery.Project, defaultSync string) string {
 	return defaultSync
 }
 
-// SyncForAllowsFallback dice si la sync branch resuelta para p admite el
-// fallback de referencia (Collect): solo cuando NADIE la declaró, ni el
-// marcador ni la config global. Un default heredado es una suposición que
-// el repo puede desmentir; una rama escrita por alguien es una intención,
-// y cambiársela por detrás mostraría una referencia que nadie pidió.
+// Only when nobody declared the ref: an inherited default is a guess the repo can disprove, a written branch is an intent.
 func SyncForAllowsFallback(p discovery.Project, defaultExplicit bool) bool {
 	return p.SyncBranch == "" && !defaultExplicit
 }
 
-// Fetch ejecuta `git fetch` en dir con los args dados (default: --prune).
-// El caller aplica el timeout vía contexto.
-//
-// class distingue el fetch que pidió una tecla del que dispara el scan
-// automático: el comando es idéntico y solo el origen lo separa, así que lo
-// tiene que traer quien llama.
+// class is the only thing separating the keypress fetch from the automatic scan, so the caller has to supply it.
 func Fetch(ctx context.Context, dir string, class cmdlog.Class, args ...string) error {
 	if len(args) == 0 {
 		args = []string{"fetch", "--prune"}
@@ -220,24 +166,12 @@ func Fetch(ctx context.Context, dir string, class cmdlog.Class, args ...string) 
 	return err
 }
 
-// Run ejecuta un argv de git en dir y devuelve la salida combinada
-// (stdout+stderr). Es el único ejecutor de acciones: el kind ya viene resuelto
-// a argv en config, así que no hay wrappers por acción ni defaults de flags
-// escondidos aquí (la política de pull vive en el gitconfig del usuario).
+// The only action executor: argv arrives already resolved from config, so there are no per-action wrappers and no hidden flag defaults (pull policy stays in the user's gitconfig).
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGitCombined(ctx, dir, cmdlog.ClassAction, args...)
 }
 
-// RemoteURL devuelve la URL del remote `origin` del repo en dir. Es la única
-// lectura de remote de gitdash y es ON DEMAND: se llama al abrir un PR, no en
-// Collect. Sumarla al scan costaría un `git remote get-url` por repo y por
-// ciclo —con 60 repos, 60 procesos que casi siempre nobody mira—, y el dato
-// solo se necesita cuando alguien pulsa una tecla.
-//
-// Sale por runGit y por tanto deja entrada en el command log como ClassRead: es
-// una lectura, aunque la pulse una persona. Un repo sin remote (o sin `origin`)
-// falla, y el motivo lo trae git en stderr: es lo que el toast necesita para
-// decir qué falta en vez de un "no se pudo" sin más.
+// On demand only, since it is read when opening a PR and never during the scan; it goes through runGit, so the command log records it as a read.
 func RemoteURL(ctx context.Context, dir string) (string, error) {
 	out, err := runGit(ctx, dir, cmdlog.ClassRead, "remote", "get-url", "origin")
 	if err != nil {
@@ -246,27 +180,14 @@ func RemoteURL(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// RebaseInProgress reporta si dir tiene un rebase a medias. Un pull con
-// --rebase que choca no es un fallo limpio: deja el repo con la historia
-// reescrita a medias y el índice en conflicto, así que la UI necesita
-// distinguir "falló" de "te dejó a medias".
-//
-// Usa `git rev-parse --git-path` en vez de mirar `.git/rebase-*` a pelo porque
-// en un worktree `.git` es un fichero y el estado del rebase vive en
-// `.git/worktrees/<nombre>/`; --git-path resuelve la ruta correcta en ambos
-// casos.
+// Uses --git-path because in a worktree .git is a file and the rebase state lives under .git/worktrees/<name>/.
 func RebaseInProgress(ctx context.Context, dir string) bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
 		out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-parse", "--git-path", name)
 		if err != nil {
 			continue
 		}
-		// La guarda de "vacío" va como condición POSITIVA y el trabajo dentro:
-		// `rev-parse --git-path` siempre imprime algo (incluso `.git/`), así que
-		// la forma `if p == "" { continue }` era una rama que ningún test podía
-		// matar. Además no es decorativa: con `p` vacío, `filepath.Join(dir, "")`
-		// es el propio repo, `os.Stat` ve un directorio y la función devolvería
-		// true para TODO repo.
+		// Positive condition on purpose: an empty p makes filepath.Join(dir, "") the repo itself, so Stat would see a directory and report a rebase for every repo.
 		if p := strings.TrimSpace(string(out)); p != "" {
 			if !filepath.IsAbs(p) {
 				p = filepath.Join(dir, p)
@@ -279,21 +200,11 @@ func RebaseInProgress(ctx context.Context, dir string) bool {
 	return false
 }
 
-// RemoveWorktree borra un worktree registrado ejecutando
-// `git worktree remove [--force] <path>` desde repoDir (el repo principal,
-// que es donde git admite el comando). withForce permite borrar worktrees con
-// cambios sin commitear. Devuelve la salida combinada + error, igual que
-// pull/push: el caller resume el motivo con FailureReason. La rama del worktree
-// nunca se toca.
 func RemoveWorktree(ctx context.Context, repoDir, wtPath string, withForce bool) (string, error) {
 	return runGitCombined(ctx, repoDir, cmdlog.ClassAction, RemoveWorktreeArgv(wtPath, withForce)...)
 }
 
-// RemoveWorktreeArgv compone el argv de RemoveWorktree. Vive aparte para que el
-// caller pueda mostrar y registrar el comando resuelto (el detail y el command
-// log) sin duplicar aquí la construcción: si se duplicara, el log podría
-// mentir sobre lo que se ejecutó, que es justo lo que el log existe para
-// evitar.
+// Split out so the detail and the command log show the same argv without duplicating the build here and drifting from what ran.
 func RemoveWorktreeArgv(wtPath string, withForce bool) []string {
 	args := []string{"worktree", "remove"}
 	if withForce {
@@ -302,10 +213,7 @@ func RemoveWorktreeArgv(wtPath string, withForce bool) []string {
 	return append(args, wtPath)
 }
 
-// gitEnv devuelve el entorno para los subprocess de git forzando mensajes en
-// inglés (LC_ALL=C). El porcelain no depende del idioma, pero los mensajes de
-// error sí: sin esto la UI no puede reconocer fallos concretos (diverged, sin
-// upstream...) cuando el usuario tiene el locale en español.
+// LC_ALL=C so git error messages stay recognizable (diverged, no upstream) regardless of the user's locale.
 func gitEnv() []string {
 	env := os.Environ()
 	out := env[:0]
@@ -322,9 +230,7 @@ func gitEnv() []string {
 	return append(out, "LC_ALL=C")
 }
 
-// FailureReason resume un fallo de git en una línea para la UI: la primera
-// línea de la salida combinada que no sea un `hint:` (los hints son verbosos y
-// se ven completos en el panel de detalle). Fallback al error del proceso.
+// First non-`hint:` line, because hints are verbose and already shown in full in the detail panel.
 func FailureReason(out string, err error) string {
 	for _, l := range strings.Split(out, "\n") {
 		l = strings.TrimSpace(l)
@@ -339,9 +245,6 @@ func FailureReason(out string, err error) string {
 	return ""
 }
 
-// runGit ejecuta git en dir y devuelve stdout. class etiqueta la entrada en el
-// command log (las lecturas del scan son ClassRead; un fetch ClassAction o
-// ClassAuto según quién lo pidió).
 func runGit(ctx context.Context, dir string, class cmdlog.Class, args ...string) ([]byte, error) {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -360,9 +263,7 @@ func runGit(ctx context.Context, dir string, class cmdlog.Class, args ...string)
 	return out, nil
 }
 
-// runGitCombined ejecuta git y devuelve stdout+stderr mezclados. Es el camino de
-// las acciones (pull, push, worktree remove), así que es el único que puede
-// clasificar el resultado: solo aquí está la salida completa que git imprimió.
+// The only exec path holding the full output git printed, hence the only one that can classify the outcome.
 func runGitCombined(ctx context.Context, dir string, class cmdlog.Class, args ...string) (string, error) {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -377,14 +278,7 @@ func runGitCombined(ctx context.Context, dir string, class cmdlog.Class, args ..
 	return out, err
 }
 
-// recordExec deja una entrada en el command log con los hechos del proceso:
-// argv, directorio, código de salida, duración y resultado clasificado. Es un
-// no-op si nadie instaló un recorder (--print, tests).
-//
-// El nombre visible del repo es el basename del directorio: la capa de exec no
-// conoce la lista de proyectos (ni el nombre que un .gitdash.toml pueda haber
-// sobreescrito), y para un log de comandos el basename es la referencia
-// precisa del checkout.
+// The logged repo name is the directory basename: the exec layer knows neither the project list nor a marker-overridden name.
 func recordExec(dir string, class cmdlog.Class, args []string, out []byte, err error, dur time.Duration) {
 	if cmdlog.Active() == nil {
 		return
@@ -398,10 +292,7 @@ func recordExec(dir string, class cmdlog.Class, args []string, out []byte, err e
 		}
 	}
 	argv := append([]string{"git"}, args...)
-	// Un argv vacío es alcanzable desde la config del usuario
-	// (`[commands] pull = ""` → CmdArgs → strings.Fields → []). Classify ya lo
-	// tolera; sin esta guarda, args[0] revienta la goroutine de la acción y con
-	// ella la TUI. Sin verbo no hay acción que nombrar.
+	// An empty argv is reachable from user config (pull = ""); without this guard args[0] panics and takes the action goroutine, and the TUI, down.
 	action := ""
 	if len(args) > 0 {
 		action = args[0]
@@ -418,7 +309,6 @@ func recordExec(dir string, class cmdlog.Class, args []string, out []byte, err e
 	})
 }
 
-// firstLine recorta un mensaje a su primera línea (para UI compacta).
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]

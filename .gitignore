@@ -14,13 +14,13 @@ node_modules/
 .vscode/
 testdata/playground/
 
-# Worktrees de Worktrunk (wt): el worktree-path del config global es
-# relativo, asi que caen dentro del repo en .worktrees/.
+# Worktrunk worktrees (wt): the global config's worktree-path is relative,
+# so they land inside the repo under .worktrees/.
 .worktrees/
 
-# Cobertura: el perfil combinado, los contadores en binario del subproceso de
-# main() y el binario instrumentado que los produce. Los tres son artefactos de
-# `make coverage`; el suelo vive en scripts/coverage-floor y SI se commitea.
+# Coverage: the merged profile, the binary counters of main()'s subprocess and
+# the instrumented binary that produces them. All three are artefacts of
+# `make coverage`; the floor lives in scripts/coverage-floor and IS committed.
 .covmain/
 
 # Mutation testing (gremlins)
