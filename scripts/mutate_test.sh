@@ -50,6 +50,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 # --- fixtures ---------------------------------------------------------------
 
+# Space-separated files the engine walked WITHOUT measuring (SKIPPED mutations).
+# Empty for every case except the scope ones.
+SKIP_FILES=''
+
 # A report whose only survivors are the given "<TYPE> <file>:<line>" entries, and
 # whose killed count is whatever makes the stated total add up. Written by hand
 # rather than through jq so the JSON is exactly what a real report looks like.
@@ -57,7 +61,7 @@ make_report() { # make_report <path> <total> <lived_entries_csv...>
 	local path=$1 total=$2
 	shift 2
 	local lived_files='' killed=$((total - $#))
-	local type file line entry
+	local type file line entry skip
 	# Over "$@", not over $*: each entry carries a space of its own.
 	for entry in "$@"; do
 		type=${entry%% *}
@@ -65,6 +69,12 @@ make_report() { # make_report <path> <total> <lived_entries_csv...>
 		line=${file##*:}
 		file=${file%:*}
 		lived_files+="{\"file_name\":\"$file\",\"mutations\":[{\"type\":\"$type\",\"line\":$line,\"column\":9,\"status\":\"LIVED\"}]},"
+	done
+	# A real --diff run reports every mutant outside the scope as SKIPPED: 1090
+	# of them in this repo's fixture run, none of them measured. They carry no
+	# weight in the totals and must not count as a measured file.
+	for skip in $SKIP_FILES; do
+		lived_files+="{\"file_name\":\"$skip\",\"mutations\":[{\"type\":\"ARITHMETIC_BASE\",\"line\":7,\"column\":3,\"status\":\"SKIPPED\"}]},"
 	done
 	printf '{"go_module":"gitdash","mutants_total":%d,"mutants_killed":%d,"mutants_lived":%d,' \
 		"$total" "$killed" "$#" >"$path"
@@ -87,10 +97,10 @@ make_log() { # make_log <path> <killed> <timed_out> [extra_line...]
 		printf 'done in 2.1s\n'
 		local i
 		for ((i = 1; i <= killed; i++)); do
-			printf '  %s%s at pkg/f%d.go:%d:9\n' ' ' KILLED "$i" "$i"
+			printf '  %s%s at internal/tui/app.go:%d:9\n' ' ' KILLED "$i"
 		done
 		[[ $timed -gt 0 ]] && for ((i = 1; i <= timed; i++)); do
-			printf '   TIMED OUT CONDITIONALS_BOUNDARY at pkg/t%d.go:%d:9\n' "i" "i"
+			printf '   TIMED OUT CONDITIONALS_BOUNDARY at internal/tui/toast.go:%d:9\n' "$i"
 		done
 		printf '\n'
 		printf 'Mutation testing completed in 30s\n'
@@ -212,6 +222,61 @@ make_log "$d/run.log" 7 0
 verdict "$d" 0 0
 check "pre-count 0 with 8 measured: red" 1 $?
 contains "pre-count 0 with 8 measured: names the contradiction" "measured 8" "$(cat "$d/verdict.out")"
+
+# The one this repo shipped and the smoke caught: the base check resolved
+# `origin/<base>` while the diff asked for `<base>`, so on a runner (where the
+# base only exists as a remote-tracking ref and HEAD is detached) the diff failed
+# and its empty output was read as "nothing to mutate". Green, having measured
+# nothing — the exact hole the check exists to close, reached through its wiring.
+gr3=$tmp/repo-remote-base
+mkdir -p "$gr3/scripts"
+cp "$MUTATE" "$gr3/scripts/mutate.sh"
+chmod +x "$gr3/scripts/mutate.sh"
+printf 'package x\n' >"$gr3/x.go"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$gr3/scripts/watchdog.sh"
+chmod +x "$gr3/scripts/watchdog.sh"
+printf '# allowlist\n' >"$gr3/.mutation-allowlist"
+git -C "$gr3" init -q -b main
+git -C "$gr3" config user.email t@example.com
+git -C "$gr3" config user.name t
+git -C "$gr3" add -A
+git -C "$gr3" commit -qm base
+git -C "$gr3" checkout -qb feature
+printf 'package x2\n' >"$gr3/x.go"
+printf 'package y\n' >"$gr3/y.go"
+git -C "$gr3" add -A
+git -C "$gr3" commit -qm change
+# The runner's shape: the base lives only as refs/remotes/origin/<base> and HEAD
+# is detached, so the bare branch name does not resolve.
+git -C "$gr3" update-ref refs/remotes/origin/main refs/heads/main
+git -C "$gr3" checkout -q --detach
+git -C "$gr3" update-ref -d refs/heads/main
+if git -C "$gr3" rev-parse --verify --quiet main >/dev/null 2>&1; then
+	bad "remote-only base fixture: the bare base still resolves, so the case proves nothing"
+else
+	out=$(cd "$gr3" && MUTATE_BASE=main MUTATE_ENGINE=true MUTATE_RUN_LOG=run.log \
+		MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt \
+		bash scripts/mutate.sh --diff 2>&1)
+	rc=$?
+	check "base that exists only as a remote-tracking ref: red" 1 $rc
+	contains "base that exists only as a remote-tracking ref: names the ref" "main" "$out"
+	lacks "base that exists only as a remote-tracking ref: never says nothing to mutate" "nothing to mutate" "$out"
+	if [[ -f $gr3/report.json ]]; then
+		bad "unresolvable base: an engine ran anyway"
+	else
+		ok "unresolvable base: nothing ran"
+	fi
+fi
+
+# And the same repo measured against the ref that DOES exist: the precheck
+# announces the two files it is about to mutate.
+out=$(cd "$gr3" && MUTATE_BASE=origin/main MUTATE_ENGINE=true MUTATE_RUN_LOG=run.log \
+	MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt \
+	MUTATE_SUMMARY=summary.md bash scripts/mutate.sh --diff 2>&1)
+rc=$?
+check "base that exists as a remote-tracking ref: gets past the precheck" 2 $rc
+contains "base that exists as a remote-tracking ref: measured 2 files in scope" "files in scope: 2" "$(cat "$gr3/budget.txt")"
+check "base that exists as a remote-tracking ref: announced both files" "x.go y.go" "$(tr '\n' ' ' <"$gr3/scope.txt" | sed 's/ $//')"
 
 # ============================================================================
 echo
@@ -383,22 +448,41 @@ echo
 echo "=== 8. the announced scope and the measured scope are the same one ==="
 # ============================================================================
 
+# The measured set is the one in the RUN LOG, not the one in report.json: the
+# report lists every file the engine merely looked at (the 1090 SKIPPED ones in a
+# real run), so it says nothing about what was measured.
+# A real --diff run walks the WHOLE module and reports every mutant outside the
+# scope as SKIPPED (1090 of them in the measured fixture run). Those are not a
+# measured file, so the integrity check has to look past them: a set taken from
+# files[] or from the progress lines would be the whole module either way, and
+# the check would be a guaranteed false positive instead of a guarantee.
 d=$(new_case scope-integrity)
+SKIP_FILES='internal/tui/app.go internal/tui/update.go'
 make_report "$d/report.json" 12 'CONDITIONALS_BOUNDARY internal/tui/table.go:292'
-make_log "$d/run.log" 11 0
+make_log "$d/run.log" 11 0 '  RUNNABLE CONDITIONALS_NEGATION at internal/tui/table.go:381:9'
 printf 'CONDITIONALS_BOUNDARY internal/tui/table.go:292\n' >>"$d/allowlist"
 printf 'internal/tui/table.go\n' >"$d/scope.txt"
 verdict "$d" 12 0 --announced "$d/scope.txt"
-check "measured inside the announced scope: green" 0 $?
+check "measured inside the announced scope, with 1090 skipped elsewhere: green" 0 $?
 
 d=$(new_case scope-outside)
+SKIP_FILES=''
 make_report "$d/report.json" 12 'CONDITIONALS_BOUNDARY internal/config/forge.go:149'
-make_log "$d/run.log" 11 0
+make_log "$d/run.log" 11 0 '  RUNNABLE CONDITIONALS_NEGATION at internal/config/forge.go:150:9'
 printf 'CONDITIONALS_BOUNDARY internal/config/forge.go:149\n' >>"$d/allowlist"
 printf 'internal/tui/table.go\n' >"$d/scope.txt"
 verdict "$d" 12 0 --announced "$d/scope.txt"
 check "measured outside the announced scope: red" 1 $?
 contains "measured outside the announced scope: names the file" "internal/config/forge.go" "$(cat "$d/verdict.out")"
+
+# The same run with no announced scope at all is not compared against anything,
+# which is what the whole-module local loop does.
+d=$(new_case scope-absent)
+make_report "$d/report.json" 12 'CONDITIONALS_BOUNDARY internal/config/forge.go:149'
+make_log "$d/run.log" 11 0
+printf 'CONDITIONALS_BOUNDARY internal/config/forge.go:149\n' >>"$d/allowlist"
+verdict "$d" 12 0
+check "no announced scope to compare against: not a red" 0 $?
 
 # ============================================================================
 echo

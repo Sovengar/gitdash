@@ -226,13 +226,16 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 	_out "  - mutator coverage: $(jq -r '.mutations_coverage' "$report")%"
 
 	# A verdict about a set different from the one that was announced is a verdict
-	# about something else. Measured files come from the report, announced ones
-	# from the precheck that decided to run at all.
+	# about something else. The measured set comes from report.json counting the
+	# mutations the engine actually REPORTED, and SKIPPED ones are excluded: with
+	# --diff the engine walks the whole module, emits a SKIPPED line for all 1090
+	# mutants outside the diff and counts none of them, so a set taken from
+	# progress lines or from files[] is the whole module either way.
 	if [[ -n $announced && -f $announced ]]; then
-		unannounced=$(jq -r '.files[]?.file_name' "$report" | sort -u |
-			comm -23 - <(grep -vE '^[[:space:]]*$' "$announced" | sort -u))
+		unannounced=$(jq -r '.files[] | .file_name as $f | .mutations[] | select(.status != "SKIPPED") | $f' "$report" |
+			sort -u | comm -23 - <(grep -vE '^[[:space:]]*$' "$announced" | sort -u))
 		if [[ -n $unannounced ]]; then
-			_out '- **no measurement**: the run mutated files outside the scope that was announced:'
+			_out '- **no measurement**: the run reported mutants for files outside the scope that was announced:'
 			local f
 			while IFS= read -r f; do [[ -n $f ]] && _out "  - $f"; done <<<"$unannounced"
 			return 1
@@ -474,20 +477,46 @@ reject_forbidden "${ENGINE_FLAGS[@]}" ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}
 # the check, which is what makes a staged-only fixture prove nothing.
 SCOPE_ARGS=()
 if [[ $MODE == diff ]]; then
-	if ! git rev-parse --verify --quiet "origin/$BASE" >/dev/null 2>&1 &&
-		! git rev-parse --verify --quiet "$BASE" >/dev/null 2>&1; then
+	# ONE string, verified and then diffed. The two used to differ: the check
+	# resolved `origin/$BASE` while the diff asked for `$BASE`, and on a runner
+	# there is no local `main`, so the diff failed and its empty output was read
+	# as "nothing to mutate". A green from an unresolvable base is the exact hole
+	# this check exists to close.
+	if ! git rev-parse --verify --quiet "$BASE" >/dev/null 2>&1; then
 		_out "- **no measurement**: the base ref \`$BASE\` could not be resolved, so the set of files to mutate is unknown."
 		_out "- An empty diff from an unresolved base is indistinguishable from a PR with no changes, and treating them alike is the hole this check closes."
-		_out "- Fetch it (\`git fetch origin $BASE\`) and re-run."
+		_out "- Pass the SAME ref you fetched, e.g. \`MUTATE_BASE=origin/main\` on a runner where the base is only a remote-tracking ref."
 		_flush_summary "$SUMMARY" 'Mutation testing'
 		die 1 "base ref $BASE could not be resolved"
 	fi
 	SCOPE_ARGS=(--diff "$BASE")
-	git diff --name-only "$BASE...HEAD" | grep '\.go$' >"$SCOPE_FILE" || true
+	# A diff that cannot be computed is an ERROR, not an empty scope: `git diff`
+	# printing nothing on failure is the same bytes as a diff with no Go files.
+	if ! git diff --name-only "$BASE...HEAD" >"$SCOPE_FILE.all"; then
+		rm -f "$SCOPE_FILE.all"
+		_out "- **no measurement**: the diff against \`$BASE\` could not be computed, so the scope is unknown."
+		_out "- A failed \`git diff\` prints nothing, and nothing is indistinguishable from 'this PR touches no Go files'."
+		_flush_summary "$SUMMARY" 'Mutation testing'
+		die 1 "git diff $BASE...HEAD failed"
+	fi
+	grep '\.go$' "$SCOPE_FILE.all" >"$SCOPE_FILE" || true
+	rm -f "$SCOPE_FILE.all"
 else
 	git ls-files '*.go' | grep -vE "$EXCLUDE" >"$SCOPE_FILE" || true
 fi
 ANNOUNCED_COUNT=$(grep -cvE '^[[:space:]]*$' "$SCOPE_FILE" || true)
+
+# Published before any early exit, so the artifact upload knows the paths even
+# when the run stops at the precheck. A red with no log attached is a red nobody
+# can act on.
+if [[ -n ${GITHUB_OUTPUT:-} ]]; then
+	{
+		printf 'report=%s\n' "$REPORT"
+		printf 'run_log=%s\n' "$RUN_LOG"
+		printf 'scope=%s\n' "$MODE"
+		printf 'expected_total=%s\n' 0
+	} >>"$GITHUB_OUTPUT"
+fi
 
 write_budget_file() {
 	[[ -n $BUDGET_FILE ]] || return 0
@@ -582,7 +611,7 @@ fi
 echo "mutate: supervising (stall $STALL, ceiling $CEILING, $TOTAL expected progress lines)" >&2
 "$WATCHDOG" "$STALL" "$CEILING" "$TOTAL" "$PROGRESS_RE" -- \
 	$ENGINE "${SCOPE_ARGS[@]}" "${ENGINE_FLAGS[@]}" \
-	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" \
+	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" --silent \
 	${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} |
 	tee "$RUN_LOG"
 
@@ -593,14 +622,10 @@ ENGINE_RC=${PIPESTATUS[0]}
 echo "mutate: engine exit $ENGINE_RC, log $RUN_LOG, report $REPORT" >&2
 
 # One path for producer, verdict and upload: they cannot disagree if they are
-# told the same one.
+# told the same one. The scope step already published these; only the count is
+# final now.
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
-	{
-		printf 'report=%s\n' "$REPORT"
-		printf 'run_log=%s\n' "$RUN_LOG"
-		printf 'scope=%s\n' "$MODE"
-		printf 'expected_total=%s\n' "$TOTAL"
-	} >>"$GITHUB_OUTPUT"
+	printf 'expected_total=%s\n' "$TOTAL" >>"$GITHUB_OUTPUT"
 fi
 
 _verdict "$REPORT" "$RUN_LOG" "$ALLOWLIST" "$TOTAL" "$ENGINE_RC" "$SCOPE_FILE" "$BUDGET_FILE"
