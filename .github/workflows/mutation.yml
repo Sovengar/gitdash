@@ -1,20 +1,26 @@
 name: Mutation (diff)
 
-# Mutation testing via gremlins over THE PR's DIFF (not the whole module), with
-# a gate that blocks NEW surviving mutants. Required status checks: Build, Lint,
-# Test and Mutation block the merge.
+# Mutation testing via gremlins over the PR's diff (not the whole module), with
+# a gate that blocks NEW survivors. Required status check: Build, Lint, Test and
+# Mutation block the merge.
 #
-# Deliberately without `paths` filters: a filtered workflow is skipped, and a
-# skipped required check stays "pending" forever. There is no filter here and the
-# scope is decided INSIDE the job, so the job ALWAYS ends in pass or fail.
+# The check's rule, in one line: it goes GREEN only if the mutation really was
+# measured and no new survivor is left untested. "Could not measure" is a RED
+# verdict, never a green one.
 #
-# That is what makes this workflow fit as a required check, and why `Calibration`
-# is NOT skipped: if .mutation-allowlist is missing, the mutation job would be
-# skipped, and a skipped check is a hung check. The previous version had exactly
-# that `if:`, which is why the comment here said it must NOT be marked required.
-# Calibration is now checked INSIDE the job (step `Calibration`), so the job
-# always reports: if it is not calibrated it fails with a message saying how to
-# calibrate it, which is more useful than a green job that measured nothing.
+# And not every green is the same green: one that measured NOTHING has to say so,
+# or the team reads it as a measurement.
+#
+# The gate lives in scripts/mutate.sh, not here: its red paths are pure functions
+# of files and are tested locally in under a second (scripts/mutate_test.sh).
+# Inline in the YAML they could only be exercised with a synthetic Actions run,
+# which is a hope and not a test. This file keeps the PATHS and the REFS:
+# checkout, fetch-depth, base resolution and the artefact upload.
+#
+# No `needs:` nor `if:` on the mutation job, and no `continue-on-error`: those two
+# were the mechanisms that manufactured the "nothing was measured" green. With one
+# step that produces and verifies, the run's state travels in-band and
+# "continue-on-error" stops being a path to green.
 on:
   pull_request:
   workflow_dispatch:
@@ -23,7 +29,7 @@ on:
 permissions:
   contents: read
 
-# Superseded runs on the same ref are cancelled so a new push ends the previous run.
+# Superseded runs on the same ref are cancelled so a new push ends the previous one.
 concurrency:
   group: mutation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,15 +37,28 @@ concurrency:
 jobs:
   Mutation:
     name: Mutation (diff)
-    # No `needs:` nor `if:` on purpose: the job has to REPORT always. A job
-    # skipped in a required check stays pending forever and blocks every PR (the
-    # same class of failure as a paths filter). Calibration is checked in a step
-    # here, and if it is missing this job fails saying how to calibrate it.
+    # No `needs:` nor `if:` on purpose: the job must ALWAYS report. A skipped job
+    # in a required check stays pending forever and blocks every PR (the same
+    # class of failure as a paths filter). Calibration is checked in a step here,
+    # and if it is missing this job fails saying how to calibrate it.
     runs-on: ubuntu-24.04
-    # Hard cap. gremlins is never signalled: on SIGTERM it panics
-    # ("send on closed channel") and writes no report.json, so a timeout can only
-    # mean "no result", never a wrong one.
-    timeout-minutes: 20
+    # Hard cap, and above the supervisor's ceiling (MUTATE_CEILING=4m): if the
+    # platform cancels underneath, the job is left with no reason, no report and
+    # no log, which is the most important red there is to lose.
+    timeout-minutes: 5
+    env:
+      # The scope's base is the merge-base, not the branch name: `git diff A...B`
+      # and the `git diff --merge-base` the engine runs internally describe the
+      # same set over the clean tree this checkout leaves.
+      MUTATE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+      # The budget is explicit and not optional because --ci demands it: if one of
+      # these were forgotten the script aborts naming it instead of falling back to
+      # the local default and loosening the budget with nobody noticing.
+      MUTATE_CAP: 120s
+      MUTATE_WORKERS: 4
+      MUTATE_STALL: 2m
+      MUTATE_CEILING: 4m
+      MUTATE_JOB_CEILING: 5m
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,110 +72,64 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # Makefile is part of the cache key: MUTATE_BASE and the tool wiring live
-          # there, so changing them busts stale module caches.
+          # go.sum and the mutation script are in the cache key: the script owns
+          # the engine wiring, so changing it busts stale module caches.
           cache-dependency-path: |
             go.sum
-            Makefile
+            scripts/mutate.sh
 
-      # Without this step the gate can do nothing: with no allowlist every new
-      # mutant looks "new" and the gate has nothing to compare it against.
-      # It fails here instead of skipping the job, because a job skipped in a
+      # The supervisor is bash, and nothing in this repo lints bash (`make lint`
+      # is Go only). This step is the only thing that proves the vendored
+      # supervisor actually works ON the runner, and it is here because it is the
+      # one component whose failure is INVISIBLE: the old wiring invoked a path
+      # that does not exist outside chezmoi, the step died instantly and nothing
+      # noticed for four runs. A broken gate, by contrast, is loud.
+      - name: Supervisor suite
+        run: bash scripts/watchdog_test.sh
+
+      # Without this step the gate cannot do anything: with no allowlist, any
+      # survivor would look new and the gate would have nothing to compare against.
+      # It fails here instead of skipping the job, because a skipped job in a
       # required check blocks every PR forever.
       - name: Calibration
-        id: calibration
         run: |
           set -euo pipefail
           if [ ! -f .mutation-allowlist ]; then
-            echo "::error title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate, then commit .mutation-allowlist"
+            echo "::error title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate-all, then commit .mutation-allowlist"
             exit 1
           fi
           echo "calibrated: $(grep -cvE '^[[:space:]]*(#|$)' .mutation-allowlist) allowlisted mutants"
 
+      # Belt and braces: guarantee the base ref is fetched even on shallow setups.
+      # Twice over, in fact: mutate.sh refuses to measure without it, so an empty
+      # diff from an unresolved base can no longer read as a PR with no changes.
       - name: Resolve mutation scope
-        id: scope
-        env:
-          BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          BASE_BRANCH: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          echo "base=$BASE"
-          # Belt and braces: guarantee the base ref is fetched even on shallow setups.
-          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" || \
-            echo "could not fetch base ref $BASE_BRANCH; continuing with what is present"
-          # The scope is the DIFF against the base, not the whole module: that is
-          # why this check takes seconds. `make mutate` (whole module) is the
-          # expensive one.
-          if git diff --name-only "$BASE...HEAD" | grep -q '\.go$'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            git diff --name-only "$BASE...HEAD" | grep '\.go$' | sed 's/^/  changed: /'
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "no .go changes vs $BASE - nothing to mutate"
-          fi
+          echo "base=$MUTATE_BASE"
+          git fetch --no-tags --depth=1 origin "+refs/heads/${{ github.base_ref || github.event.repository.default_branch }}:refs/remotes/origin/${{ github.base_ref || github.event.repository.default_branch }}" || \
+            echo "could not fetch base ref; continuing with what is present"
 
-      - name: Mutate
-        if: steps.scope.outputs.run == 'true'
-        # A gremlins crash must not be read as a mutation failure: the Gate step
-        # below decides, and it treats a missing report.json as "no result".
-        continue-on-error: true
-        run: make mutate-diff MUTATE_BASE=origin/${{ github.base_ref || github.event.repository.default_branch }}
-
-      # Blocking gate: fail on any surviving mutant in the diff that is not already
-      # listed in .mutation-allowlist.
-      - name: Gate
-        if: always() && steps.scope.outputs.run == 'true'
-        env:
-          ALLOWLIST: .mutation-allowlist
+      # One step: measure AND decide. The exit code is the verdict, and it is
+      # passed explicitly rather than through a step output, so no intermediate
+      # state can be mistaken for a result. The reason lines go to stdout and the
+      # script also writes them to $GITHUB_STEP_SUMMARY, which is where the reason
+      # of a red is read.
+      - name: Mutate and gate
+        id: mutate
         run: |
-          set -uo pipefail
-          S="$GITHUB_STEP_SUMMARY"
-          : > "$S"
-          echo "### Mutation testing" >> "$S"
-
-          if [ ! -f report.json ]; then
-            echo "- no report.json (timed out, or gremlins crashed) -> no result, gate passes" >> "$S"
-            exit 0
-          fi
-
-          echo "- total: $(jq -r '.mutants_total' report.json)" >> "$S"
-          echo "- killed: $(jq -r '.mutants_killed' report.json)" >> "$S"
-          echo "- survived: $(jq -r '.mutants_lived' report.json)" >> "$S"
-          echo "- not covered: $(jq -r '.mutants_not_covered' report.json)" >> "$S"
-          echo "- test efficacy: $(jq -r '.test_efficacy' report.json)%" >> "$S"
-          echo "- mutator coverage: $(jq -r '.mutations_coverage' report.json)%" >> "$S"
-          echo "- note: gremlins does not report TIMED OUT mutants in report.json, and efficacy excludes them" >> "$S"
-
-          jq -r '.files[] | .file_name as $f | .mutations[] | select(.status=="LIVED") | "\(.type) \($f):\(.line)"' report.json | sort -u > /tmp/lived.txt
-          total=$(wc -l < /tmp/lived.txt)
-
-          # No "the allowlist exists" check here: the Calibration step of this
-          # same job already aborts when it is missing, with a message saying how
-          # to seed it. Having it in two places was one more backdoor: if the
-          # allowlist vanished between steps, the gate passed green having
-          # compared nothing.
-          grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | sed 's/[[:space:]]*$//' | sort -u > /tmp/allow.txt
-          comm -23 /tmp/lived.txt /tmp/allow.txt > /tmp/new_lived.txt
-          new=$(wc -l < /tmp/new_lived.txt)
-
-          echo "- surviving in diff: $total (allowlisted: $((total - new)), new: $new)" >> "$S"
-
-          if [ "$new" -gt 0 ]; then
-            {
-              echo ""
-              echo "New surviving mutants - no test catches these changes:"
-              sed 's/^/- /' /tmp/new_lived.txt
-              echo ""
-              echo "Add a test that kills them, or - only if provably equivalent - add the line to $ALLOWLIST with a comment saying why."
-            } >> "$S"
-            exit 1
-          fi
+          scripts/mutate.sh --diff --ci --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-report-${{ github.event.pull_request.number || github.run_id }}
-          path: report.json
+          # The path comes from the step that produced it, so the uploader and the
+          # script cannot disagree about where the report is. The run log goes
+          # with it: a red that has no log attached is the red nobody can act on.
+          path: |
+            ${{ steps.mutate.outputs.report }}
+            ${{ steps.mutate.outputs.run_log }}
           if-no-files-found: ignore
           retention-days: 14
