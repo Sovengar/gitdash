@@ -42,10 +42,15 @@ jobs:
     # class of failure as a paths filter). Calibration is checked in a step here,
     # and if it is missing this job fails saying how to calibrate it.
     runs-on: ubuntu-24.04
-    # Hard cap, and above the supervisor's ceiling (MUTATE_CEILING=4m): if the
-    # platform cancels underneath, the job is left with no reason, no report and
-    # no log, which is the most important red there is to lose.
-    timeout-minutes: 5
+    # The invariant is NOT "the supervisor's ceiling fits in the job": it is
+    # "everything that runs BEFORE the supervisor, plus its ceiling, fits in the
+    # job". Measured on the runner: 98s of checkout + setup-go + the suites, and
+    # ~28.5s of warm + dry-run; the worst case came to 366.5s against the 300s of a
+    # 5m timeout, i.e. the platform cancelled instead of the supervisor. 8m leaves
+    # plenty of margin, and the script checks it with TWO assertions because each
+    # one sees the other's blind spot: the declared one (config) and the measured
+    # one (clock).
+    timeout-minutes: 8
     env:
       # The scope's base is the merge-base, not the branch name: `git diff A...B`
       # and the `git diff --merge-base` the engine runs internally describe the
@@ -54,12 +59,31 @@ jobs:
       # The budget is explicit and not optional because --ci demands it: if one of
       # these were forgotten the script aborts naming it instead of falling back to
       # the local default and loosening the budget with nobody noticing.
-      MUTATE_CAP: 120s
+      #
+      # The chain the script asserts is 2*cap < stall < ceiling, and here
+      # ceiling + setup_reserve < job_ceiling. The cap has to be under half the stall
+      # or a slow mutant is cut as a stall instead of being REPORTED as TIMED OUT,
+      # and the verdict's branch for expired mutants becomes unreachable. That is why
+      # the cap is 60s and not the roomier 120s: 120s needed a 4m+ stall, which does
+      # not fit under an 8m job with a 150s reserve.
+      MUTATE_CAP: 60s
       MUTATE_WORKERS: 4
-      MUTATE_STALL: 2m
-      MUTATE_CEILING: 4m
-      MUTATE_JOB_CEILING: 5m
+      MUTATE_STALL: 3m
+      MUTATE_CEILING: 5m
+      MUTATE_JOB_CEILING: 8m
+      # Everything that can run before the supervisor, with margin over the ~127s
+      # measured: setup-go, the two suites, the base fetch and the warm + dry-run.
+      # This is the DECLARED half of the budget invariant.
+      MUTATE_SETUP_RESERVE: 150s
     steps:
+      # The job clock starts FIRST, before the checkout, because the measured half
+      # of the budget invariant has to know how much job time is already gone — and
+      # the 98s of checkout + setup-go is most of what the reserve is for. Marked
+      # later it would have measured only the warm + dry-run and reported the
+      # invariant as satisfied while it was not.
+      - name: Mark the job clock
+        run: echo "MUTATE_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,14 +102,16 @@ jobs:
             go.sum
             scripts/mutate.sh
 
-      # The supervisor is bash, and nothing in this repo lints bash (`make lint`
-      # is Go only). This step is the only thing that proves the vendored
-      # supervisor actually works ON the runner, and it is here because it is the
-      # one component whose failure is INVISIBLE: the old wiring invoked a path
-      # that does not exist outside chezmoi, the step died instantly and nothing
-      # noticed for four runs. A broken gate, by contrast, is loud.
-      - name: Supervisor suite
-        run: bash scripts/watchdog_test.sh
+      # The supervisor and the gate are bash, and nothing in this repo lints bash
+      # (`make lint` is Go only), so these two suites are the only check there is
+      # over that code. mutate_test.sh rides along here: it takes ~1s and it is the
+      # only proof that the gate's red paths still work, which on a runner is the
+      # difference between a gate that measures and one that stopped noticing.
+      - name: Shell suites
+        run: |
+          set -euo pipefail
+          bash scripts/watchdog_test.sh
+          bash scripts/mutate_test.sh
 
       # Without this step the gate cannot do anything: with no allowlist, any
       # survivor would look new and the gate would have nothing to compare against.

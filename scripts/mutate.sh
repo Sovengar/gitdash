@@ -1,72 +1,27 @@
 #!/usr/bin/env bash
 # mutate.sh — measure the mutation of a scope AND decide its verdict, in one process.
-#
-# It replaces the mutation wiring that used to live in three places at once (the
-# Makefile recipes, scripts/mutate-all.sh, and an inline gate in the workflow).
-# One place knows how to warm, how to measure the denominator, how to pick the
-# per-mutant ceiling, how to call the supervisor, and what to do with the result.
-#
-# The rule that shapes the whole design: "no measurement" is a RED verdict, never
-# a green one. The old gate printed "no report.json -> no result, gate passes"
-# and exited 0, so a supervisor missing from the runner turned the required check
-# green while measuring nothing.
-#
-# Split: the run phase MEASURES (gremlins + watchdog) and the verdict phase
-# DECIDES from files only — no gremlins, no Go, no git, no clock, no network.
-# That is what makes every red path testable locally in under a second, with
-# fixtures fabricated in a temp dir; see scripts/mutate_test.sh.
-#
-# Usage:
-#   scripts/mutate.sh                 # measure the whole module
-#   scripts/mutate.sh --diff          # measure only the diff vs $MUTATE_BASE
-#   scripts/mutate.sh --diff --ci     # same, as the required check does it
-#   scripts/mutate.sh --diff --dry    # warm + denominator only, mutate nothing
-#   scripts/mutate.sh --verdict-only <report> <run-log> <allowlist> \
-#       --expected-total N --engine-rc N [--announced P] [--budget P] [--summary P]
-#
-# Exit: 0 green, 1 red. 2 is misuse (bad flags, unresolvable base, missing budget
-# knob) and never means anything about mutation.
+# The rule that shapes the whole design: "no measurement" is a RED verdict, never a green one.
+# The old gate printed "no report.json -> no result, gate passes" and exited 0.
+# Usage and exit codes: --help. The design is in AGENTS.md, section "Mutation (diff)".
 
 set -uo pipefail
 
-# One definition of "one unit of progress". The numerator (the watchdog's poll)
-# and the denominator (the dry-run count) both come from this expression; define
-# it twice and the supervisor declares a healthy run finished early.
-# The format comes from report.go: Mutant prints "%s%s %s at %s\n", so a line
-# ends in "at <file>:<line>:<col>". The trailing [^[:space:]] tolerates the CR a
-# terminal line discipline adds, so this does not depend on stdout being piped.
+# The single definition of "one unit of progress", counted by both the numerator and the denominator.
+# The trailing [^[:space:]] tolerates the CR a terminal line discipline adds.
 PROGRESS_RE='at [^[:space:]]+:[[:digit:]]+:[[:digit:]]+[^[:space:]]*$'
 
-# Flags that break the "exactly one line per mutant" contract, and with it the
-# denominator. -S filters lines by status, so the numerator stops meaning
-# "mutants processed"; -s suppresses every log.Infof, so the engine prints
-# nothing while still exiting 0 WITH a report present — the silent shape this
-# gate exists to refuse. The check lives in the caller because it restricts the
-# INVOCATION, and the invocation belongs to the caller, not to the supervisor.
-MUTATE_FORBIDDEN='-S --output-statuses -s --silent'
+# Flags that break the "exactly one line per mutant" contract, and with it the denominator.
+# The guard below is DERIVED from this list, so no message can name a flag nothing enforces.
+# Overridable, and the suite relies on that to prove the derivation is real.
+MUTATE_FORBIDDEN=${MUTATE_FORBIDDEN:-'-S --output-statuses -s --silent'}
 
-# The local budget, one row per scope, so the full-module local run and the CI
-# diff run read the same formula instead of each keeping its own copy.
-#
-# cap      absolute ceiling per mutant. gremlins has no per-mutant absolute
-#          timeout: --timeout-coefficient is the only lever, and it multiplies the
-#          coverage-pass duration, so an absolute cap has to be expressed as
-#          coefficient = ceil(cap / elapsed).
-# workers  parallelism. Contention is what expires mutants, not slowness.
-# stall    seconds without a new progress line before the run counts as wedged.
-# ceiling  absolute ceiling for the whole run.
-#
-# CI does NOT inherit these: under --ci the budget knobs are mandatory, because
-# "the environment wins" alone fails by a forgotten variable landing on this
-# table, which is CI quietly loosening its own budget with no diff to show.
-#
+# The budget, one row per scope, so both loops read the same formula instead of each keeping its own copy.
+# Under --ci these are not inherited but mandatory: "the environment wins" would let CI loosen its own budget.
 # scope  cap  workers  stall  ceiling
 # run    180s 8       20m   60m
-# diff   120s 4       2m    4m
+# diff   60s  4       3m    5m
 
-# --- output -----------------------------------------------------------------
-# Every reason line goes to stdout AND, when --summary was given, to that file:
-# the run phase uses stdout, the workflow's verdict-only call uses the file.
+# --- output: every reason line goes to stdout AND, when --summary was given, to that file
 OUT_LINES=()
 
 _out() {
@@ -100,46 +55,49 @@ _to_secs() {
 	esac
 }
 
-# ============================================================================
-# VERDICT — a pure function of paths.
-# ============================================================================
-# Reads files and arguments, prints the reason, returns the colour. It never
-# invokes gremlins, go, git or the clock, so every branch is reachable from a
-# temp dir in under a second. Branch order is "least ambiguous first": a missing
-# tool cannot judge anything, an unresolvable scope is not the set we announced,
-# and a cancelled run has no verdict at all.
-_verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [announced] [budget]
-	local report=$1 run_log=$2 allowlist=$3 expected=$4 engine_rc=$5
-	local announced=${6:-} budget=${7:-}
-	local tmp reason unannounced total new
+# Go prints time.Duration with a unit once it passes a minute (1h2m3.5s, 2m, 1m2.5s).
+# Anything but h/m/s, or a total of zero, is a hard error: never a silent 0.
+# Normalised to milliseconds because it is only ever divided into a cap.
+_go_duration_secs() { # _go_duration_secs <duration> -> seconds on stdout, or fail
+	local secs
+	secs=$(awk -v d="$1" 'BEGIN{
+		gsub(/,/, ".", d)
+		total = 0
+		while (match(d, /^[0-9]+(\.[0-9]+)?[hms]/)) {
+			n = substr(d, 1, RLENGTH)
+			u = substr(n, length(n), 1)
+			v = substr(n, 1, length(n) - 1) + 0
+			if (u == "h") total += v * 3600
+			else if (u == "m") total += v * 60
+			else total += v
+			d = substr(d, RLENGTH + 1)
+		}
+		if (d != "") exit 1
+		if (total <= 0) exit 1
+		sec = int(total)
+		printf "%d.%03d", sec, int((total - sec) * 1000 + 0.5)
+	}') || return 1
+	# Trims only the padding the fixed three decimals added: it stops at the first significant digit.
+	while [[ $secs == *.*0 ]]; do secs=${secs%0}; done
+	[[ $secs == *. ]] && secs=${secs%.}
+	printf '%s\n' "$secs"
+}
 
-	if ! command -v jq >/dev/null 2>&1; then
-		_out "- **no measurement**: jq is not available, so the report cannot be read and no verdict can be reached."
-		_out "- Install jq: an extractor that fails leaves an empty output, and an empty output read as 'zero new survivors' is the green-without-measurement this check forbids."
-		return 1
-	fi
+# --- VERDICT: a pure function of paths, no gremlins, no Go, no git, no clock
+# Branch order is "least ambiguous first": a missing tool cannot judge anything, a cancelled run has no verdict.
+# Whether the run happened, as opposed to what it measured: "no result" vs "a result", which one cascade stops saying.
+_verdict_run_state() { # <run_log> <engine_rc>
+	local run_log=$1 engine_rc=$2 reason
 
-	# Without an allowlist every survivor would look new, so the gate would be
-	# comparing against nothing. Red with instructions, never a skip: a skipped
-	# required check stays pending forever and blocks every PR.
-	if [[ ! -f $allowlist ]]; then
-		_out "- **no measurement**: $allowlist is missing, so the gate has nothing to compare survivors against."
-		_out "- Seed it with \`make mutate-all\`, then commit $allowlist."
-		return 1
-	fi
-
-	# An empty run log is the shape --silent leaves behind: the engine exits 0
-	# with a report present and prints nothing, so there is no mutant line, no
-	# TIMED OUT line, nothing to count. Judging that green is the hole itself.
+	# The shape --silent leaves behind: exit 0, a report present, no line to count.
 	if [[ ! -s $run_log ]]; then
 		_out "- **no measurement**: the run log is empty, so the engine produced no progress lines at all."
 		_out "- An empty log is exactly what a silent run leaves behind while exiting 0; nothing was measured."
 		return 1
 	fi
 
-	# 124 is the supervisor's own code for "I cut it", and the reason is the last
-	# thing it printed on stderr, which is inside the run log. Stall and ceiling
-	# demand opposite responses, so they are told apart, not lumped together.
+	# 124 is the supervisor's own "I cut it"; the reason is its last stderr line, inside the run log.
+	# Stall and ceiling demand opposite responses, so they are told apart rather than lumped together.
 	if [[ $engine_rc -eq 124 ]]; then
 		reason=$(grep -oE 'no progress for [0-9]+s|reached .* did not exit within the [0-9]+s ceiling|[0-9]+s ceiling' "$run_log" | tail -1)
 		_out "- **no measurement**: the supervisor cut the run — ${reason:-reason not found in the log}."
@@ -149,9 +107,7 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 		return 1
 	fi
 
-	# 130/143 mean the SUPERVISOR was signalled, which on a runner is a
-	# cancellation. No layer may translate them into survivors: they are not a
-	# mutation result, and calling them one would be a lie.
+	# 130/143 mean the SUPERVISOR was signalled; no layer may translate them into survivors.
 	if [[ $engine_rc -eq 130 || $engine_rc -eq 143 ]]; then
 		_out "- **no measurement**: the run was cancelled (the supervisor exited $engine_rc), so there is no result to judge."
 		_out "- 130 and 143 pass through untranslated on purpose: they mean the runner cancelled the job, not that mutation produced a verdict."
@@ -165,12 +121,33 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 		_log_tail "$run_log"
 		return 1
 	fi
+	return 0
+}
 
-	# TIMED OUT mutants enter neither report.json's totals (report.go:178 sums
-	# lived + killed + notViable) nor the efficacy, so a run that expired 15 of
-	# them reports a perfect score for 15 mutants nobody tested. The count comes
-	# from the aggregate footer because a per-line count dies with a truncated
-	# log, and a number derived from partial text looks right while being wrong.
+_verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [announced] [budget]
+	local report=$1 run_log=$2 allowlist=$3 expected=$4 engine_rc=$5
+	local announced=${6:-} budget=${7:-}
+	local unannounced
+
+	if ! command -v jq >/dev/null 2>&1; then
+		_out "- **no measurement**: jq is not available, so the report cannot be read and no verdict can be reached."
+		_out "- Install jq: an extractor that fails leaves an empty output, and an empty output read as 'zero new survivors' is the green-without-measurement this check forbids."
+		return 1
+	fi
+
+	# Without an allowlist every survivor would look new, so the gate compares against nothing.
+	# Red with instructions, never a skip: a skipped required check blocks every PR forever.
+	if [[ ! -f $allowlist ]]; then
+		_out "- **no measurement**: $allowlist is missing, so the gate has nothing to compare survivors against."
+		_out "- Seed it with \`make mutate-all\`, then commit $allowlist."
+		return 1
+	fi
+
+	# Was there a run at all? Before anything about WHAT it measured: a verdict about a run that never happened is meaningless.
+	_verdict_run_state "$run_log" "$engine_rc" || return 1
+
+	# TIMED OUT mutants enter neither the totals nor the efficacy: 15 expired report a perfect score for 15 untested mutants.
+	# Counted from the aggregate footer, not per line: a per-line count dies with a truncated log.
 	local timed_out timed_out_lines
 	timed_out=$(sed -n 's/^Timed out: \([0-9][0-9]*\),.*/\1/p' "$run_log" | tail -1)
 	timed_out=${timed_out:-0}
@@ -188,9 +165,7 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 	fi
 
 	if [[ ! -f $report ]]; then
-		# A missing report is "nothing to mutate" ONLY when the run said it had
-		# nothing to report AND the pre-count agrees. Deriving it from the
-		# absence alone would move the lie instead of fixing it.
+		# "Nothing to mutate" ONLY when the run said so AND the pre-count agrees.
 		if [[ $expected -eq 0 ]] && grep -qF 'No results to report.' "$run_log"; then
 			_out "- **nothing to mutate**: the diff has Go files but no mutable statements, so zero mutants were generated."
 			_out "- **no mutation was measured, and that is a result, not a failure.**"
@@ -205,9 +180,7 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 		return 1
 	fi
 
-	# Parsed before it is read, because an extractor that fails leaves an empty
-	# output and an empty output read as "zero new survivors" is the
-	# green-without-measurement this check forbids. Presence is not parseability.
+	# Parsed before it is read: a failing extractor leaves empty output, and empty read as "zero new survivors" is the green-without-measurement this check forbids.
 	jq -e . "$report" >/dev/null 2>&1 || {
 		_out "- **no measurement**: $report exists but cannot be parsed, so it cannot be judged."
 		_out "- A failing extractor leaves empty output, and empty output read as 'zero new survivors' is the green this check exists to refuse."
@@ -225,12 +198,8 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 	_out "  - test efficacy: $(jq -r '.test_efficacy' "$report")%"
 	_out "  - mutator coverage: $(jq -r '.mutations_coverage' "$report")%"
 
-	# A verdict about a set different from the one that was announced is a verdict
-	# about something else. The measured set comes from report.json counting the
-	# mutations the engine actually REPORTED, and SKIPPED ones are excluded: with
-	# --diff the engine walks the whole module, emits a SKIPPED line for all 1090
-	# mutants outside the diff and counts none of them, so a set taken from
-	# progress lines or from files[] is the whole module either way.
+	# A verdict about a set other than the announced one is a verdict about something else.
+	# SKIPPED is excluded: with --diff both files[] and the progress lines carry the whole module.
 	if [[ -n $announced && -f $announced ]]; then
 		unannounced=$(jq -r '.files[] | .file_name as $f | .mutations[] | select(.status != "SKIPPED") | $f' "$report" |
 			sort -u | comm -23 - <(grep -vE '^[[:space:]]*$' "$announced" | sort -u))
@@ -242,22 +211,45 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 		fi
 	fi
 
-	# A pre-count of 0 against a report full of mutants means the numerator and
-	# the denominator described different runs, and the supervisor was given the
-	# wrong one: the total it was told to watch for was never reachable.
-	if [[ $expected -eq 0 ]] && [[ $(jq -r '.mutants_total' "$report") != 0 ]]; then
-		_out "- **no measurement**: the pre-count expected 0 mutants but the run measured $(jq -r '.mutants_total' "$report")."
+	# Both directions: disagreement means the numerator and the denominator came out of different runs.
+	local measured_total
+	measured_total=$(jq -r '.mutants_total' "$report")
+	if [[ $expected -eq 0 && $measured_total != 0 ]]; then
+		_out "- **no measurement**: the pre-count expected 0 mutants but the run measured $measured_total."
 		_out "- The denominator and the numerator came out of different runs, so the verdict would be about a scope that was never the one announced."
 		return 1
 	fi
+	if [[ $expected -gt 0 && $measured_total == 0 ]]; then
+		_out "- **no measurement**: the pre-count expected $expected mutant(s) and the run measured none of them."
+		_out "- A green here would be a verdict about mutants that were never measured."
+		return 1
+	fi
+
+	_verdict_survivors "$report" "$allowlist" "$expected" "$budget"
+}
+
+# The comparison against the allowlist, and the only green reachable with a report in hand.
+# Split out so the "was there a measurement" half stops sharing a scope and a scratch directory.
+_verdict_survivors() { # <report> <allowlist> <expected_total> <budget>
+	local report=$1 allowlist=$2 expected=$3 budget=${4:-}
+	local tmp total new survivor reported
 
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/gitdash-mutate-verdict.XXXXXX") || return 1
 	jq -r '.files[] | .file_name as $f | .mutations[] | select(.status=="LIVED") | "\(.type) \($f):\(.line)"' "$report" |
 		sort -u >"$tmp/lived.txt"
 	total=$(wc -l <"$tmp/lived.txt" | tr -d ' ')
 
-	# Compared BY LINE, not by substring: an entry naming the same file at a
-	# different line does not cover the mutant that appeared.
+	# The filter matches the literal "LIVED"; this count comes from the report and a rename cannot fudge it.
+	# Disagreement is red: a drifted literal hides survivors and "new: 0" reads as a green.
+	reported=$(jq -r '.mutants_lived' "$report")
+	if [[ ! $reported =~ ^[0-9]+$ || $reported -ne $total ]]; then
+		_out "- **no measurement**: the report counts $reported survivor(s) but $total mutation(s) carry the LIVED status."
+		_out "- A status literal that drifted turns every real survivor into an invisible one, and an invisible survivor reads as 'new: 0' and a green."
+		rm -rf "$tmp"
+		return 1
+	fi
+
+	# Compared BY LINE, not by substring: same file at another line is a new one.
 	grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sed 's/[[:space:]]*$//' | sort -u >"$tmp/allow.txt"
 	comm -23 "$tmp/lived.txt" "$tmp/allow.txt" >"$tmp/new.txt"
 	new=$(wc -l <"$tmp/new.txt" | tr -d ' ')
@@ -268,7 +260,6 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 	if [[ $new -gt 0 ]]; then
 		_out ''
 		_out "- **$new surviving mutant(s) are not in $allowlist**:"
-		local survivor
 		while IFS= read -r survivor; do _out "  - $survivor"; done <"$tmp/new.txt"
 		_out ''
 		_out "Add a test that kills them, or — only if provably equivalent — add the line to $allowlist with a comment saying why."
@@ -278,7 +269,10 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 	rm -rf "$tmp"
 
 	if [[ $expected -eq 0 ]]; then
-		_out '- **nothing to mutate**: the pre-count found no mutants, so no mutation was measured.'
+		# A _test.go-only diff arrives HERE, not through "No results to report": SKIPPED mutants are results too.
+		_out '- **nothing to mutate**: the diff has Go files but no mutable statements, so the engine generated no mutants for it.'
+		_out "- **no mutation was measured, and that is a result, not a failure.**"
+		_out "- Source of this verdict: the pre-count of in-scope mutants was 0, not an absent report."
 	else
 		_out '- **measured and clean**: every surviving mutant is allowlisted, so this change introduced no new gap.'
 	fi
@@ -293,8 +287,7 @@ _log_tail() { # _log_tail <run_log>
 	_out '```'
 }
 
-# The budget the run used, on every verdict: these numbers only mean something
-# relative to the job ceiling, and that coupling is invisible from the workflow.
+# On every verdict: these numbers only mean something relative to the job ceiling, which the workflow hides.
 _budget_lines() { # _budget_lines <budget_file>
 	local line
 	[[ -n ${1:-} && -f $1 ]] || return 0
@@ -302,9 +295,7 @@ _budget_lines() { # _budget_lines <budget_file>
 	while IFS= read -r line; do _out "  - $line"; done <"$1"
 }
 
-# ============================================================================
-# RUN — warm, enumerate, supervise.
-# ============================================================================
+# --- RUN: warm, enumerate, supervise
 
 REPORT=${MUTATE_REPORT:-report.json}
 RUN_LOG=${MUTATE_RUN_LOG:-.mutation-run.log}
@@ -331,7 +322,7 @@ SUMMARY=${MUTATE_SUMMARY:-}
 while [[ $# -gt 0 ]]; do
 	case $1 in
 	--diff)
-		MODE=diff
+		MODE='diff'
 		;;
 	--run)
 		MODE=run
@@ -387,9 +378,7 @@ if [[ $VERDICT_ONLY -eq 1 ]]; then
 	[[ -n $ENGINE_RC ]] || die 2 "--verdict-only needs --engine-rc"
 	[[ $EXPECTED_TOTAL =~ ^[0-9]+$ ]] || die 2 "--expected-total must be a non-negative integer"
 	[[ $ENGINE_RC =~ ^[0-9]+$ ]] || die 2 "--engine-rc must be a non-negative integer"
-	# The run log arrives as a positional argument, never by convention: a path
-	# that resolved to nothing and read as "no log, so no problems" is the very
-	# failure this gate exists to close.
+	# Positional, never by convention: a path that resolved to nothing reads as "no log, so no problems".
 	[[ -n ${POSITIONAL[1]} ]] || die 2 "--verdict-only was given an empty run-log path"
 
 	_verdict "${POSITIONAL[0]}" "${POSITIONAL[1]}" "${POSITIONAL[2]}" \
@@ -405,11 +394,11 @@ run)
 	CAP_DEFAULT=180s WORKERS_DEFAULT=8 STALL_DEFAULT=20m CEILING_DEFAULT=60m
 	;;
 diff)
-	CAP_DEFAULT=120s WORKERS_DEFAULT=4 STALL_DEFAULT=2m CEILING_DEFAULT=4m
+	CAP_DEFAULT=60s WORKERS_DEFAULT=4 STALL_DEFAULT=3m CEILING_DEFAULT=5m
 	;;
 esac
 
-for knob in CAP WORKERS STALL CEILING JOB_CEILING; do
+for knob in CAP WORKERS STALL CEILING JOB_CEILING SETUP_RESERVE JOB_START; do
 	var=MUTATE_$knob
 	if [[ $CI -eq 1 && -z ${!var:-} ]]; then
 		die 2 "--ci requires $var: the budget is mandatory here so that a missing one cannot fall back to the local row"
@@ -421,43 +410,61 @@ WORKERS=${MUTATE_WORKERS:-$WORKERS_DEFAULT}
 STALL=${MUTATE_STALL:-$STALL_DEFAULT}
 CEILING=${MUTATE_CEILING:-$CEILING_DEFAULT}
 JOB_CEILING=${MUTATE_JOB_CEILING:-}
+SETUP_RESERVE=${MUTATE_SETUP_RESERVE:-0}
+JOB_START=${MUTATE_JOB_START:-0}
 
 CAP_SECS=$(_to_secs "$CAP")
 CEILING_SECS=$(_to_secs "$CEILING")
 JOB_CEILING_SECS=$([[ -n $JOB_CEILING ]] && _to_secs "$JOB_CEILING" || echo 0)
+SETUP_RESERVE_SECS=$(_to_secs "$SETUP_RESERVE")
 STALL_SECS=$(_to_secs "$STALL")
 
-# Invariant assertions instead of magic numbers. What has to hold is that the
-# supervisor dies before the platform does, and that one mutant cannot outlive the
-# run it belongs to. A typo in any limit is caught here rather than by a job that
-# the platform cancels with no reason, no report and no log.
+# Invariants, not magic numbers: the supervisor must die before the platform does.
+# A typo in any limit is caught here rather than by a job cancelled with no reason, no report and no log.
 [[ $STALL_SECS -gt 0 ]] || die 2 "the stall limit must be positive, got '$STALL'"
 [[ $STALL_SECS -lt $CEILING_SECS ]] || die 2 "the stall limit ($STALL) must be below the run ceiling ($CEILING)"
-[[ $CAP_SECS -le $CEILING_SECS ]] || die 2 "the per-mutant cap ($CAP) must not exceed the run ceiling ($CEILING)"
+# A mutant emits no progress while it runs, so the stall detector and the engine's own timeout race.
+# If the cap reaches the stall the supervisor wins: a 124 with the log cut short, and the expired mutant never REPORTED.
+# That makes the verdict's TIMED OUT branch unreachable, so a whole cap of slack under the stall is required.
+[[ $((CAP_SECS * 2)) -lt $STALL_SECS ]] ||
+	die 2 "the per-mutant cap ($CAP) leaves no room under the stall limit ($STALL): a slow mutant would be cut as a stall instead of reported as TIMED OUT. The cap must be under half the stall."
+# NOT "ceiling < job timeout" but "everything before the supervisor plus its ceiling fits in the job".
+# A ceiling that fits on paper and not in the clock is how the platform cancels instead of the supervisor.
 if [[ $JOB_CEILING_SECS -gt 0 ]]; then
-	[[ $CEILING_SECS -lt $JOB_CEILING_SECS ]] ||
-		die 2 "the run ceiling ($CEILING) must be below the job ceiling ($JOB_CEILING), or the platform cancels the job before the supervisor can say why"
+	[[ $SETUP_RESERVE_SECS -gt 0 ]] ||
+		die 2 "MUTATE_SETUP_RESERVE must state how long the steps before the supervisor can take, otherwise the job budget cannot be checked"
+	[[ $((CEILING_SECS + SETUP_RESERVE_SECS)) -lt $JOB_CEILING_SECS ]] ||
+		die 2 "the run ceiling ($CEILING) plus the setup reserve ($SETUP_RESERVE) is $((CEILING_SECS + SETUP_RESERVE_SECS))s, which does not fit under the job ceiling ($JOB_CEILING = ${JOB_CEILING_SECS}s): the platform would cancel the job before the supervisor can say why"
 fi
 
-# --- forbidden flags --------------------------------------------------------
-# Rejected before anything runs, so a forbidden flag is a refusal and not a
-# measurement. Both spellings matter: the flag alone or with =value, and the
-# grouped shorthand (-Sk) that slips through a loop matching whole flags.
+# --- forbidden flags: derived from MUTATE_FORBIDDEN, never spelled out twice
+# A guard that can drift from the list it claims to enforce is a comment pretending to be code.
+FORBIDDEN_EXACT=()
+FORBIDDEN_SHORTS=()
+for _f in $MUTATE_FORBIDDEN; do
+	case $_f in
+	--?*) FORBIDDEN_EXACT+=("$_f") ;;
+	-?) FORBIDDEN_EXACT+=("$_f") FORBIDDEN_SHORTS+=(f="${_f#-}") ;;
+	*) die 2 "MUTATE_FORBIDDEN contains '$_f', which is neither a long flag nor a shorthand" ;;
+	esac
+done
+# bash cannot build a character class from a list at match time, so -S and -s become [s,S] here.
+FORBIDDEN_SHORT_CLASS=$(IFS=,; echo "${FORBIDDEN_SHORTS[*]-}")
+
+# Rejected before anything runs, so a forbidden flag is a refusal and not a measurement.
 reject_forbidden() { # reject_forbidden <flag>...
-	local f
+	local f e
 	for f in "$@"; do
-		case $f in
-		-S | --output-statuses | -s | --silent | -S=* | --output-statuses=* | -s=* | --silent=*)
-			die 2 "'$f' breaks the one-line-per-mutant contract and would make the denominator and this gate meaningless (see MUTATE_FORBIDDEN)"
-			;;
-		-[!-]?*)
-			# A grouped shorthand: bash cannot derive a character class from a
-			# list, so s and S are spelled out.
-			case ${f#-} in
-			*s* | *S*) die 2 "'$f' carries a forbidden shorthand grouped with other flags (see MUTATE_FORBIDDEN)" ;;
+		for e in ${FORBIDDEN_EXACT[@]+"${FORBIDDEN_EXACT[@]}"}; do
+			case $f in
+			"$e" | "$e"=*) die 2 "'$f' breaks the one-line-per-mutant contract and would make the denominator and this gate meaningless (see MUTATE_FORBIDDEN)" ;;
 			esac
-			;;
-		esac
+		done
+		if [[ -n $FORBIDDEN_SHORT_CLASS && $f == -[!-]?* ]]; then
+			case ${f#-} in
+			*[$FORBIDDEN_SHORT_CLASS]*) die 2 "'$f' carries a forbidden shorthand grouped with other flags (see MUTATE_FORBIDDEN)" ;;
+			esac
+		fi
 	done
 }
 
@@ -467,21 +474,17 @@ if [[ -n ${MUTATE_EXTRA_FLAGS:-} ]]; then
 	# shellcheck disable=SC2206
 	EXTRA_FLAGS=($MUTATE_EXTRA_FLAGS)
 fi
-reject_forbidden "${ENGINE_FLAGS[@]}" ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}
+# Split the way the call site splits it: $ENGINE is invoked unquoted, so that is where a flag slips through.
+# shellcheck disable=SC2206
+ENGINE_WORDS=($ENGINE)
+reject_forbidden "${ENGINE_FLAGS[@]}" ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} ${ENGINE_WORDS[@]+"${ENGINE_WORDS[@]}"}
 
-# --- scope precheck ---------------------------------------------------------
-# gremlins silently falls back to the whole module when the diff is empty, so a
-# PR with no Go code would launch a ten-minute full-module measurement inside a
-# four-minute job and get cut by the platform. The scope is the COMMITTED diff,
-# not the index: a file that is only staged is invisible here and invisible to
-# the check, which is what makes a staged-only fixture prove nothing.
+# --- scope precheck: gremlins silently falls back to the whole module on an empty diff
+# Without this a PR with no Go code launches a full-module run inside a short job.
+# The scope is the COMMITTED diff, not the index.
 SCOPE_ARGS=()
 if [[ $MODE == diff ]]; then
-	# ONE string, verified and then diffed. The two used to differ: the check
-	# resolved `origin/$BASE` while the diff asked for `$BASE`, and on a runner
-	# there is no local `main`, so the diff failed and its empty output was read
-	# as "nothing to mutate". A green from an unresolvable base is the exact hole
-	# this check exists to close.
+	# ONE string, verified and then diffed: they used to differ, and on a runner the bare name fails to resolve.
 	if ! git rev-parse --verify --quiet "$BASE" >/dev/null 2>&1; then
 		_out "- **no measurement**: the base ref \`$BASE\` could not be resolved, so the set of files to mutate is unknown."
 		_out "- An empty diff from an unresolved base is indistinguishable from a PR with no changes, and treating them alike is the hole this check closes."
@@ -490,8 +493,7 @@ if [[ $MODE == diff ]]; then
 		die 1 "base ref $BASE could not be resolved"
 	fi
 	SCOPE_ARGS=(--diff "$BASE")
-	# A diff that cannot be computed is an ERROR, not an empty scope: `git diff`
-	# printing nothing on failure is the same bytes as a diff with no Go files.
+	# A diff that cannot be computed is an ERROR: `git diff` printing nothing on failure is a diff with no Go files.
 	if ! git diff --name-only "$BASE...HEAD" >"$SCOPE_FILE.all"; then
 		rm -f "$SCOPE_FILE.all"
 		_out "- **no measurement**: the diff against \`$BASE\` could not be computed, so the scope is unknown."
@@ -506,15 +508,12 @@ else
 fi
 ANNOUNCED_COUNT=$(grep -cvE '^[[:space:]]*$' "$SCOPE_FILE" || true)
 
-# Published before any early exit, so the artifact upload knows the paths even
-# when the run stops at the precheck. A red with no log attached is a red nobody
-# can act on.
+# Published before any early exit, so the upload attaches the log even when the run stops at the precheck.
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
 	{
 		printf 'report=%s\n' "$REPORT"
 		printf 'run_log=%s\n' "$RUN_LOG"
 		printf 'scope=%s\n' "$MODE"
-		printf 'expected_total=%s\n' 0
 	} >>"$GITHUB_OUTPUT"
 fi
 
@@ -532,10 +531,7 @@ write_budget_file() {
 }
 write_budget_file
 
-# A PR with no Go files at all is a green that says out loud that nothing was
-# measured. It is decided by the PRE-CHECK and never rederived from a missing
-# report: "the diff has nothing to mutate" deduced from "no report" is the same
-# lie in a different place.
+# Decided by the PRE-CHECK, never rederived from a missing report: re-deriving moves the lie, it does not fix it.
 if [[ $ANNOUNCED_COUNT -eq 0 ]]; then
 	_out "- **nothing to mutate**: the scope against \`$BASE\` contains no .go files, so no mutation run was launched."
 	_out "- **no mutation was measured.** This is a result, not a failure."
@@ -553,16 +549,11 @@ command -v jq >/dev/null 2>&1 ||
 [[ -f $ALLOWLIST ]] ||
 	die 2 "no $ALLOWLIST, so the gate has nothing to compare survivors against; seed it with: make mutate-all"
 
-# A report from an earlier run must never be read as this run's. The working tree
-# survives between local runs, so this is not hypothetical.
+# The working tree survives between local runs, so a stale report must never be read as this one's.
 rm -f "$REPORT" "$RUN_LOG"
 
-# --- warm -------------------------------------------------------------------
-# Cache primer only, and deliberately NOT the source of the denominator: -run '^$'
-# builds the instrumented packages and runs zero suites, so its duration is build
-# time, and ceil(cap/build_time) is a cap nobody agreed to. The dry-run below is
-# where elapsed is measured, because it runs the same coverage pass before the
-# engine exists. go already parallelises the build, so this is not parallelised.
+# --- warm: a cache primer only, never the source of the denominator
+# -run '^$' builds the instrumented packages and runs zero suites, so its duration is build time.
 echo "mutate: warming the build cache…" >&2
 go test -coverpkg "$COVERPKG" -run '^$' ./... >/dev/null 2>&1 || true
 
@@ -574,61 +565,68 @@ trap "rm -f '$DRY_OUT'" EXIT
 $ENGINE "${SCOPE_ARGS[@]}" --dry-run "${ENGINE_FLAGS[@]}" ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} >"$DRY_OUT" 2>&1
 DRY_RC=$?
 
-# The footer says "done in 8.858216525s" (coverage.go, log.Infof over a
-# time.Duration) and a duration prints as "8,858216525s" under a Spanish locale,
-# so only the digits are taken and the decimal comma is normalised.
-cov_secs=$(sed -n 's/.*done in \([0-9,.]*\)s.*/\1/p' "$DRY_OUT" | tail -1 | tr ',' '.')
-if [[ -z $cov_secs ]] || ! awk -v c="$cov_secs" 'BEGIN{exit !(c+0 > 0)}'; then
+# The dry-run is the denominator's source, so a failed one is not a warning.
+# Its exit code used to be quoted only in the next error's message and never checked.
+if [[ $DRY_RC -ne 0 ]]; then
 	tail -n 25 "$DRY_OUT" >&2
-	die 2 "the dry-run reported no measurable coverage time, so the per-mutant cap cannot be derived (engine exit $DRY_RC)"
+	die 2 "the dry-run exited $DRY_RC, so neither the denominator nor the coverage time it reports can be trusted"
 fi
 
-# Counted with the same expression the supervisor counts with: wc -l on that log
-# would also count "Starting...", "done in ..." and the footer, which would make
-# the supervisor declare a healthy run finished early.
-TOTAL=$(grep -cE "$PROGRESS_RE" "$DRY_OUT" || true)
+cov_secs=$(_go_duration_secs "$(sed -n 's/.*done in \([^[:space:]]*\).*/\1/p' "$DRY_OUT" | tail -1)")
+if [[ -z $cov_secs ]]; then
+	tail -n 25 "$DRY_OUT" >&2
+	die 2 "the dry-run reported no measurable coverage time, so the per-mutant cap cannot be derived (dry-run exit $DRY_RC)"
+fi
 
-# ceil(cap / elapsed) as an integer, because an absolute per-mutant timeout does
-# not exist in gremlins: this multiplier over the coverage duration is the only
-# lever there is.
+# Two counts: WATCH_LINES is every mutant CONSIDERED (the supervisor's denominator, SKIPPED included).
+# EXPECTED_MEASURED is the in-scope subset the verdict compares against. See AGENTS.md.
+WATCH_LINES=$(grep -cE "$PROGRESS_RE" "$DRY_OUT" || true)
+EXPECTED_MEASURED=$(grep -E "$PROGRESS_RE" "$DRY_OUT" | grep -cvE '^[[:space:]]*SKIPPED ' || true)
+
+# ceil(cap / elapsed) as an integer: it is the only per-mutant lever gremlins has.
 COEF=$(awk -v cap="$CAP_SECS" -v el="$cov_secs" 'BEGIN{printf "%d", (cap/el==int(cap/el)) ? cap/el : int(cap/el)+1}')
 PER_MUTANT=$(awk -v el="$cov_secs" -v k="$COEF" 'BEGIN{printf "%d", el*k+2}')
 
 echo "mutate: coverage ${cov_secs}s -> coefficient $COEF (per-mutant ceiling ~${PER_MUTANT}s, cap $CAP)" >&2
-echo "mutate: $WORKERS workers, $TOTAL mutants expected, $ANNOUNCED_COUNT files in scope" >&2
+echo "mutate: $WORKERS workers, $EXPECTED_MEASURED in scope of $WATCH_LINES considered, $ANNOUNCED_COUNT files in the announced scope" >&2
 
 if [[ $DRY -eq 1 ]]; then
 	echo "mutate: --dry: warmed and enumerated, nothing mutated" >&2
 	exit 0
 fi
 
-# --- supervise --------------------------------------------------------------
-# No exec: this script always has a verdict left to write, and exec would hand
-# the process to the supervisor and take with it the ability to tell 124 from a
-# failed mutation. Dropping exec does not weaken the group kill — being the
-# direct parent and giving the engine its own group are properties of
-# watchdog.sh, which creates its own pgid and refuses to run if it could not.
-echo "mutate: supervising (stall $STALL, ceiling $CEILING, $TOTAL expected progress lines)" >&2
-"$WATCHDOG" "$STALL" "$CEILING" "$TOTAL" "$PROGRESS_RE" -- \
+# The measured half of the budget invariant, checked where it can still save the run.
+if [[ $JOB_CEILING_SECS -gt 0 && $JOB_START =~ ^[0-9]+$ && $JOB_START -gt 0 ]]; then
+	elapsed=$(( $(date +%s) - JOB_START ))
+	remaining=$(( JOB_CEILING_SECS - elapsed ))
+	[[ $remaining -gt $CEILING_SECS ]] ||
+		die 2 "not enough job budget left to supervise: ${remaining}s of $JOB_CEILING remain after ${elapsed}s already spent, and the supervisor alone can take $CEILING ($CEILING_SECS). Raise timeout-minutes or lower MUTATE_CEILING."
+	echo "mutate: job budget: ${elapsed}s spent, ${remaining}s left, supervisor ceiling ${CEILING_SECS}s" >&2
+fi
+
+# --- supervise: no exec, because it would take away the ability to tell 124 from a failed mutation
+echo "mutate: supervising (stall $STALL, ceiling $CEILING, $WATCH_LINES progress lines to watch)" >&2
+# stderr is folded into the SAME log: the supervisor's reasons go to its stderr, and a stdout-only
+# tee dropped the one line that explains a 124, so the verdict printed "reason not found in the log".
+# It cannot disturb the TIMED OUT cross-check: the supervisor prefixes every line with its own name.
+"$WATCHDOG" "$STALL" "$CEILING" "$WATCH_LINES" "$PROGRESS_RE" -- \
 	$ENGINE "${SCOPE_ARGS[@]}" "${ENGINE_FLAGS[@]}" \
 	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" \
-	${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} |
+	${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} 2>&1 |
 	tee "$RUN_LOG"
 
-# Taken immediately, because under pipefail a pipeline's status is "the last
-# non-zero": a tee that failed on ENOSPC would read as a failed mutation run.
+# Taken immediately: under pipefail a pipeline's status is "the last non-zero", so a failed tee would read as a failed run.
 ENGINE_RC=${PIPESTATUS[0]}
 
 echo "mutate: engine exit $ENGINE_RC, log $RUN_LOG, report $REPORT" >&2
 
-# One path for producer, verdict and upload: they cannot disagree if they are
-# told the same one. The scope step already published these; only the count is
-# final now.
+# One path for producer, verdict and upload, so they cannot disagree if told the same one.
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
-	printf 'expected_total=%s\n' "$TOTAL" >>"$GITHUB_OUTPUT"
+	printf 'expected_total=%s\n' "$EXPECTED_MEASURED" >>"$GITHUB_OUTPUT"
+	printf 'watch_lines=%s\n' "$WATCH_LINES" >>"$GITHUB_OUTPUT"
 fi
 
-_verdict "$REPORT" "$RUN_LOG" "$ALLOWLIST" "$TOTAL" "$ENGINE_RC" "$SCOPE_FILE" "$BUDGET_FILE"
+_verdict "$REPORT" "$RUN_LOG" "$ALLOWLIST" "$EXPECTED_MEASURED" "$ENGINE_RC" "$SCOPE_FILE" "$BUDGET_FILE"
 rc=$?
 _flush_summary "$SUMMARY" 'Mutation testing'
 exit "$rc"
