@@ -1,232 +1,232 @@
-# TODOLIST — cobertura al 100%
+# TODOLIST — coverage to 100%
 
-Objetivo: que ningún statement del módulo quede sin ejecutar, y que un gate de CI
-lo impida.
+Goal: no statement of the module left unexecuted, and a CI gate that prevents it.
 
-## Cómo medir (no te fíes de `go test -cover` a secas)
+## How to measure (do not trust bare `go test -cover`)
 
-`go test -coverpkg ./...` escribe **cada bloque una vez por test binary** (13
-paquetes aquí, y en la práctica 22 copias). Sumar en crudo da ~10% y no significa
-nada. Hay que deduplicar por rango y quedarse con el `count` máximo:
+`go test -coverpkg ./...` writes **each block once per test binary** (13 packages
+here, and in practice 22 copies). Adding them raw gives ~10% and means nothing.
+You have to deduplicate by range and keep the maximum `count`:
 
 ```bash
 go clean -testcache && go test -coverpkg ./... -coverprofile=/tmp/cov.out ./...
-# -> deduplicar por bloque, max(count); covered/total
+# -> deduplicate by block, max(count); covered/total
 ```
 
-Estado medido al abrir este documento: **96.67% (2697/2790), 85 bloques sin cubrir**.
-Progreso: **98.35% (2750/2796), 41 sin cubrir**.
+State measured when this document was opened: **96.67% (2697/2790), 85 blocks
+uncovered**. Progress: **98.35% (2750/2796), 41 uncovered**.
 
-Meta: 2790/2790.
+Target: 2790/2790.
 
-## Regla de este todolist
+## Rule of this todolist
 
-- Cada casilla se marca `[x]` **solo** cuando el bloque tiene `count>0` en un
-  perfil deduplicado, no cuando el test pasa.
-- Un test que pasa no prueba cobertura: `TestToastVacioNoSeEncola` falló
-  primero por un caso mal entendido. Medir después de escribir.
-- Si un bloque resulta inalcanzable (ver §inalcanzables), se documenta aquí con
-  el porqué y se excluye del gate explícitamente. No se borra ni se maquilla.
-
----
-
-## [x] Base de partida
-
-- [x] Medir la cobertura real con el denominador deduplicado (era 94.9%, no 100)
-- [x] Clasificar los 132 bloques: `count=0` real / bug de gremlins / sin bloque
-
-## [x] `const` de paquete — no los instrumenta Go (8 mutantes)
-
-- [x] `actionTimeout`, `commandTimeout`, `toastDuration` → funciones de una línea
-- [x] `tool.DefaultTimeout` → función
-- [x] `prMinBodyLines`, `prMinWidth` → funciones
-- [x] `TestPlazosEnUnidades` afirma en unidades, no contra la fuente
-
-## [x] Seam de handoff (el techo de la TUI)
-
-- [x] Campo `handoff handoffFunc` en `Model`, default `tea.ExecProcess`
-- [x] `handoffSpy` que no cede la terminal y expone `salir(err)`
-- [x] Los 5 handoffs ejecutados enteros: editor, lazygit, shell, `p a`, visual
-
-## [x] Ramas que existían y nadie miraba
-
-- [x] `renderGroupSummary`: `errors` y `wt` (nunca activados)
-- [x] `activityIndicator`: `case m.scanning` (`New` deja `scanning=true`)
-- [x] `renderGroupSummary` en modo worktree
+- A box is marked `[x]` **only** when the block has `count>0` in a deduplicated
+  profile, not when the test passes.
+- A passing test does not prove coverage: `TestToastEmptyNotIsQueues` failed
+  first because of a misunderstood case. Measure after writing.
+- If a block turns out to be unreachable (see §unreachable), it is documented here
+  with the why and explicitly excluded from the gate. It is neither deleted nor
+  glossed over.
 
 ---
 
-## Pendiente por fichero
+## [x] Starting point
 
-### `internal/tui/update.go` — 13 → quedan 4
+- [x] Measure the real coverage with the deduplicated denominator (it was 94.9%, not 100)
+- [x] Classify the 132 blocks: real `count=0` / gremlins bug / no block
 
-- [x] `31.23,34.16` — `spinner.TickMsg` (hay que mandarlo a mano: lo emite el spinner)
-- [x] `221.2` — `return m, nil` para un msg desconocido
-- [x] `421,432` — `!HasRepo` y sin fila en el comando `!` + `enter`
-- [x] `592,596` — `busyActionCmd`: ocupado y libre
-- [x] `635` — `toggleFold` sin fila (no-op, cursor quieto)
-- [x] `770,783` — `visualPrompt`/`removePrompt`/`promptLine` sin armar
+## [x] Package `const` — Go does not instrument them (8 mutants)
+
+- [x] `actionTimeout`, `commandTimeout`, `toastDuration` → one-line functions
+- [x] `tool.DefaultTimeout` → function
+- [x] `prMinBodyLines`, `prMinWidth` → functions
+- [x] `TestDeadlinesInUnits` asserts in units, not against the source
+
+## [x] The handoff seam (the TUI's ceiling)
+
+- [x] `handoff handoffFunc` field in `Model`, default `tea.ExecProcess`
+- [x] `handoffSpy` that does not give up the terminal and exposes `exit(err)`
+- [x] The 5 handoffs executed whole: editor, lazygit, shell, `p a`, visual
+
+## [x] Branches that existed and nobody looked at
+
+- [x] `renderGroupSummary`: `errors` and `wt` (never enabled)
+- [x] `activityIndicator`: `case m.scanning` (`New` leaves `scanning=true`)
+- [x] `renderGroupSummary` in worktree mode
+
+---
+
+## Pending per file
+
+### `internal/tui/update.go` — 13 → 4 left
+
+- [x] `31.23,34.16` — `spinner.TickMsg` (it has to be sent by hand: the spinner emits it)
+- [x] `221.2` — `return m, nil` for an unknown msg
+- [x] `421,432` — `!HasRepo` and no row in the `!` command + `enter`
+- [x] `592,596` — `busyActionCmd`: busy and free
+- [x] `635` — `toggleFold` with no row (no-op, cursor still)
+- [x] `770,783` — `visualPrompt`/`removePrompt`/`promptLine` with nothing armed
 - [ ] `66.74,68.5` — `statusMsg.err` / `rebaseInProgress`
-- [ ] `538.22` — `sendEvent` de un collect que sí terminó
-- [ ] `711` — `vars["branch"]` de un worktree
+- [ ] `538.22` — `sendEvent` of a collect that did finish
+- [ ] `711` — `vars["branch"]` of a worktree
 
-### `internal/tui/app.go` — 22 → quedan 15
+### `internal/tui/app.go` — 22 → 15 left
 
-- [x] `200` — `visualOptionForKey` con tecla desconocida
-- [x] `412` — `NotifyConfig` (el aviso tiene que verse, no irse a stderr)
-- [x] `616` — `removeWorktreeCmd` con el padre ocupado
-- [x] `647` — `recollectCmd` con el repo ocupado
-- [x] `701` — `openLazygitCmd` con el repo ocupado (orden de las dos guardas)
-- [x] `930` — `startVisualCmd` con el repo ocupado
-- [x] `998` — `execExit` con un `*exec.ExitError` real (exit 3)
-- [x] `1013` — `logIntent` con recorder apagado
-- [x] `1066` — `saveCollapsed` con store nil
-- [ ] `417` — `Init()` (arranca scan + ticker de 1s)
-- [ ] `430` — `startScanCmd` con evento que no es `scanMsg`
-- [x] `446` — `tickCmd` (su `tea.Cmd` se invoca: 1s reales, y emite el tick)
-- [ ] `468` — `ctx.Err() != nil` en el colector
+- [x] `200` — `visualOptionForKey` with an unknown key
+- [x] `412` — `NotifyConfig` (the warning has to be visible, not go to stderr)
+- [x] `616` — `removeWorktreeCmd` with the parent busy
+- [x] `647` — `recollectCmd` with the repo busy
+- [x] `701` — `openLazygitCmd` with the repo busy (order of the two guards)
+- [x] `930` — `startVisualCmd` with the repo busy
+- [x] `998` — `execExit` with a real `*exec.ExitError` (exit 3)
+- [x] `1013` — `logIntent` with the recorder off
+- [x] `1066` — `saveCollapsed` with a nil store
+- [ ] `417` — `Init()` (starts the scan + the 1s ticker)
+- [ ] `430` — `startScanCmd` with an event that is not `scanMsg`
+- [x] `446` — `tickCmd` (its `tea.Cmd` is invoked: real 1s, and it emits the tick)
+- [ ] `468` — `ctx.Err() != nil` in the collector
 - [ ] `477` — `sendEvent(collectDoneMsg)`
-- [ ] `487` — `!p.HasRepo` en el fetch automático
-- [ ] `494` — repo ya en `fetchStates["fetching"]`
-- [ ] `766` — worktree no encontrado
-- [ ] `789` — marcador ilegible en `p a`
-- [ ] `821` — `openPullAICmd`, camino feliz con el seam
-- [ ] `835` — `pullAIArgv` con error
-- [ ] `879` — `startVisualCmd`, camino feliz con git-sim en PATH
+- [ ] `487` — `!p.HasRepo` in the automatic fetch
+- [ ] `494` — repo already in `fetchStates["fetching"]`
+- [ ] `766` — worktree not found
+- [ ] `789` — unreadable marker in `p a`
+- [ ] `821` — `openPullAICmd`, happy path with the seam
+- [ ] `835` — `pullAIArgv` with an error
+- [ ] `879` — `startVisualCmd`, happy path with git-sim in PATH
 
 ### `internal/tui/table.go` — 0 · `detail.go` — 0 · `sections.go` — 2
 
-- [x] `table.go` — `styleFor` entero, glifo de header, `worktreeHidden` en
-      `summary`, `repoExpanded` inducido por búsqueda, `(detached)` sin sha
-- [x] `detail.go` — detached con rama, rama vacía, sin upstream, worktree en otra raíz
-- [ ] `sections.go 128` — `onlyDirty` en la cabecera de stats
-- [ ] `sections.go 289` — `[worktree]` en el título de la ficha
+- [x] `table.go` — whole `styleFor`, header glyph, `worktreeHidden` in
+      `summary`, `repoExpanded` induced by search, `(detached)` with no sha
+- [x] `detail.go` — detached with a branch, empty branch, no upstream, worktree in another root
+- [ ] `sections.go 128` — `onlyDirty` in the stats header
+- [ ] `sections.go 289` — `[worktree]` in the card's title
 
 ### `internal/tui/proverlay.go` — 0
 
-- [x] `193` — `openPR` con `logOpen` (segunda red de la guarda)
-- [x] `408` — `prParams()` con `m.pr == nil`
-- [x] `492` — `draftLabel` con draft a true
-- [x] `507` — `prPrompt()` con `m.pr == nil`
+- [x] `193` — `openPR` with `logOpen` (the guard's second net)
+- [x] `408` — `prParams()` with `m.pr == nil`
+- [x] `492` — `draftLabel` with draft true
+- [x] `507` — `prPrompt()` with `m.pr == nil`
 
 ### `internal/tui/toast.go` — 3
 
-- [ ] `183` — `head == ""` en el corte por anchura (salvaguarda de progreso)
-- [ ] `206` — `len(lines) == 0` tras envolver
-- [ ] `248` — bloque de altura 0 en el apilado
+- [ ] `183` — `head == ""` in the width cut (progress safeguard)
+- [ ] `206` — `len(lines) == 0` after wrapping
+- [ ] `248` — zero-height block in the stacking
 
 ### `internal/tui/prcreate.go` — 2 · `cmdlogpanel.go` — 1 · `bordered.go` — 0
 
-- [ ] `prcreate.go 62` — `sub == nil` al resolver el flag de base
+- [ ] `prcreate.go 62` — `sub == nil` when resolving the base flag
 - [ ] `prcreate.go 101` — `bin == "" || len(argv) == 0`
-- [ ] `cmdlogpanel 176` — `cmdline` vacía → `-`
-- [x] `bordered 90,93` — `leftChar`/`rightChar` vacíos
+- [ ] `cmdlogpanel 176` — empty `cmdline` → `-`
+- [x] `bordered 90,93` — empty `leftChar`/`rightChar`
 
-### `cmd/gitdash/` — 11 → quedan 4
+### `cmd/gitdash/` — 11 → 4 left
 
-- [x] `main.go 52,57,58` — `depsProd`: las cinco funciones no son nil y `load` lee de verdad
-- [x] `main.go 65` — `run(printMode, eout)` con deps reales
-- [x] `print.go 51,57,62,65,69` — worktree duplicado, sufijo `[wt]`, detached,
-      rama vacía, contador de worktrees (se extrajo `printRowOf` para poder
-      probarlos sobre filas fabricadas: un HEAD real no se puede dejar detached)
-- [x] `main.go 21` — `func main()`, en un SUBPROCESO (`go build -cover` + exec +
-      `GOCOVERDIR` + `covdata textfmt`, y el test FALLA si el perfil no trae el
-      bloque). **Ojo**: ejercitado de verdad, pero su contador no llega al perfil
-      combinado de `-coverpkg ./...` que usa el gate, así que sale a 0 en la
-      métrica global. Los contadores de un subproceso hay que fusionarlos a mano.
-- [x] `main.go 57,58` — los dos closures de `depsProd`
-- [ ] `print.go 29` — error de `discovery.Scan` a stderr
+- [x] `main.go 52,57,58` — `depsProd`: the five functions are not nil and `load` really reads
+- [x] `main.go 65` — `run(printMode, eout)` with real deps
+- [x] `print.go 51,57,62,65,69` — duplicated worktree, `[wt]` suffix, detached,
+      empty branch, worktree counter (`printRowOf` was extracted so they could be
+      tested over fabricated rows: a real HEAD cannot be left detached)
+- [x] `main.go 21` — `func main()`, in a SUBPROCESS (`go build -cover` + exec +
+      `GOCOVERDIR` + `covdata textfmt`, and the test FAILS if the profile does not
+      carry the block). **Careful**: exercised for real, but its counter does not
+      reach the combined profile of `-coverpkg ./...` that the gate uses, so it
+      reads 0 in the global metric. A subprocess's counters have to be merged by
+      hand.
+- [x] `main.go 57,58` — the two `depsProd` closures
+- [ ] `print.go 29` — `discovery.Scan` error to stderr
 
-### `internal/discovery/scan.go` — 7 → quedan 5
+### `internal/discovery/scan.go` — 7 → 5 left
 
-- [x] `47,57` — roots inexistentes y que son un fichero (error agregado)
-- [x] `85` — `WalkDir` sobre un directorio sin permiso (se salta, no aborta)
-- [x] `173` — `MarkerPrompt` con marcador inexistente (vacío, no error)
-- [x] `187` — `MarkerPrompt` con marcador malformado (sí error)
-- [x] `222` — `.git` ilegible por permisos
-- [ ] `100` — el walk que ABORTA (devuelve error, no solo salta)
+- [x] `47,57` — nonexistent roots and ones that are a file (aggregated error)
+- [x] `85` — `WalkDir` over a directory without permission (it skips, it does not abort)
+- [x] `173` — `MarkerPrompt` with a nonexistent marker (empty, not an error)
+- [x] `187` — `MarkerPrompt` with a malformed marker (yes, error)
+- [x] `222` — `.git` unreadable due to permissions
+- [ ] `100` — the walk that ABORTS (returns an error, not just skips)
 
-Nota: los tests de permisos se saltan si el proceso corre como root, que no
-puede impedirse leer un 0o000. Aquí no es root, pero en un contenedor de CI puede
-darse: si se saltan, el bloque vuelve a estar sin cubrir sin que nadie se entere.
+Note: the permission tests are skipped if the process runs as root, which cannot
+be prevented from reading a 0o000. Here it is not root, but in a CI container it
+can happen: if they get skipped, the block is uncovered again with nobody noticing.
 
 ### `internal/gitstatus/status.go` — 2 · `state.go` — 2 · `cache.go` — 1
 
-- [x] `status.go 140` — `syncBehind` a una ref inexistente → `known=false`
-- [x] `status.go 176` — `StreamPool` con contexto ya cancelado
-- [x] `status.go 333` — `FailureReason` sin salida / solo hints
-- [ ] `status.go 263` — `rev-parse` devolviendo vacío
-- [ ] `state.go 70` — `json.Marshal` fallando (mapa no serializable)
-- [ ] `state.go 78` — `os.WriteFile` fallando
-- [ ] `cache.go 106` — `json.MarshalIndent` fallando
+- [x] `status.go 140` — `syncBehind` on a nonexistent ref → `known=false`
+- [x] `status.go 176` — `StreamPool` with the context already cancelled
+- [x] `status.go 333` — `FailureReason` with no output / hints only
+- [ ] `status.go 263` — `rev-parse` returning empty
+- [ ] `state.go 70` — `json.Marshal` failing (unserialisable map)
+- [ ] `state.go 78` — `os.WriteFile` failing
+- [ ] `cache.go 106` — `json.MarshalIndent` failing
 
 ### `internal/config/config.go` — 1 · `internal/forge/parse.go` — 1
 
-- [ ] `config.go 417` — `label = key` **hecho con `t.Cleanup`, reverificar**
-- [ ] `parse.go 70` — `RepoRef` con `Host` conocido y sin segmentos
+- [ ] `config.go 417` — `label = key` **done with `t.Cleanup`, re-verify**
+- [ ] `parse.go 70` — `RepoRef` with a known `Host` and no segments
 
 ---
 
-## Inalcanzables (decidir antes del gate)
+## Unreachable (decide before the gate)
 
-Estos no los cubre ningún test sin cambiar el código o la métrica:
+No test covers these without changing the code or the metric:
 
-**Nada de esto quedó inalcanzable.** Los tres casos que había dado por perdidos
-salen, y la lección es que "no se puede testear" y "no lo he pensado" se parecen
-mucho:
+**Nothing here ended up unreachable.** The three cases that had been written off
+as lost come out, and the lesson is that "it cannot be tested" and "I never
+thought about it" look a lot alike:
 
-1. ~~`internal/testutil` — 8 bloques de `t.Fatal`.~~ **Resuelto, 8 → 1.** Los
-   helpers tomato un `TB` (interface con `Helper`/`Fatal`/`Fatalf`/`TempDir`) en
-   vez de `*testing.T`, y `MockTB` registra el fallo en vez de matar el proceso.
-   `*testing.T` satisface el interface, así que las 160 llamadas del repo no
-   cambian. El fallo se provoca DE VERDAD: un fichero donde debería ir el
-   directorio da ENOTDIR.
-2. ~~`func main()`.~~ **Resuelto** (ver `cmd/main.go` en el todolist).
-3. ~~`tea.Tick`.~~ **Resuelto**: `tea.Tick` devuelve una `tea.Cmd` que se puede
-   invocar directamente. Cuesta 1s por test y ejecuta el closure.
+1. ~~`internal/testutil` — 8 `t.Fatal` blocks.~~ **Resolved, 8 → 1.** The helpers
+   take a `TB` (an interface with `Helper`/`Fatal`/`Fatalf`/`TempDir`) instead of
+   `*testing.T`, and `MockTB` records the failure instead of killing the process.
+   `*testing.T` satisfies the interface, so the repo's 160 calls do not change.
+   The failure is provoked FOR REAL: a file where the directory should be gives
+   ENOTDIR.
+2. ~~`func main()`.~~ **Resolved** (see `cmd/main.go` in the todolist).
+3. ~~`tea.Tick`.~~ **Resolved**: `tea.Tick` returns a `tea.Cmd` that can be
+   invoked directly. It costs 1s per test and runs the closure.
 
-Lo que **sí** queda fuera del objetivo, y no por inalcanzable:
+What **does** stay outside the goal, and not because it is unreachable:
 
-4. **Los 83 NOT COVERED de mutación.** No son cobertura: 36 son un bug del
-   lookup de gremlins (ver `WATCHDOG-PLAN.md` §0) y 47 son condiciones de `case`,
-   que Go instrumenta desde la columna del cuerpo. El refactor `switch`→`if` se
-   probó y **no los baja**.
+4. **The 83 mutation NOT COVERED.** They are not coverage: 36 are a bug in
+   gremlins' lookup (see `WATCHDOG-PLAN.md` §0) and 47 are `case` conditions,
+   which Go instruments from the body's column. The `switch`→`if` refactor was
+   tried and **does not bring them down**.
 
 ---
 
-## El gate — HECHO
+## The gate — DONE
 
-Dos capas, porque cubrenbergerentes cosas distintas y una sin la otra deja un
-agujero. Verde y verificado con 6 casos.
+Two layers, because they cover different things and one without the other leaves
+a hole. Green and verified with 6 cases.
 
-- [x] `scripts/diff-coverage.sh` — el diff de este cambio al 100% (quien toca el
-      codigo lo testea; lo viejo no bloquea un PR)
-- [x] `scripts/coverage-floor` — el suelo del total, commiteado, solo sube
-- [x] `make coverage` / `make coverage-check` — `-coverpkg ./...` + el perfil del
-      subproceso de `main()`
-- [x] step de CI, con `fetch-depth: 0` (sin historial el diff es no-op y el
-      gate aprueba en silencio)
+- [x] `scripts/diff-coverage.sh` — this change's diff at 100% (whoever touches the
+      code tests it; the old code does not block a PR)
+- [x] `scripts/coverage-floor` — the total's floor, committed, only goes up
+- [x] `make coverage` / `make coverage-check` — `-coverpkg ./...` + the profile of
+      `main()`'s subprocess
+- [x] CI step, with `fetch-depth: 0` (without history the diff is a no-op and the
+      gate approves in silence)
 
-Estado: **diff 100% (368/368) · total 98.17% · suelo 98.17%**
+State: **diff 100% (368/368) · total 98.17% · floor 98.17%**
 
-Fallos que tenia y como se detectaron, porque todos eran **aprobados
-silenciosos**:
+The failures it had and how they were detected, because they were all **silent
+passes**:
 
 | | |
 |---|---|
-| prefijo del módulo mal (`gitdash//`) | ninguna ruta casaba → "sin líneas tocadas" → aprobado |
-| comentarios contados como statements | el diff salía 55% en vez de 99% |
-| perfil extra inexistente se ignoraba | el gate pasaba sin el perfil de `main()` |
-| CI sin historial | `git diff main...HEAD` vacío → aprobado |
-| suelo comparado en float crudo | fallaba por 0.001 |
+| wrong module prefix (`gitdash//`) | no path matched → "no lines touched" → passed |
+| comments counted as statements | the diff came out 55% instead of 99% |
+| a nonexistent extra profile was ignored | the gate passed without `main()`'s profile |
+| CI without history | `git diff main...HEAD` empty → passed |
+| floor compared as a raw float | it failed by 0.001 |
 
-Los dos primeros lo cazó mirar la salida; los otros tres, probando que el gate
-**falla** cuando debe (con `--min 101`, con suelo a 99.99, sin perfil, y
-añadiendo una función sin tests).
+The first two were caught by looking at the output; the other three by proving
+that the gate **fails** when it should (with `--min 101`, with the floor at 99.99,
+with no profile, and by adding a function with no tests).
 
-### Lo que queda de este documento
+### What is left of this document
 
-Sigue habiendo cobertura por subir (el pump de eventos de `app.go` sobre todo),
-pero **no bloquea el gate**: nada de eso está en el diff de ningún PR. El 100%
-del diff es por construcción alcanzable, porque solo mira lo que se toca.
-
+There is still coverage to raise (`app.go`'s event pump above all), but it
+**does not block the gate**: none of it is in any PR's diff. The diff's 100% is
+reachable by construction, because it only looks at what is touched.

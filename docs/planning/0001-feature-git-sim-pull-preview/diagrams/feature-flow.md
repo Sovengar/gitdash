@@ -1,38 +1,38 @@
-# Flujo de la feature — Preview visual con git-sim
+# Feature flow — Visual preview with git-sim
 
-Derivado de `behavior.feature`. Camino paralelo al selector de `p`.
+Derived from `behavior.feature`. A path parallel to `p`'s selector.
 
 ```mermaid
 flowchart TD
-    A[Cursor sobre un repo] --> B{¿Pulsa v?}
-    B -- no --> Z[Otras teclas: flujo normal]
-    B -- sí --> C{¿Hay fila de repo?}
+    A[Cursor on a repo] --> B{Presses v?}
+    B -- no --> Z[Other keys: normal flow]
+    B -- yes --> C{Is there a repo row?}
     C -- no --> T1[toast: no git repo]
-    C -- sí --> D[arma visualArmed<br/>captura path + upstream]
-    D --> E[[promptLine pinta el aviso<br/>en keybinds]]
+    C -- yes --> D[arms visualArmed<br/>captures path + upstream]
+    D --> E[[promptLine paints the warning<br/>in keybinds]]
 
-    E --> K{Segunda tecla}
-    K -- "p / m / r" --> V{variante}
-    K -- otra tecla --> X[desarma y sigue su curso normal]
+    E --> K{Second key}
+    K -- "p / m / r" --> V{variant}
+    K -- another key --> X[disarms and carries on normally]
 
     V -- p --> P1[git-sim --media-dir DIR pull]
-    V -- m --> M1{¿upstream?}
-    V -- r --> R1{¿upstream?}
+    V -- m --> M1{upstream?}
+    V -- r --> R1{upstream?}
     M1 -- no --> T2[toast: no upstream]
     R1 -- no --> T2
-    M1 -- sí --> P2[git-sim --media-dir DIR merge upstream]
-    R1 -- sí --> P3[git-sim --media-dir DIR rebase upstream]
+    M1 -- yes --> P2[git-sim --media-dir DIR merge upstream]
+    R1 -- yes --> P3[git-sim --media-dir DIR rebase upstream]
 
     P1 --> L{LookPath git-sim}
     P2 --> L
     P3 --> L
-    L -- falta --> T3[toast: git-sim not installed]
-    L -- ok --> H[handoff de terminal<br/>ExecProcess cwd=repo]
+    L -- missing --> T3[toast: git-sim not installed]
+    L -- ok --> H[terminal handoff<br/>ExecProcess cwd=repo]
 
-    H --> W[git-sim dibuja y abre la imagen<br/>NO muta el repo real]
-    W --> DONE[execDoneMsg: log argv real, Dur=0<br/>re-colecta el estado]
+    H --> W[git-sim draws and opens the image<br/>does NOT mutate the real repo]
+    W --> DONE[execDoneMsg: log the real argv, Dur=0<br/>re-collect the state]
 
-    P1 --> DIR[(media-dir<br/>caché XDG/gitdash/git-sim<br/>se crea si falta)]
+    P1 --> DIR[(media-dir<br/>XDG cache/gitdash/git-sim<br/>created if missing)]
     P2 --> DIR
     P3 --> DIR
 ```

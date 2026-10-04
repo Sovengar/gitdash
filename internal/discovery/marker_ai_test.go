@@ -8,8 +8,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// writeMarker escribe un marcador con contenido arbitrario (p. ej. la tabla
-// [ai.pull]) en dir.
 func writeMarker(t *testing.T, dir, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"), []byte(content), 0o644); err != nil {
@@ -17,59 +15,53 @@ func writeMarker(t *testing.T, dir, content string) {
 	}
 }
 
-// El prompt se lee del marcador on demand; no se guarda en Project.
-func TestMarkerPromptLeeAIPull(t *testing.T) {
+func TestMarkerPromptReadsAIPull(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir)
-	writeMarker(t, dir, "[ai.pull]\nprompt = \"arreglá el rebase\"\n")
+	writeMarker(t, dir, "[ai.pull]\nprompt = \"fix the rebase\"\n")
 
 	got, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
-	if got != "arreglá el rebase" {
+	if got != "fix the rebase" {
 		t.Errorf("prompt = %q", got)
 	}
 }
 
-// Sin tabla [ai] el prompt es vacío, no un error.
-func TestMarkerPromptAusente(t *testing.T) {
+func TestMarkerPromptMissing(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir)
 	testutil.Marker(t, dir, "api", "", "", false)
 
 	got, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err != nil || got != "" {
-		t.Errorf("prompt/err = %q/%v, want vacío/nil", got, err)
+		t.Errorf("prompt/err = %q/%v, want empty/nil", got, err)
 	}
 }
 
-// Un worktree sintético sin marcador no es un error: simplemente no hay prompt.
-func TestMarkerPromptSinFichero(t *testing.T) {
+func TestMarkerPromptWithoutFile(t *testing.T) {
 	got, err := MarkerPrompt(t.TempDir(), ".gitdash.toml", "pull")
 	if err != nil || got != "" {
-		t.Errorf("prompt/err = %q/%v, want vacío/nil", got, err)
+		t.Errorf("prompt/err = %q/%v, want empty/nil", got, err)
 	}
 }
 
-// Un marcador roto degrada a error (la TUI lo convierte en toast).
-func TestMarkerPromptMalformado(t *testing.T) {
+func TestMarkerPromptMalformed(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir)
 	writeMarker(t, dir, "name = [roto\n")
 
 	if _, err := MarkerPrompt(dir, ".gitdash.toml", "pull"); err == nil {
-		t.Error("se esperaba error con marcador malformado")
+		t.Error("expected an error with a malformed marker")
 	}
 }
 
-// La tabla anidada [ai.pull] parsea limpia: Scan no marca MarkerErr ni la
-// guarda en Project.
-func TestScanToleraTablaAI(t *testing.T) {
+func TestScanToleratesTableAI(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "api")
 	testutil.Init(t, proj)
-	writeMarker(t, proj, "[ai.pull]\nprompt = \"arregla\"\n")
+	writeMarker(t, proj, "[ai.pull]\nprompt = \"fix\"\n")
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -79,6 +71,6 @@ func TestScanToleraTablaAI(t *testing.T) {
 		t.Fatalf("projects = %d, want 1", len(projects))
 	}
 	if projects[0].MarkerErr != "" {
-		t.Errorf("MarkerErr = %q, want vacío", projects[0].MarkerErr)
+		t.Errorf("MarkerErr = %q, want empty", projects[0].MarkerErr)
 	}
 }

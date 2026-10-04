@@ -1,4 +1,3 @@
-// Modo --print: tabla one-shot sin UI, homenaje a git-statuses.
 package main
 
 import (
@@ -16,24 +15,16 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// printRow es la fila de la tabla de salida.
 type printRow struct {
 	name, group, branch, state, upDown, sync, wt, activity, path string
 	score, lastCommit                                            int
 }
 
-// printRowOf compone la fila de un proyecto a partir de su snapshot.
-//
-// Vive aparte del bucle de runPrint porque el mapeo es donde se toman las
-// decisiones que se ven en la tabla (el sufijo [wt], el "(detached)", el "-" de
-// la rama vacía, el contador de worktrees) y porque armado sobre filas
-// fabricadas se puede comprobar cada una: sobre repos reales dependen de que
-// el repo esté en detached, que no se puede provocar a voluntad.
+// Split out because this mapping holds the decisions the table shows ([wt] suffix, "(detached)", the "-" for an empty branch, the worktree count) and each one can be checked on fabricated rows instead of on real repos in detached HEAD, which cannot be provoked at will.
 func printRowOf(p discovery.Project, snap gitstatus.Snapshot) printRow {
 	st := snap.State(p.HasRepo)
 	name := p.Name
 	if p.IsWorktree {
-		// restos visibles solo si su repo principal no está descubierto
 		name += " [wt]"
 	}
 	branch := snap.Status.Branch
@@ -62,8 +53,6 @@ func printRowOf(p discovery.Project, snap gitstatus.Snapshot) printRow {
 	}
 }
 
-// runPrint ejecuta discovery + recolección (sin fetch) e imprime la tabla.
-// Sin repos imprime un mensaje y sale 0.
 func runPrint(cfg config.Config) {
 	projects, err := discovery.Scan(cfg)
 	if err != nil {
@@ -87,20 +76,16 @@ func runPrint(cfg config.Config) {
 
 	rows := make([]printRow, 0, len(projects))
 	for _, p := range projects {
-		// Worktree plegado bajo su repo principal descubierto
 		if p.IsWorktree && p.MainRepo != "" && hasProject(projects, p.MainRepo) {
 			continue
 		}
 		rows = append(rows, printRowOf(p, states[p.Path]))
 	}
 
-	// mismo orden que la TUI: atención-primero, actividad, nombre
+	// Same order as the TUI: attention first, then activity, then name.
 	sortPrintRows(rows)
 
-	// GROUP se conserva en print (tabla plana, sin headers de
-	// grupo); WT = working tree; WTS = contador de worktrees (renombrado
-	// desde WT para liberar la sigla); ↑↓up explícito.
-	// La tabla va a stdout: un fallo de escritura no es accionable aquí.
+	// Column order mirrors the TUI, so both read the same.
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "NAME\tGROUP\tBRANCH\tWT\t↑↓up\tSYNC\tWTS\tACTIVITY\tPATH")
 	for _, r := range rows {
@@ -110,11 +95,7 @@ func runPrint(cfg config.Config) {
 	_ = w.Flush()
 }
 
-// sortPrintRows ordena la tabla como la TUI: atención-primero (score), luego el
-// commit más reciente, luego el nombre sin distinguir mayúsculas. Vive aparte
-// porque es la única forma de probar el orden con filas fabricate: sobre repos
-// reales los commits caen en el mismo segundo y el desempate por fecha no se
-// puede fijar.
+// Split out because it is the only way to test the order with fabricated rows: real repos land their commits in the same second, so the date tiebreak cannot be fixed.
 func sortPrintRows(rows []printRow) {
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].score != rows[j].score {
@@ -127,7 +108,6 @@ func sortPrintRows(rows []printRow) {
 	})
 }
 
-// hasProject reporta si algún proyecto descubierto tiene esa ruta.
 func hasProject(projects []discovery.Project, path string) bool {
 	for _, p := range projects {
 		if p.Path == path {
@@ -137,24 +117,19 @@ func hasProject(projects []discovery.Project, path string) bool {
 	return false
 }
 
-// printSync formatea la desviación vs sync branch con la rama visible:
-// `<rama> ↓N`, `<rama>`, `<rama> —`, `—`.
 func printSync(snap gitstatus.Snapshot) string {
 	if snap.SyncBranch == "" {
 		return "—"
 	}
 	if !snap.SyncKnown {
-		return snap.SyncBranch + " —" // ref inexistente
+		return snap.SyncBranch + " —"
 	}
 	if snap.SyncBehind == 0 {
-		return snap.SyncBranch // rama visible sin tick
+		return snap.SyncBranch
 	}
 	return fmt.Sprintf("%s ↓%d", snap.SyncBranch, snap.SyncBehind)
 }
 
-// printState compone la columna WT del modo print: solo
-// working tree — counts o vacío (tabla quieta). Los estados de ciclo
-// de vida viven en otras columnas: detached en BRANCH, no-up en ↑↓up.
 func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	switch st {
 	case gitstatus.StateError:
@@ -166,10 +141,7 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	if s.Dirty() == 0 {
 		return ""
 	}
-	// mismo formato que dirtyTail de la TUI: el 0 de tracked se omite y el
-	// separador solo aparece si hay algo delante → solo untracked es "?1", no
-	// "0 ?1" ni " ?1" (con el espacio inicial la celda se desalinea y parece
-	// que hay un número que no existe).
+	// Same format as the TUI's dirtyTail: the 0 of tracked is omitted and the separator only appears when something precedes it, so untracked-only is "?1" and not "0 ?1" (the leading space misaligns the cell and looks like a phantom number).
 	var b strings.Builder
 	if s.TrackedChanges > 0 {
 		fmt.Fprintf(&b, "%d", s.TrackedChanges)
@@ -183,8 +155,6 @@ func printState(st gitstatus.State, snap gitstatus.Snapshot) string {
 	return b.String()
 }
 
-// printUpDown compone ↑↓up para print: `no-up` sin upstream
-// trackeado, vacío en sync; errores y no-repo vacíos.
 func printUpDown(st gitstatus.State, snap gitstatus.Snapshot) string {
 	if st == gitstatus.StateNoRepo || snap.Err != "" {
 		return ""
@@ -229,8 +199,6 @@ func orDashPrint(s string) string {
 	return s
 }
 
-// groupLabelPrint compone `primary/secondary` para la columna GROUP
-// solo primario si no hay secundario, "-" si ninguno.
 func groupLabelPrint(p discovery.Project) string {
 	switch {
 	case p.PrimaryGroup != "" && p.SecondaryGroup != "":

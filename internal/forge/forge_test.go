@@ -1,19 +1,11 @@
-// Tests del reconhecimento de un host por su forge (ForgeForHost). La identidad
-// completa del repo (Forge, Host, Project, Owner, Name) la prueba parse_test.go.
 package forge
 
 import "testing"
 
-// refGH construye la referencia de un proyecto de GitHub. La usan también los
-// tests del argv de creación.
 func refGH(project string) RepoRef {
 	return RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: project, Owner: "acme", Name: "widget"}
 }
 
-// Detección de provider por host: solo los hosts públicos se reconocen sin
-// configuración. Una instancia self-managed no está en la lista a propósito
-// (eso lo aporta la config) y un host desconocido tiene que ser un no, no un
-// github por defecto.
 func TestForgeForHost(t *testing.T) {
 	cases := []struct {
 		host string
@@ -38,18 +30,17 @@ func TestForgeForHost(t *testing.T) {
 	}
 }
 
-// PublicHosts devuelve una COPIA: quien la mezcla con lo declarado por el usuario
-// no puede cambiar la tabla de reconocimiento de forge por el camino.
-func TestPublicHostsEsCopia(t *testing.T) {
+// PublicHosts returns a COPY so the caller mixing it with what the user declared cannot change forge's recognition table on the way.
+func TestPublicHostsIsCopy(t *testing.T) {
 	hosts := PublicHosts()
 	if len(hosts) != 2 {
-		t.Fatalf("PublicHosts() = %v, want los dos públicos", hosts)
+		t.Fatalf("PublicHosts() = %v, want both public hosts", hosts)
 	}
 	delete(hosts, "github.com")
 	if _, ok := PublicHosts()["github.com"]; !ok {
-		t.Error("borrar de la copia eliminó el host de la tabla")
+		t.Error("deleting from the copy removed the host from the table")
 	}
 	if _, ok := ForgeForHost("github.com"); !ok {
-		t.Error("ForgeForHost dejó de reconocer github.com")
+		t.Error("ForgeForHost stopped recognising github.com")
 	}
 }

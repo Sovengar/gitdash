@@ -1,274 +1,274 @@
-# Feature: PR opening (crear PR/MR desde gitdash)
+# Feature: PR opening (creating a PR/MR from gitdash)
 
-## Objetivo
+## Goal
 
-Crear un pull/merge request desde la TUI de gitdash, sin salir de ella: un panel
-overlay captura título, cuerpo, branch base y draft, y `gh`/`glab` ejecuta la
-creación por debajo con esos parámetros.
+Create a pull/merge request from gitdash's TUI without leaving it: an overlay
+panel captures title, body, base branch and draft, and `gh`/`glab` does the
+creation underneath with those parameters.
 
-## Decisiones tomadas
+## Decisions taken
 
-Estas decisiones vienen del usuario y condicionan todo lo demás. No reabrirlas
-sin consultarlo.
+These decisions come from the user and condition everything else. Do not reopen
+them without asking.
 
-| Decisión | Valor | Por qué |
+| Decision | Value | Why |
 |---|---|---|
-| Flujo | gitdash arma el argv completo y ejecuta `gh`/`glab` | gh y glab son no-interactivos con `-t`/`-b`/`-B`/`-d`/`-l`/`-y`; no hace falta handoff de terminal ni navegador |
-| Provider | automático desde `git remote get-url` | sin heurísticas en config; `ParseRemoteURL` de prdash ya resuelve scp/ssh/https y subcarpeta |
-| Base del PR | `sync_branch` del repo, prellenada | el snapshot ya lo tiene; no se elige a ojo |
-| Puertas | GitHub → `gh pr create`, GitLab → `glab mr create` | cubre github.com y el GitLab self-managed del usuario |
-| Subcarpeta | `clone_base` derivado de `api_base` | el GitLab del usuario vive en `/git/`, sin esto toda URL apunta mal |
-| Body del PR | **no** se lee del marcador commiteado | límite de confianza de AGENTS.md: el marcador es input no fiable |
+| Flow | gitdash builds the full argv and runs `gh`/`glab` | gh and glab are non-interactive with `-t`/`-b`/`-B`/`-d`/`-l`/`-y`; no terminal handoff nor browser needed |
+| Provider | automatic from `git remote get-url` | no heuristics in config; prdash's `ParseRemoteURL` already resolves scp/ssh/https and the subfolder |
+| PR base | the repo's `sync_branch`, prefilled | the snapshot already has it; it is not chosen by eye |
+| Doors | GitHub → `gh pr create`, GitLab → `glab mr create` | covers github.com and the user's self-managed GitLab |
+| Subfolder | `clone_base` derived from `api_base` | the user's GitLab lives at `/git/`; without this every URL points wrong |
+| PR body | **not** read from the committed marker | AGENTS.md's trust boundary: the marker is untrusted input |
 
-## Fuera de alcance
+## Out of scope
 
-- **Panel de PRs para aprobar/mergear/listar.** Eso es prdash, que ya lo hace y
-  ya tiene 48 KB de CHANGELOG de bugs resueltos. Acá se **crean**.
-- Comentarios, worktrees de review, simulación, auto-review.
-- Backoff, paginación, snapshot en disco, polling global: son cosas del inbox
-  global de prdash. Acá es una acción sobre el repo bajo el cursor.
+- **A PR panel to approve/merge/list.** That is prdash, which already does it and
+  already has 48 KB of CHANGELOG of fixed bugs. Here they are **created**.
+- Comments, review worktrees, simulation, auto-review.
+- Backoff, pagination, on-disk snapshot, global polling: those belong to prdash's
+  global inbox. Here it is an action on the repo under the cursor.
 - Bitbucket, Azure DevOps, Codeberg.
 
-## Mapa de lo que ya existe (relevante)
+## Map of what already exists (the relevant part)
 
-- `discovery.Project` **no** tiene branch. La branch viva es
-  `r.snap.Status.Branch`; la base es `r.snap.SyncBranch` / `SyncFor(p, default)`.
-- **No existe ninguna lectura de remote en `gitdash`.** `internal/gitstatus`
-  lanza 4 verbos en `Collect` y ninguno es de remote. Hay que agregarlo y tiene
-  que pasar por `runGit` para que quede en el command log.
-- El tabla de "acciones válidas" **es** `DefaultKeybindings()` (`config.go:197`).
-  Una acción sin estar ahí hace que `[keybindings]` la liste como obsoleta.
-- Cuatro listas de acciones que hay que tocar de forma coherente:
-  `DefaultKeybindings`, `hintLabels`, la lista literal dentro de `HintBarLines`,
-  y `commandActions`/`rowActions`.
-- `exec.Command` en `internal/tui/app.go` **ya son 6** (editor, lazygit,
-  `pull_ai`, visual, `!`, shell). AGENTS.md todavía dice 4: corregir.
-- `bubbles/v2` trae `textarea`: el cuerpo del PR no necesita textarea casero.
-- Gotcha 6: `tea.KeyPressMsg` necesita `Code` **y** `Text` para insertar runas.
-- Gotcha 1: todo `tea.Cmd` que lee del canal debe rearmar `withPump`.
-- Gotcha 10: los tests localizan la fila **por path** (`cursorOn`), nunca por
-  índice, porque el orden es attention-first.
-- `Config.KeyByAction()` está muerto: la TUI usa `actionForKey`.
+- `discovery.Project` does **not** have a branch. The live branch is
+  `r.snap.Status.Branch`; the base is `r.snap.SyncBranch` / `SyncFor(p, default)`.
+- **There is no remote read anywhere in `gitdash`.** `internal/gitstatus` launches
+  4 verbs in `Collect` and none of them is a remote. It has to be added and it has
+  to go through `runGit` so it lands in the command log.
+- The table of "valid actions" **is** `DefaultKeybindings()` (`config.go:197`). An
+  action that is not there makes `[keybindings]` list it as stale.
+- Four action lists that have to be touched coherently: `DefaultKeybindings`,
+  `hintLabels`, the literal list inside `HintBarLines`, and
+  `commandActions`/`rowActions`.
+- There are already **6** `exec.Command`s in `internal/tui/app.go` (editor,
+  lazygit, `pull_ai`, visual, `!`, shell). AGENTS.md still says 4: fix it.
+- `bubbles/v2` ships `textarea`: the PR body does not need a homemade one.
+- Gotcha 6: `tea.KeyPressMsg` needs `Code` **and** `Text` to insert runes.
+- Gotcha 1: every `tea.Cmd` that reads from the channel must rearm `withPump`.
+- Gotcha 10: the tests locate the row **by path** (`cursorOn`), never by index,
+  because the order is attention-first.
+- `Config.KeyByAction()` is dead: the TUI uses `actionForKey`.
 
-## Portable desde prdash (mismas versiones de charm.land/*, sin tocar go.mod)
+## Portable from prdash (same charm.land/* versions, no go.mod change)
 
-- `internal/forge/tool` → Runner con timeout, env homogéneo (`LC_ALL=C`,
-  `GIT_TERMINAL_PROMPT=0`), `Error` con exit code.
-- `internal/reporesolver.ParseRemoteURL` → normaliza remote → RepoRef.
-- `internal/forge/model` → `RepoRef` y la convención `Known bool`.
-- Derivación `clone_base` desde `api_base` (`/git/api/v4/` → `git`).
+- `internal/forge/tool` → Runner with timeout, homogeneous env (`LC_ALL=C`,
+  `GIT_TERMINAL_PROMPT=0`), `Error` with the exit code.
+- `internal/reporesolver.ParseRemoteURL` → normalises remote → RepoRef.
+- `internal/forge/model` → `RepoRef` and the `Known bool` convention.
+- `clone_base` derivation from `api_base` (`/git/api/v4/` → `git`).
 
-NO portar: streams, paginación, polling, backoff, snapshot, comentarios,
-worktrees, Herdr. Son la otra arquitectura de eventos.
+Do NOT port: streams, pagination, polling, backoff, snapshot, comments,
+worktrees, Herdr. That is the other event architecture.
 
 ## Tasks
 
-### T1 — `internal/forge`: resolver el repo a un forge
-`RepoRef` (Forge, Host, Project, ClonePrefix) + `ParseRemoteURL` + detección de
-provider por host + derivación de `clone_base`. Puro, sin I/O.
+### T1 — `internal/forge`: resolving a repo to a forge
+`RepoRef` (Forge, Host, Project, ClonePrefix) + `ParseRemoteURL` + provider
+detection by host + `clone_base` derivation. Pure, no I/O.
 
-Puro y table-driven con la tabla de casos de prdash: scp-like
-`git@host:o/r.git`, `ssh://git@host/o/r`, `https://host/o/r.git`, sin `.git`,
-con barra final, con prefijo de subcarpeta, host desconocido, ruta local.
+Pure and table-driven with prdash's case table: scp-like `git@host:o/r.git`,
+`ssh://git@host/o/r`, `https://host/o/r.git`, without `.git`, with a trailing
+slash, with a subfolder prefix, unknown host, local path.
 
-**Done when** los casos de la tabla pasan y `HostUnknown` no se confunde con
+**Done when** the table's cases pass and `HostUnknown` is not confused with
 `RutaLocal`. **Checks:** `go test ./internal/forge/...`
 
-### T2 — `internal/forge`: construir y ejecutar el argv de creación
-`BuildCreateArgv(ref, params) []string` para gh y para glab, + `Runner` con
-timeout y env homogéneo.
+### T2 — `internal/forge`: building and running the creation argv
+`BuildCreateArgv(ref, params) []string` for gh and for glab, + `Runner` with
+timeout and homogeneous env.
 
 `Params`: Title, Body, Base, Head, Draft, Labels.
 
-Mapa de flags (verificado contra las CLIs instaladas):
+Flag map (verified against the installed CLIs):
 
 | | gh | glab |
 |---|---|---|
-| título | `-t` | `-t` |
-| cuerpo | `-b` | `-d` |
+| title | `-t` | `-t` |
+| body | `-b` | `-d` |
 | base | `-B` | `-b` |
 | head | `-H` | `-s` |
 | draft | `-d` | `--draft` |
-| labels | `-l` (repetible) | `-l` (repetible) |
-| sin prompt | — | `-y` |
+| labels | `-l` (repeatable) | `-l` (repeatable) |
+| no prompt | — | `-y` |
 
-Ojo: en gh `-b` es body y `-B` es base; en glab `-b` es base y `-d` es
-description. Es la trampa más fácil de esta task.
+Careful: in gh `-b` is body and `-B` is base; in glab `-b` is base and `-d` is
+description. It is the easiest trap of this task.
 
-**Done when** ambos argv salen con los flags correctos y cada valor es **un
-elemento** de argv (nunca shell-concatenado). **Checks:** `go test ./internal/forge/...`
+**Done when** both argvs come out with the right flags and every value is **one**
+argv element (never shell-concatenated). **Checks:** `go test ./internal/forge/...`
 
-### T3 — Overlay de TUI
-`prArmed` (captura path, branch, sync branch al armar), el panel overlay, el
-textinput del título, el textarea del cuerpo, la selección de base y el toggle
-de draft.
+### T3 — TUI overlay
+`prArmed` (captures path, branch, sync branch when arming), the overlay panel, the
+title's textinput, the body's textarea, the base selection and the draft toggle.
 
-Es un **view mode** como `logOpen`, no un estado armado de prefix-key: vive
-varias pulsaciones, así que la tecla de submit lo distingue de "elegir
-variante".
+It is a **view mode** like `logOpen`, not a prefix-key armed state: it lives
+across several presses, so the submit key is what distinguishes it from "picking a
+variant".
 
-Prompt de keybinds vía `promptLine()` (un `case` más), `keybindsLines()` deriva
-solo, `computeLayout` recibe el presupuesto.
+Keybinds warning via `promptLine()` (one more `case`), `keybindsLines()` derives on
+its own, `computeLayout` receives the budget.
 
-**Done when** `esc` cierra sin crear, submit valida (título no vacío, base no
-vacía), y el prompt aparece en la sección keybinds. **Checks:** `go test ./internal/tui/...`
+**Done when** `esc` closes without creating, the submit validates (title not
+empty, base not empty), and the warning appears in the keybinds section.
+**Checks:** `go test ./internal/tui/...`
 
-**Implementado** (rama `feat/pr-opening`, sin commit todavía):
+**Implemented** (branch `feat/pr-opening`, not committed yet):
 
-- `internal/tui/proverlay.go`: el overlay entero. Estado `m.pr *prDraft`
-  (nil = cerrado: un flag aparte podría quedar a true sin formulario detrás) y
-  `m.prPending *prSubmission`, el seam que T4 ejecuta.
-- Es un **view mode**, no un prefix-key: `handlePRKey` se consulta al principio
-  de `handleKey` y se lleva el teclado entero. Única excepción: `ctrl+c`, que
-  sigue cerrando la app como en el panel del log.
-- Teclas: `O` abre, `tab`/`shift+tab` recorren los campos, `space`/`enter`
-  giran el draft, `ctrl+s` envía, `esc` cancela. El envío es `ctrl+s` y no
-  `enter` porque `enter` en el cuerpo es un salto de línea.
-- El aviso de validación (título o base vacíos) va en una **línea del panel**,
-  no en un toast: un toast expira a los 3 s y caduca cuando el usuario está
-  mirando el campo culpable. La línea está reservada siempre, para que el
-  textarea no cambie de alto al aparecer.
-- El presupuesto entra por `computeLayout(..., formMin)`: con el overlay
-  abierto no se busca panel de preview (el cuerpo es el formulario) y la caja
-  no se dibuja por debajo de `prMinBodyLines`. Si no cabe, **no se abre**; si
-  un resize deja sin sitio, se cierra con aviso.
-- **T4**: la tecla `O` está fija en `internal/tui` (no se puede tocar
-  `internal/config` desde T3). Al registrar `pr` en la config sobran la
-  constante `prKey` y su bloque en `handleKey`; ojo con añadir también `"pr"`
-  al guard que impide armar selectores con el panel del log abierto.
+- `internal/tui/proverlay.go`: the whole overlay. State `m.pr *prDraft` (nil =
+  closed: a separate flag could be left true with no form behind it) and
+  `m.prPending *prSubmission`, the seam that T4 runs.
+- It is a **view mode**, not a prefix-key: `handlePRKey` is consulted at the start
+  of `handleKey` and takes the whole keyboard. Single exception: `ctrl+c`, which
+  still closes the app as in the log panel.
+- Keys: `O` opens, `tab`/`shift+tab` walk the fields, `space`/`enter` toggle the
+  draft, `ctrl+s` submits, `esc` cancels. The submit is `ctrl+s` and not `enter`
+  because `enter` in the body is a line break.
+- The validation warning (empty title or base) goes on a **panel line**, not a
+  toast: a toast expires after 3 s and goes stale exactly while the user is
+  looking at the guilty field. The line is always reserved, so that the textarea
+  does not change height when it appears.
+- The budget enters through `computeLayout(..., formMin)`: with the overlay open
+  no preview panel is looked for (the body is the form) and the box is not drawn
+  below `prMinBodyLines`. If it does not fit, it **does not open**; if a resize
+  leaves no room, it closes with a warning.
+- **T4**: the `O` key is hardcoded in `internal/tui` (`internal/config` cannot be
+  touched from T3). Once `pr` is registered in the config the `prKey` constant and
+  its block in `handleKey` are surplus; careful about also adding `"pr"` to the
+  guard that prevents arming selectors with the log panel open.
 
+### T4 — Execution, wiring and docs
+Register `pr` in `DefaultKeybindings`, `hintLabels`, `HintBarLines`'s list,
+`commandActions`, `rowActions`. Wire the argv to the Runner, capture stdout (no
+handoff: there is no TTY to give up), toast + recollect on return, command log
+entry with the resolved argv.
 
-### T4 — Ejecución, wiring y docs
-Registrar `pr` en `DefaultKeybindings`, `hintLabels`, la lista de
-`HintBarLines`, `commandActions`, `rowActions`. Conectar el argv con el Runner,
-capturar stdout (sin handoff: no hay TTY que ceder), toast + recollect al volver,
-entrada de command log con el argv resuelto.
+Document in AGENTS.md: the design gotchas section, the correction of "the 4
+exec.Command" → the real number, and the `internal/forge` row in the package
+table.
 
-Documentar en AGENTS.md: la sección de gotchas de diseño, la corrección de
-"los 4 exec.Command" → el número real, y la fila de `internal/forge` en la
-tabla de paquetes.
+**Done when** `make lint` is green, the whole suite is green, `make install` done,
+smoke with tmux. **Checks:** `go build && go vet && go test ./...`
 
-**Done when** `make lint` en verde, suite completa en verde, `make install`
-hecho, smoke con tmux. **Checks:** `go build && go vet && go test ./...`
+**Implemented** (branch `feat/pr-opening`, not committed yet):
 
-**Implementado** (rama `feat/pr-opening`, sin commit todavía):
+- `internal/config/forge.go`: `[forge.github]` / `[forge.gitlab]` with `hosts` and
+  `api_base`, plus `Config.ForgeHosts()` / `Config.ForgePrefixes()`, the two maps
+  that `ParseRemoteURL` consumes. An **absolute `api_base` names the host** it
+  applies to and its path yields the subfolder prefix
+  (`forge.PrefixFromAPIBase`); a relative one applies to the whole provider. The
+  public hosts come from `forge.PublicHosts()` (new), so the list cannot be
+  duplicated across packages. An unsupported provider warns on load.
+- `internal/gitstatus.RemoteURL(ctx, dir)`: `git remote get-url origin` through
+  `runGit`, `ClassRead`, on demand (NOT in `Collect`).
+- `internal/tui/prcreate.go`: the flow (remote → forge → argv → `LookPath` →
+  `forge/tool.Runner`). The four rejections cut BEFORE executing and are toast +
+  `running` released + no exec in the log + no recollect. The exec is recorded by
+  hand (gh/glab are not git) with `Dur` measured and the RAW argv: whoever paints
+  it sanitises it (`sanitizeLogText` in the panel), as the log's rule demands.
+- **Accepting and executing are two steps**: `prSubmit` publishes `m.prPending`
+  and returns the `tea.Cmd` that emits `prStartMsg`; `prCreateCmd` consumes it.
+  T3's seam is kept (T3's tests stay green without being touched).
+- `proverlay.go`: out go the `prKey` constant and its block in `handleKey` (the
+  `pr` action resolves through `actionForKey` like any other), `prPrompt` asks the
+  key to `m.cfg.KeyFor("pr")`, and `pr` is also in the guard that prevents
+  overlays with the log panel open (otherwise it leaves a phantom intent).
+- Tests: full cycle with a `gh` stub in `t.TempDir()` (resolved argv with `-R`,
+  `ClassAction`, exit and `Dur`), self-managed GitLab at `/git/` from a real
+  `config.toml` (the project comes out without the prefix), the three rejections
+  executing nothing, the panel's argv sanitised with an OSC and with format
+  characters, the head from the snapshot, `RemoteURL` through `runGit` with
+  `ClassRead`, and the forges config.
+- Left for the parent: the commit (and `make install`, which writes outside the
+  repo).
 
-- `internal/config/forge.go`: `[forge.github]` / `[forge.gitlab]` con `hosts` y
-  `api_base`, más `Config.ForgeHosts()` / `Config.ForgePrefixes()`, que son los
-  dos mapas que consume `ParseRemoteURL`. El `api_base` **absoluto nombra el
-  host** al que aplica y de su path sale el prefijo de subcarpeta
-  (`forge.PrefixFromAPIBase`); un relativo aplica a todo el proveedor. Los hosts
-  públicos vienen de `forge.PublicHosts()` (nueva), así que la lista no puede
-  duplicarse entre paquetes. Un proveedor no soportado avisa al cargar.
-- `internal/gitstatus.RemoteURL(ctx, dir)`: `git remote get-url origin` por
-  `runGit`, `ClassRead`, on demand (NO en `Collect`).
-- `internal/tui/prcreate.go`: el flujo (remote → forge → argv → `LookPath` →
-  `forge/tool.Runner`). Los cuatro rechazos cortan ANTES de ejecutar y son
-  toast + `running` liberado + sin exec en el log + sin recollect. El exec se
-  registra a mano (gh/glab no son git) con `Dur` medido y el argv CRUDO: lo sanea
-  quien pinta (`sanitizeLogText` en el panel), como manda la regla del log.
-- **Aceptar y ejecutar son dos pasos**: `prSubmit` publica `m.prPending` y
-  devuelve el `tea.Cmd` que emite `prStartMsg`; `prCreateCmd` lo consume. El
-  seam de T3 se conserva (los tests de T3 siguen verdes sin tocarlos).
-- `proverlay.go`: fuera la constante `prKey` y su bloque en `handleKey` (la
-  acción `pr` resuelve por `actionForKey` como cualquier otra), `prPrompt` pide
-  la tecla a `m.cfg.KeyFor("pr")`, y `pr` está también en el guard que impide
-  overlays con el panel del log abierto (si no, deja una intención fantasma).
-- Tests: ciclo completo con stub de `gh` en `t.TempDir()` (argv resuelto con
-  `-R`, `ClassAction`, exit y `Dur`), GitLab self-managed en `/git/` desde un
-  `config.toml` real (el proyecto sale sin el prefijo), los tres rechazos sin
-  ejecutar nada, el argv del panel saneado con un OSC y con caracteres de
-  formato, el head desde el snapshot, `RemoteURL` por `runGit` con `ClassRead`,
-  y la config de forges.
-- Pendiente del padre: commit (y `make install`, que escribe fuera del repo).
+## Risks
 
-## Riesgos
+- **`gh`/`glab` not installed**: `exec.LookPath` + toast, no handoff. The same
+  treatment as `lazygit`.
+- **Not authenticated**: not detected before running; `gh`/`glab` fail on their
+  own and the message goes to the toast. Do not invent auth: gitdash does not
+  manage it.
+- **`glab` on gitlab.com without a token** (verified on the user's machine): the
+  failure is the environment's, not the code's. Mention it, do not work around it.
+- **The PR body does not come from the marker.** If it is ever wanted, that is a
+  separate trust-boundary decision, not a default.
 
-- **`gh`/`glab` no instalados**: `exec.LookPath` + toast, sin handoff. Es el
-  mismo trato que `lazygit`.
-- **No autenticados**: no se detecta antes de ejecutar; `gh`/`glab` fallan
-  solos y el mensaje va al toast. No inventar auth: gitdash no la gestiona.
-- **`glab` en gitlab.com sin token** (verificado en la máquina del usuario): el
-  fallo es del entorno, no del código. Mencionarlo, no workaroundearlo.
-- **El cuerpo del PR no sale del marcador.** Si algún día se quiere, es una
-  decisión de trust boundary aparte, no un default.
-
-## Evidencia (commits)
+## Evidence (commits)
 
 | Task | Commit | Checks |
 |---|---|---|
-| (previo) guard visual | `8b2c87a` | en `main` |
-| T1 · resolver repo a forge | `f8c9c13` | `go test -race ./...`, 98% cobertura del paquete |
+| (previous) visual guard | `8b2c87a` | in `main` |
+| T1 · resolve repo to forge | `f8c9c13` | `go test -race ./...`, 98% coverage of the package |
 | T2 · argv + Runner | `9c78548` | `go test -race ./...`, `make lint` |
-| (fix) flake del command log | `cabc98a` | 20/20 en verde tras el fix (2/15 fallaba antes) |
-| (fix) comentario obsoleto | `076b988` | `go test -race ./...` |
-| T3 · overlay | `d2d4fbc` | `go test -race ./...`, `make lint`, 5 corridas sin flake |
-| T4 · ejecución y wiring | `55f4788` | `go test -race ./...`, `make lint`, smoke con tmux |
-| T5 · gate de mutation testing | (sin commit: lo abre el padre) | `make mutate-diff MUTATE_BASE=origin/main` → 0 supervivientes nuevos |
+| (fix) command log flake | `cabc98a` | 20/20 green after the fix (2/15 failed before) |
+| (fix) stale comment | `076b988` | `go test -race ./...` |
+| T3 · overlay | `d2d4fbc` | `go test -race ./...`, `make lint`, 5 runs without a flake |
+| T4 · execution and wiring | `55f4788` | `go test -race ./...`, `make lint`, smoke with tmux |
+| T5 · mutation testing gate | (no commit: the parent opens it) | `make mutate-diff MUTATE_BASE=origin/main` → 0 new survivors |
 
-### T5 — Cerrar la gate de mutation testing
+### T5 — Closing the mutation testing gate
 
-La CI corre gremlins sobre el diff y bloquea el merge si queda un mutante vivo
-que no esté en `.mutation-allowlist`. La feature entró con 19.
+CI runs gremlins over the diff and blocks the merge if a surviving mutant is left
+that is not in `.mutation-allowlist`. The feature came in with 19.
 
-**Bug latente encontrado por el camino**: `prFits` solo miraba el alto, así que
-en un terminal angosto y alto el overlay abría con los inputs a un ancho
-negativo (lo tapaba el `max(1, …)` de `prFit`). Ahora `prFits` exige también
-`prMinWidth`, y el ancho de los inputs se deriva de esa constante
-(`prValueWidth`): el mínimo es `2 + prLabelWidth + prValueSlack + prMinValueWidth`
-(27), que deja una columna de valor de 12 —la misma que la de rótulos—.
+**Latent bug found on the way**: `prFits` only looked at the height, so in a
+narrow, tall terminal the overlay opened with the inputs at a negative width
+(hidden by `prFit`'s `max(1, …)`). Now `prFits` also requires `prMinWidth`, and
+the inputs' width derives from that constant (`prValueWidth`): the minimum is
+`2 + prLabelWidth + prValueSlack + prMinValueWidth` (27), which leaves a 12-wide
+value column — the same as the label one.
 
-**Supervivientes cerrados con test (15)**: el borde exacto del alto y del ancho
-(`prFits`, `prSection`), los rótulos que se resaltan al mover el foco, el nivel
-del aviso del desenlace, el reparto del hueco entre los widgets (`prFit`), el
-`Blur` de `closePR`, el remote scp con la `@` en la posición 0, y la guarda de
-nil de `prFit`. Cada test se comprobó mutando el código a mano: falla con la
-mutación y pasa sin ella.
+**Survivors closed with a test (15)**: the exact bound of the height and of the
+width (`prFits`, `prSection`), the labels that get highlighted when the focus
+moves, the level of the outcome warning, the split of the gap among the widgets
+(`prFit`), `closePR`'s `Blur`, the scp remote with the `@` at position 0, and
+`prFit`'s nil guard. Each test was verified by mutating the code by hand: it fails
+with the mutation and passes without it.
 
-**Allowlistados con demostración (4)**: las pistas de capacidad de los dos
-`make` de `internal/config/forge.go` y el de `internal/forge/tool/tool.go`, y el
-`colon < 0` de `ParseRemoteURL`, equivalente dado el contrato del mapa de hosts
-(`config.ForgeHosts` se salta los vacíos). Los comentarios están en
+**Allowlisted with a demonstration (4)**: the capacity hints of the two `make`s in
+`internal/config/forge.go` and the one in `internal/forge/tool/tool.go`, and
+`ParseRemoteURL`'s `colon < 0`, equivalent given the contract of the hosts map
+(`config.ForgeHosts` skips the empty ones). The comments are in
 `.mutation-allowlist`.
 
-## Incidentes durante la implementación
+## Incidents during the implementation
 
-Ninguno de los dos es del código de la feature; los dos vienen del tooling y
-hay que revisarlos por separado.
+Neither is from the feature's code; both come from the tooling and have to be
+looked at separately.
 
-### 1. `gga run` (hook pre-commit) destruyó el worktree
+### 1. `gga run` (pre-commit hook) destroyed the worktree
 
-Al commitear T4, el hook `pre-commit` (`~/.git-templates`, corre `gga run`) dejó
-un commit `fbcd15a "base"` — autor `gitdash tests <test@gitdash.local>` — que
-**borraba todos los archivos versionados** y agregaba un `base.txt`. El
-`git commit` real falló después con `cannot lock ref 'HEAD'`, así que el trabajo
-no llegó a perderse: el árbol seguía íntegro y se recuperó con
-`git reset d2d4fbc`.
+When committing T4, the `pre-commit` hook (`~/.git-templates`, runs `gga run`)
+left a commit `fbcd15a "base"` — author `gitdash tests <test@gitdash.local>` —
+that **deleted every tracked file** and added a `base.txt`. The real `git commit`
+failed afterwards with `cannot lock ref 'HEAD'`, so the work was not actually lost:
+the tree was intact and was recovered with `git reset d2d4fbc`.
 
-Lo que sí comprobado:
+What was checked:
 
-- La suite completa **no** mueve HEAD: `go test -race ./...` con HEAD vigilado
-  lo deja igual. Los tests no son el culpable.
-- Todos los helpers de `testutil` usan `t.TempDir()` y `git()` fija
-  `cmd.Dir`. No hay ningún `os.Chdir` en el repo.
-- El commit de T4 se hizo con `--no-verify` para no volver a invocar el hook.
+- The whole suite does **not** move HEAD: `go test -race ./...` with a watched HEAD
+  leaves it alone. The tests are not the culprit.
+- All of `testutil`'s helpers use `t.TempDir()` and `git()` pins `cmd.Dir`. There
+  is no `os.Chdir` in the repo.
+- T4's commit was made with `--no-verify` so as not to invoke the hook again.
 
-### 2. `core.bare=true` en el repo principal
+### 2. `core.bare=true` in the main repo
 
-`gitstatus` no. El repo principal `/home/buble/dev/projects/gitdash` queda
-marcado como bare en `.git/config` en momentos, lo que rompe `go build` con
-`error obtaining VCS status: exit status 128` **y** `git status`. Se restauró
-con `git config --local core.bare false`, pero volvió a aparecer solo después.
+Not `gitstatus`. The main repo `/home/buble/dev/projects/gitdash` gets marked as
+bare in `.git/config` at times, which breaks `go build` with `error obtaining VCS
+status: exit status 128` **and** `git status`. It was restored with
+`git config --local core.bare false`, but it reappeared on its own later.
 
-Sospechoso: `gga` monta un worktree de "candidate view" dentro de
-`.git/gentle-ai/candidate-views/` y deja el flag puesto. Hay además un
-`REVIEW-MAINTENANCE.lock` sin liberar desde las 20:57.
+Suspect: `gga` mounts a "candidate view" worktree inside
+`.git/gentle-ai/candidate-views/` and leaves the flag set. There is also a
+`REVIEW-MAINTENANCE.lock` that has not been released since 20:57.
 
-**Pendiente de decisión del usuario**: auditar `gga` con la rama a salvo.
+**Pending the user's decision**: audit `gga` with the branch safe.
 
-## Config que necesita el usuario
+## Config the user needs
 
-Para el GitLab self-managed, en `~/.config/gitdash/config.toml`:
+For the self-managed GitLab, in `~/.config/gitdash/config.toml`:
 
 ```toml
 [forge.gitlab]
@@ -276,11 +276,11 @@ api_base = "https://umane.emeal.nttdata.com/git/api/v4/"
 hosts = ["umane.emeal.nttdata.com"]
 ```
 
-`api_base` absoluto es lo que nombra el host al que aplica; los hosts que no
-nombra conservan el default del proveedor, así que `gitlab.com` sigue en la raíz
-mientras la instancia self-managed vive bajo `/git/`.
+An absolute `api_base` is what names the host it applies to; the hosts it does not
+name keep the provider's default, so `gitlab.com` stays at the root while the
+self-managed instance lives under `/git/`.
 
 | T1 forge resolver | `f8c9c13` | `go test ./internal/forge/...` |
 | T2 forge argv | `9c78548` | `go test ./internal/forge/...` |
-| T3 overlay de TUI | `d2d4fbc` | build + vet + gofmt + `go test -race ./...` |
-| T4 ejecución y wiring | (sin commit: lo abre el padre) | build + vet + gofmt + `make lint` + `go test -race ./...` + smoke tmux |
+| T3 TUI overlay | `d2d4fbc` | build + vet + gofmt + `go test -race ./...` |
+| T4 execution and wiring | (no commit: the parent opens it) | build + vet + gofmt + `make lint` + `go test -race ./...` + tmux smoke |

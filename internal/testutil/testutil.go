@@ -1,5 +1,3 @@
-// Package testutil construye repos git de prueba deterministicos para los
-// tests de discovery, gitstatus y tui (fixtures).
 package testutil
 
 import (
@@ -8,19 +6,7 @@ import (
 	"path/filepath"
 )
 
-// TB es lo unico que los helpers de este paquete necesitan de un test: marcarlo
-// como helper y matarlo cuando algo no cuadra.
-//
-// Existe por los 8 bloques de t.Fatal que de otro modo no ejecuta nadie. Casi
-// todos son del mismo tipo: os.MkdirAll, os.WriteFile y cmd.CombinedOutput solo
-// fallan cuando el disco o el proceso fallan, y un t.Fatal mata el test de
-// golpe, asi que no hay forma de provocar la rama desde el propio test que la
-// cubre. Con un parametro de interfaz, el mismo fallo se puede provocar
-// apuntando a un path con un fichero donde deberia ir el directorio, y el doble
-// registra el fallo en vez de matar el proceso.
-//
-// *testing.T satisface este interface, asi que las 160 llamadas del repo siguen
-// pasando t sin cambios.
+// An interface so their error branches stay reachable: os.MkdirAll, os.WriteFile and cmd.CombinedOutput only fail when disk or process fail, and a t.Fatal would kill the very test that covers them, while a double records the failure instead.
 type TB interface {
 	Helper()
 	Fatal(args ...any)
@@ -28,7 +14,6 @@ type TB interface {
 	TempDir() string
 }
 
-// git ejecuta un comando git en dir y falla el test si devuelve error.
 func git(t TB, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -38,7 +23,6 @@ func git(t TB, dir string, args ...string) {
 	}
 }
 
-// Init crea un repo git vacío en dir (branch main) con identidad local.
 func Init(t TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -49,7 +33,6 @@ func Init(t TB, dir string) {
 	git(t, dir, "config", "user.name", "gitdash tests")
 }
 
-// CommitFiles escribe ficheros (map ruta→contenido) en dir y los commitea.
 func CommitFiles(t TB, dir string, files map[string]string, msg string) {
 	t.Helper()
 	for name, content := range files {
@@ -65,9 +48,6 @@ func CommitFiles(t TB, dir string, files map[string]string, msg string) {
 	git(t, dir, "commit", "-m", msg)
 }
 
-// Marker escribe el marcador .gitdash.toml con los metadatos dados
-// ("" como valor = clave omitida). Con malformed=true escribe TOML inválido.
-// primary_group/secondary_group (la clave group ya no existe).
 func Marker(t TB, dir, name, primary, secondary string, malformed bool) {
 	t.Helper()
 	var content string
@@ -89,7 +69,6 @@ func Marker(t TB, dir, name, primary, secondary string, malformed bool) {
 	}
 }
 
-// InitBare crea un repo bare que hace de origin.
 func InitBare(t TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -98,16 +77,12 @@ func InitBare(t TB, dir string) {
 	git(t, dir, "init", "--bare", "-b", "main")
 }
 
-// AddUpstream conecta dir con el bare origin, pushea la rama main y la deja
-// como upstream trackeado.
 func AddUpstream(t TB, dir, origin string) {
 	t.Helper()
 	git(t, dir, "remote", "add", "origin", origin)
 	git(t, dir, "push", "-u", "origin", "main")
 }
 
-// PushUpstreamCommits crea n commits en un clone temporal del bare origin
-// y los pushea, dejando el repo local detrás (behind/diverged).
 func PushUpstreamCommits(t TB, bare string, n int, prefix string) {
 	t.Helper()
 	clone := t.TempDir()
@@ -120,10 +95,7 @@ func PushUpstreamCommits(t TB, bare string, n int, prefix string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 }
 
-// PushUpstreamFile crea un commit en un clone temporal del bare origin que
-// ESCRIBE name con content, y lo pushea. PushUpstreamCommits solo crea ficheros
-// nuevos, así que no puede generar un conflicto: para eso hace falta que las dos
-// partes toquen el mismo fichero con contenido distinto.
+// PushUpstreamCommits only adds new files and cannot produce a conflict, so a conflicting scenario needs both sides to write the same file.
 func PushUpstreamFile(t TB, bare, name, content, msg string) {
 	t.Helper()
 	clone := t.TempDir()
@@ -134,21 +106,16 @@ func PushUpstreamFile(t TB, bare, name, content, msg string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 }
 
-// Detach pone el repo en HEAD detached sobre el commit actual.
 func Detach(t TB, dir string) {
 	t.Helper()
 	git(t, dir, "checkout", "--detach", "--quiet", "HEAD")
 }
 
-// MakeWorktree añade un worktree del repo en wtDir (su .git es un fichero).
 func MakeWorktree(t TB, dir, wtDir, branch string) {
 	t.Helper()
 	git(t, dir, "worktree", "add", "--quiet", wtDir, "-b", branch)
 }
 
-// NewRepo crea un repo con un commit base; con upstream=true además lo
-// conecta a un origin bare (remoto local) con la rama trackeada. Devuelve
-// el repo y el path del bare origin.
 func NewRepo(t TB, upstream bool) (dir, origin string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -162,7 +129,6 @@ func NewRepo(t TB, upstream bool) (dir, origin string) {
 	return dir, origin
 }
 
-// WriteUncommitted modifica ficheros ya trackeados sin commitear.
 func WriteUncommitted(t TB, dir string, files map[string]string) {
 	t.Helper()
 	for name, content := range files {
@@ -173,13 +139,11 @@ func WriteUncommitted(t TB, dir string, files map[string]string) {
 	}
 }
 
-// WriteUntracked crea ficheros nuevos sin trackear.
 func WriteUntracked(t TB, dir string, files map[string]string) {
 	t.Helper()
 	WriteUncommitted(t, dir, files)
 }
 
-// BreakGit corrompe el .git de un repo para probar el estado error.
 func BreakGit(t TB, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("basura"), 0o644); err != nil {
@@ -187,19 +151,16 @@ func BreakGit(t TB, dir string) {
 	}
 }
 
-// FetchLocal actualiza los remote-tracking refs del repo local (los tests
-// que simulan behind/diverged necesitan fetch para ver el upstream nuevo).
+// Remote-tracking refs only move on fetch, so tests simulating behind/diverged need this after pushing to origin.
 func FetchLocal(t TB, dir string) {
 	t.Helper()
 	git(t, dir, "fetch", "--quiet", "origin")
 }
 
-// Checkout cambia a una rama (existente) del repo.
 func Checkout(t TB, dir, branch string) {
 	git(t, dir, "checkout", "--quiet", branch)
 }
 
-// NewBranch crea (o recrea) una rama en HEAD y se cambia a ella.
 func NewBranch(t TB, dir, branch string) {
 	git(t, dir, "checkout", "-qB", branch)
 }

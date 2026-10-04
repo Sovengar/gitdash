@@ -1,35 +1,10 @@
-# Suelo de la cobertura TOTAL del proyecto. Lo lee scripts/diff-coverage.sh.
+# Coverage floor for the whole project; read by scripts/diff-coverage.sh.
 #
-# Solo puede SUBIR: si el total baja de este numero, el gate falla. Si el total
-# esta por encima, el script avisa para que se suba aqui en el mismo commit.
+# It can only GO UP: if the total drops below this number the gate fails, and if it is above, the script warns so it can be raised here in the same commit. It is a minimum, not the goal: the goal is 100% of the DIFF, which is what forces testing what you touch; this floor only keeps the whole from degrading between PRs that touch no code.
+# It is a number and not a list of excluded files: the only statement that does not reach the combined profile is func main(), which really runs in a subprocess whose test verifies the profile it produces (explained in cmd/gitdash/main_test.go and in the script itself), so a lower floor "to be safe" would be a lie.
+# 100.00% MEASURED BOTH LOCALLY AND IN CI, with no margin needed: both give 1951/1951 statements.
 #
-# No es el objetivo, es el minimo. El objetivo es el 100% del DIFF, que es lo
-# que obliga a testear lo que se toca; este suelo existe para que el conjunto no
-# se degrade entre PRs que no tocan codigo.
-#
-# Y es un numero, no una lista de ficheros excluidos: el unico statement que no
-# llega al perfil combinado es func main(), que se ejecuta de verdad en un
-# subproceso y cuyo test verifica el perfil que produce. Eso esta explicado en
-# cmd/gitdash/main_test.go y en el propio script. Un suelo mas bajo para
-# "quedarse tranquilo" seria mentira.
-#
-# 100.00% MEDIDO EN LOCAL Y EN CI. No hace falta margen: los dos dan
-# 1951/1951 statements.
-#
-# QUE HIZO QUE COINCIDAN. Este numero solia ser mas bajo en CI que en local, y la
-# diferencia (4 statements) NO era por root, como decia la version anterior de
-# este fichero: el runner de GitHub no corre como root (verificado contra el log
-# del job Test), asi que los tests de permisos 0o000 SI se ejecutan ahi. Era por
-# lazygit: dos tests llevaban `t.Skip("lazygit no instalado")`, asi que en un
-# runner sin lazygit el camino entero se saltaba y sus statements no llegaban al
-# perfil. Ahora usan un lazygit de mentira en el PATH (conLazygitFalso), el mismo
-# truco que las CLI de forge, y se midio el perfil con un PATH sin lazygit: 100.00%
-#
-# OTRA TRAMPA QUE ESTO EVITA: los casos de "fichero ilegible" (marcador o .git
-# que no se pueden leer) usan EISDIR —un DIRECTORIO con el nombre del marcador—
-# y NO 0o000. root lee un 0o000, asi que un test de permisos mide una cosa en
-# local y otra en CI: el suelo habriadependido de quien ejecuta.
-#
-# MEDIDO, NO ADIVINADO: el perfil de CI se reprodujo con un PATH sin lazygit,
-# que es justo lo que ve el runner.
+# WHAT MADE THEM MATCH: this number used to be lower in CI than locally, and the difference (4 statements) was NOT about root, as an earlier version of this file said: GitHub's runner does not run as root (verified against the Test job log), so the 0o000 permission tests DO run there. It was lazygit: two tests carried `t.Skip("lazygit not installed")`, so on a runner without lazygit the whole path was skipped and its statements never reached the profile; they now use a fake lazygit in the PATH (withFakeLazygit), the same trick as the forge CLIs, and the profile was measured with a PATH without lazygit: 100.00%.
+# ANOTHER TRAP THIS AVOIDS: the "unreadable file" cases (marker or .git that cannot be read) use EISDIR — a DIRECTORY named after the marker — and NOT 0o000, because root reads a 0o000 and a permission test would then measure one thing locally and another in CI, making the floor depend on who runs it.
+# MEASURED, NOT GUESSED: CI's profile was reproduced with a PATH without lazygit, which is exactly what the runner sees.
 100.00

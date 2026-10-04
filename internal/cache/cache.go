@@ -1,6 +1,4 @@
-// Package cache persiste el descubrimiento en disco para
-// pintar la tabla al instante al arrancar mientras el rescan corre en
-// background.
+// Package cache persists discovery on disk to paint the table instantly while the rescan runs in background.
 package cache
 
 import (
@@ -11,18 +9,13 @@ import (
 	"gitdash/internal/discovery"
 )
 
-// FileName es el fichero de cache dentro del dir XDG de cache.
 const FileName = "repos.json"
 
-// DirName es el subdirectorio de gitdash bajo $XDG_CACHE_HOME.
 const DirName = "gitdash"
 
-// version del formato; un fichero de otra versión se ignora.
-// v2 añade sync_branch y main_repo.
-// v3 reemplaza group por primary_group/secondary_group.
+// Format version; a file from another version is ignored (v3 replaced group with primary_group/secondary_group).
 const version = 3
 
-// Entry es un repo persistido.
 type Entry struct {
 	Path           string `json:"path"`
 	Name           string `json:"name"`
@@ -34,13 +27,11 @@ type Entry struct {
 	MainRepo       string `json:"main_repo,omitempty"`
 }
 
-// File es el documento JSON completo.
 type File struct {
 	Version int     `json:"version"`
 	Repos   []Entry `json:"repos"`
 }
 
-// Path devuelve la ruta del fichero de cache ($XDG_CACHE_HOME/gitdash).
 func Path() (string, error) {
 	dir, err := os.UserCacheDir()
 	if err != nil {
@@ -49,9 +40,7 @@ func Path() (string, error) {
 	return filepath.Join(dir, DirName, FileName), nil
 }
 
-// Load lee el cache y devuelve los proyectos aún válidos (el marcador debe
-// seguir existiendo en su carpeta). Cache corrupto o versión
-// desconocida = lista vacía sin error.
+// A corrupt or unknown-version cache yields an empty list without error.
 func Load(path, marker string) []discovery.Project {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -67,7 +56,7 @@ func Load(path, marker string) []discovery.Project {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(e.Path, marker)); err != nil {
-			continue // directorio/marcador borrado → descartar
+			continue
 		}
 		projects = append(projects, discovery.Project{
 			Path:           e.Path,
@@ -83,8 +72,7 @@ func Load(path, marker string) []discovery.Project {
 	return projects
 }
 
-// Save persiste los proyectos descubiertos (se llama al final de cada
-// rescan). Best-effort: los errores no son fatales.
+// Best effort: a write error is not fatal.
 func Save(path string, projects []discovery.Project) error {
 	f := File{Version: version, Repos: make([]Entry, 0, len(projects))}
 	for _, p := range projects {
@@ -102,9 +90,7 @@ func Save(path string, projects []discovery.Project) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// Sin rama de error en el Marshal: `File` son un int y una slice de structs
-	// de string/bool, y `encoding/json` no puede fallar con esos tipos. La
-	// rama era inalcanzable y mutation la contaba como cobertura muerta.
+	// No error branch on Marshal: File is an int plus a slice of string/bool structs, which encoding/json cannot fail on.
 	raw, _ := json.MarshalIndent(f, "", "  ")
 	return os.WriteFile(path, raw, 0o644)
 }

@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// stub escribe un script ejecutable en t.TempDir() y devuelve su path. El binario
-// de un forge no se puede probar de verdad sin red ni token, así que lo que se
-// prueba es lo que el Runner hace alrededor: argv, entorno, plazo y captura.
+// A forge's real binary cannot be tested without network or token, so what is tested is what the Runner does around it: argv, environment, deadline and capture.
 func stub(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "stub.sh")
@@ -22,11 +20,7 @@ func stub(t *testing.T, body string) string {
 	return path
 }
 
-// El entorno del subproceso es homogéneo: sin el locale del usuario (los
-// mensajes de git y de las CLIs se leen en inglés) y sin nada que pueda abrir
-// una pregunta. Un LC_ALL del usuario filtrado pondría los mensajes en el
-// idioma que sea y el aviso al usuario dejaría de entenderse.
-func TestEnvEsHomogeneo(t *testing.T) {
+func TestEnvIsHomogeneous(t *testing.T) {
 	t.Setenv("LC_ALL", "es_ES.UTF-8")
 	t.Setenv("LANG", "es_ES.UTF-8")
 	t.Setenv("LANGUAGE", "es")
@@ -46,103 +40,92 @@ func TestEnvEsHomogeneo(t *testing.T) {
 			n++
 		}
 		if strings.HasPrefix(kv, "LC_ALL=") && kv != "LC_ALL=C" {
-			t.Errorf("LC_ALL no forzado a C: %q", kv)
+			t.Errorf("LC_ALL not forced to C: %q", kv)
 		}
 	}
 	if n != 1 {
-		t.Errorf("LC_ALL=C aparece %d veces, quiero 1 (el del usuario no debe survive)", n)
+		t.Errorf("LC_ALL=C appears %d times, want 1 (the user's must not survive)", n)
 	}
 	for _, want := range []string{"GIT_TERMINAL_PROMPT=0", "NO_COLOR=1"} {
 		if !slicesHas(env, want) {
-			t.Errorf("Env no contiene %q", want)
+			t.Errorf("Env does not contain %q", want)
 		}
 	}
 }
 
-// Lo que no es locale se conserva: sin PATH el subproceso ni arranca, y sin el
-// entorno del usuario las CLIs pierden la config que las autentica.
-func TestEnvConservaElResto(t *testing.T) {
-	t.Setenv("GITDASH_TEST_MARKER", "sigue-vivo")
+func TestEnvKeepsTheRest(t *testing.T) {
+	t.Setenv("GITDASH_TEST_MARKER", "still-alive")
 	env := Env()
-	if !slicesHas(env, "GITDASH_TEST_MARKER=sigue-vivo") {
-		t.Error("Env tiró una variable que no es locale")
+	if !slicesHas(env, "GITDASH_TEST_MARKER=still-alive") {
+		t.Error("Env dropped a variable that is not locale")
 	}
 	if len(env) == 0 {
-		t.Error("Env está vacío")
+		t.Error("Env is empty")
 	}
 }
 
-func TestEnvAgregaLasVariablesDelForge(t *testing.T) {
+func TestEnvAddsTheVariablesOfTheForge(t *testing.T) {
 	env := Env("GH_PROMPT_DISABLED=1")
 	if !slicesHas(env, "GH_PROMPT_DISABLED=1") {
-		t.Error("Env no agrego la variable extra")
+		t.Error("Env did not add the extra variable")
 	}
 }
 
-// El motivo del fallo sale de stderr, y el código de salida se preserva: son
-// las dos cosas que necesita el toast para decir qué pasó. stderr vacío cae al
-// error del propio proceso, porque un Msg vacío se clasificaría como fallo de
-// red sin motivo y dejaría al usuario sin nada que hacer.
-func TestRunCapturaStderrYCodigoDeSalida(t *testing.T) {
-	bin := stub(t, "#!/bin/sh\necho 'el motivo real' >&2\nexit 3\n")
+// An empty stderr falls back to the process error because an empty Msg would classify as a network failure with no reason, leaving the user with nothing to do.
+func TestRunCapturesStderrAndCodeOfOutput(t *testing.T) {
+	bin := stub(t, "#!/bin/sh\necho 'the real reason' >&2\nexit 3\n")
 	_, err := (&Runner{Bin: bin}).Run(context.Background(), "-t", "x")
 	var cerr *Error
 	if !errors.As(err, &cerr) {
 		t.Fatalf("error = %T, quiero *tool.Error", err)
 	}
-	if cerr.Msg != "el motivo real" {
-		t.Errorf("Msg = %q, quiero el stderr", cerr.Msg)
+	if cerr.Msg != "the real reason" {
+		t.Errorf("Msg = %q, want the stderr", cerr.Msg)
 	}
 	if cerr.ExitCode != 3 {
 		t.Errorf("ExitCode = %d, quiero 3", cerr.ExitCode)
 	}
 	if cerr.Bin != bin || !slicesHas(cerr.Args, "-t") {
-		t.Errorf("Error no recuerda el argv: %+v", cerr)
+		t.Errorf("Error does not remember the argv: %+v", cerr)
 	}
 	if !strings.Contains(cerr.Error(), "exit 3") {
-		t.Errorf("el mensaje no menciona el código: %q", cerr)
+		t.Errorf("the message does not mention the code: %q", cerr)
 	}
 
-	// stderr vacío: el motivo sale del error del proceso y no queda vacío.
 	_, err = (&Runner{Bin: stub(t, "#!/bin/sh\nexit 7\n")}).Run(context.Background())
 	if !errors.As(err, &cerr) {
 		t.Fatalf("error = %T, quiero *tool.Error", err)
 	}
 	if cerr.Msg == "" {
-		t.Error("sin stderr el motivo no puede quedar vacío")
+		t.Error("without stderr the reason cannot be empty")
 	}
 	if cerr.ExitCode != 7 {
 		t.Errorf("ExitCode = %d, quiero 7", cerr.ExitCode)
 	}
 	if cerr.Unwrap() == nil {
-		t.Error("Unwrap devuelve nil: se pierde la causa de exec")
+		t.Error("Unwrap returns nil: exec's cause is lost")
 	}
 }
 
-// stdout vuelve incluso en error. Una CLI puede salir con código distinto de
-// cero y traer el dato útil en stdout; tirarlo deja al usuario sin el mensaje
-// que sí llegó.
-func TestRunDevuelveStdoutAunqueFalle(t *testing.T) {
-	bin := stub(t, "#!/bin/sh\necho 'salida válida'\nexit 1\n")
+func TestRunReturnsStdoutAlthoughFails(t *testing.T) {
+	bin := stub(t, "#!/bin/sh\necho 'valid output'\nexit 1\n")
 	out, err := (&Runner{Bin: bin}).Run(context.Background())
 	if err == nil {
-		t.Fatal("se esperaba error")
+		t.Fatal("expected an error")
 	}
-	if strings.TrimSpace(out) != "salida válida" {
-		t.Errorf("stdout = %q, quiero la salida válida aunque el comando falle", out)
+	if strings.TrimSpace(out) != "valid output" {
+		t.Errorf("stdout = %q, want the valid output even though the command failed", out)
 	}
 }
 
-// Cada elemento del argv llega como elemento. Es lo que hace seguro pasar un
-// título escrito por la persona: sin comillas de por medio, un ";" o un
-// "$(...)" no son sintaxis, son texto.
-func TestRunPasaElArgvElementoPorElemento(t *testing.T) {
-	nasty := `doble "comilla" & $(id) ; echo inyectado | cat`
+// Each argv element arrives as one element, which is what makes it safe to pass a title written by a person: with no quotes in between, a ";" or a "$(...)" is text, not syntax.
+func TestRunPassesTheArgvElementForElement(t *testing.T) {
+	nasty := `doble "quote" & $(id) ; echo inyectado | cat`
 	bin := stub(t, "#!/bin/sh\nprintf 'argc=%s\\n' \"$#\"\nprintf '%s\\0' \"$@\"\n")
 	out, err := (&Runner{Bin: bin}).Run(context.Background(),
-		"pr", "create", "-t", nasty, "-b", "cuerpo con\ttab y\nnueva línea", "-B", "main")
+		"pr", "create", "-t", nasty, "-b", "body with\ttab and\nnew line", "-B", "main")
 	if err != nil {
-		t.Fatalf("Run falló: %v", err)
+		t.Fatalf("Run failed: %v", err)
 	}
 	if !strings.HasPrefix(out, "argc=8\n") {
 		t.Errorf("argc = %q, quiero 8 elementos", strings.SplitN(out, "\n", 2)[0])
@@ -151,60 +134,51 @@ func TestRunPasaElArgvElementoPorElemento(t *testing.T) {
 	if got := strings.Split(strings.TrimSuffix(payload, "\x00"), "\x00"); len(got) != 8 {
 		t.Fatalf("llegaron %d elementos: %q", len(got), got)
 	} else if got[3] != nasty {
-		t.Errorf("el valor no llegó entero: %q", got[3])
-	} else if got[5] != "cuerpo con\ttab y\nnueva línea" {
-		t.Errorf("el cuerpo con saltos de línea no llegó entero: %q", got[5])
+		t.Errorf("the value did not arrive whole: %q", got[3])
+	} else if got[5] != "body with\ttab and\nnew line" {
+		t.Errorf("the body with line breaks did not arrive whole: %q", got[5])
 	}
 }
 
-// Sin timeout, una CLI colgada deja la TUI esperando para siempre. Timeout=0
-// (cero explícito, el valor de un Runner construido a mano) y negativo tienen
-// que caer al default igual: con el plazo en cero el proceso muere al instante
-// aunque sea trivial.
-func TestRunAplicaElTimeoutPorDefecto(t *testing.T) {
+func TestRunAppliesTheTimeoutForBug(t *testing.T) {
 	bin := stub(t, "#!/bin/sh\necho ok\n")
 	if _, err := (&Runner{Bin: bin}).Run(context.Background()); err != nil {
-		t.Errorf("timeout=0 debería usar el default, pero falló: %v", err)
+		t.Errorf("timeout=0 should use the default, but failed: %v", err)
 	}
 	if _, err := (&Runner{Bin: bin, Timeout: -time.Second}).Run(context.Background()); err != nil {
-		t.Errorf("un timeout negativo debería caer al default, pero falló: %v", err)
+		t.Errorf("a negative timeout should fall back to the default, but failed: %v", err)
 	}
 	r := &Runner{Bin: bin}
 	if _, err := r.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if r.Timeout != 0 {
-		t.Errorf("Run mutó el Timeout del Runner: %v", r.Timeout)
+		t.Errorf("Run mutated the Runner's Timeout: %v", r.Timeout)
 	}
-	// Y un plazo positivo y corto se respeta: el comando duerme más de lo que
-	// se le da y muere por plazo.
 	slow := stub(t, "#!/bin/sh\nsleep 5\n")
 	if _, err := (&Runner{Bin: slow, Timeout: 50 * time.Millisecond}).Run(context.Background()); err == nil {
-		t.Error("un comando que excede el timeout tiene que fallar")
+		t.Error("a command that exceeds the timeout has to fail")
 	}
 }
 
-// El binario inexistente es un error de entorno (gh no instalado), no un
-// timeout ni un fallo de la CLI: tiene que llegar como el error que es, con un
-// motivo que el toast pueda enseñar en vez de un "not found" sin contexto.
-func TestRunConBinarioInexistente(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-existe")
+func TestRunWithBinaryNonexistent(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nonexistent")
 	_, err := (&Runner{Bin: missing}).Run(context.Background())
 	if err == nil {
-		t.Fatal("se esperaba error")
+		t.Fatal("expected an error")
 	}
 	var cerr *Error
 	if !errors.As(err, &cerr) {
 		t.Fatalf("error = %T, quiero *tool.Error", err)
 	}
 	if cerr.Err == nil {
-		t.Error("la causa de exec no se preservó")
+		t.Error("exec's cause was not preserved")
 	}
-	if !strings.Contains(cerr.Msg, "no-existe") {
-		t.Errorf("Msg = %q, quiero que nombre el binario que falta", cerr.Msg)
+	if !strings.Contains(cerr.Msg, "nonexistent") {
+		t.Errorf("Msg = %q, want it to name the missing binary", cerr.Msg)
 	}
 	if cerr.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, quiero 0: no llegó a ejecutarse", cerr.ExitCode)
+		t.Errorf("ExitCode = %d, want 0: it never ran", cerr.ExitCode)
 	}
 }
 
@@ -221,7 +195,6 @@ func TestExitCode(t *testing.T) {
 	if got := ExitCode(errWrap{&Error{ExitCode: 9}}); got != 9 {
 		t.Errorf("ExitCode(envuelto) = %d, quiero 9", got)
 	}
-	// Y el *exec.ExitError crudo, que es lo que devuelve exec sin envolver.
 	_, err := (&Runner{Bin: stub(t, "#!/bin/sh\nexit 6\n")}).Run(context.Background())
 	var cerr *Error
 	if !errors.As(err, &cerr) {
@@ -240,8 +213,8 @@ func TestFirstLine(t *testing.T) {
 		"uno\n":        "uno",
 		"":             "",
 		"\n":           "",
-		"con 3 lineas": "con 3 lineas",
-		"motivo\nargv": "motivo",
+		"with 3 lines": "with 3 lines",
+		"reason\nargv": "reason",
 	}
 	for in, want := range cases {
 		if got := FirstLine(in); got != want {
@@ -263,18 +236,10 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// El plazo por defecto son 30 SEGUNDOS y está escrito como producto
-// (`30 * time.Second`), así que el mutante de ARITHMETIC_BASE lo convierte en
-// `30 / time.Second` = 30ms. Con un plazo tan corto, `gh pr create` de una PR
-// real nunca llega a responder y el overlay falla siempre: un bug de producción
-// disfrazado de constante.
-//
-// La aserción va en unidades, no contra la constante: comparar `r.Timeout` con
-// `DefaultTimeout` (como hace TestNew) no puede fallar, porque los dos lados
-// llevan el mismo error. Aquí se compara contra 30s, un número del enunciado.
-func TestDefaultTimeoutSonTreintaSegundos(t *testing.T) {
+// The deadline is 30 SECONDS written as a product, so the ARITHMETIC_BASE mutant makes it 30ms and every real `gh pr create` fails; the assertion is in units, because comparing `r.Timeout` with `DefaultTimeout` cannot fail (same error on both sides).
+func TestDefaultTimeoutAreThirtySeconds(t *testing.T) {
 	if DefaultTimeout() != 30*time.Second {
-		t.Errorf("DefaultTimeout() = %v, want 30s (un %v mata cualquier gh/glab real)",
+		t.Errorf("DefaultTimeout() = %v, want 30s (a %v kills any real gh/glab)",
 			DefaultTimeout(), DefaultTimeout())
 	}
 	r := New("gh")
@@ -288,8 +253,8 @@ type errWrap struct{ err error }
 func (e errWrap) Error() string { return "envuelto: " + e.err.Error() }
 func (e errWrap) Unwrap() error { return e.err }
 
-func slicesHas(hay []string, needle string) bool {
-	for _, h := range hay {
+func slicesHas(has []string, needle string) bool {
+	for _, h := range has {
 		if h == needle {
 			return true
 		}
@@ -297,24 +262,18 @@ func slicesHas(hay []string, needle string) bool {
 	return false
 }
 
-// Error() solo añade el código de salida cuando NO es cero. El caso de un fallo
-// sin código (que se corta por contexto, o que no viene de un *exec.ExitError)
-// tiene que decir lo mismo sin el sufijo "(exit N)": un "(exit 0)" en un error
-// seria un mensaje que se contradice, y el texto es lo que lee el usuario en el
-// panel del log.
-func TestErrorSinCodigoNoDiceExit(t *testing.T) {
+func TestErrorWithoutCodeNotSaysExit(t *testing.T) {
 	e := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "contexto cancelado"}
 	got := e.Error()
 	want := "gh pr list: contexto cancelado"
 	if got != want {
-		t.Errorf("Error() = %q, want %q (sin sufijo de exit)", got, want)
+		t.Errorf("Error() = %q, want %q (no exit suffix)", got, want)
 	}
 	if strings.Contains(got, "exit") {
-		t.Errorf("Error() = %q, want sin la palabra exit", got)
+		t.Errorf("Error() = %q, want without the word exit", got)
 	}
-	// Y con código sigue apareciendo: el caso de arriba no puede romper el otro.
 	e2 := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "boom", ExitCode: 2}
 	if !strings.Contains(e2.Error(), "(exit 2)") {
-		t.Errorf("Error() = %q, want el sufijo (exit 2)", e2.Error())
+		t.Errorf("Error() = %q, want the suffix (exit 2)", e2.Error())
 	}
 }

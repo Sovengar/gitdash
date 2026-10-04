@@ -1,5 +1,3 @@
-// Tests de las acciones con handoff de terminal: tecla g (lazygit) y
-// modo comando `!` (input al final de la ficha del panel) via worktrunk.
 package tui
 
 import (
@@ -22,28 +20,19 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// El plazo de un comando `!` son 5 MINUTOS, escritos como producto
-// (`5 * time.Minute`). El mutante de ARITHMETIC_BASE lo convierte en
-// `5 / time.Minute`, o sea 8.3ms: cualquier comando real —un build, un test, un
-// `git fetch`— se cortaría antes de imprimir nada, y el usuario vería un fallo
-// seco sin salida.
-//
-// Se comprueba con un `sleep` de medio segundo, que pasa con 5m y no con 8ms. No
-// se baja la constante ni se espera a que expire de verdad: un test de 5 minutos
-// para tapar un mutante no es un test, es un castigo. La aserción mira el código
-// de salida, que es donde se ve el corte por contexto.
-func TestComandoNoSeCortaEnMedioSegundo(t *testing.T) {
+// The `!` deadline is 5 MINUTES written as a product, so the ARITHMETIC_BASE mutant makes it 8.3ms and every real command dies with no output; checked with a half-second sleep and the exit code, never by waiting it out.
+func TestCommandNotIsCutsInMiddleSecond(t *testing.T) {
 	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "sleep 0.5; echo tardado")
 	if code != 0 {
-		t.Fatalf("un comando de medio segundo debe salir con 0, dio %d (salida %q): "+
-			"el plazo de %v lo cortó antes de terminar", code, out, commandTimeout())
+		t.Fatalf("a half-second command must exit 0, got %d (output %q): "+
+			"the %v deadline cut it short before it finished", code, out, commandTimeout())
 	}
 	if !strings.Contains(out, "tardado") {
-		t.Errorf("el comando no llegó a imprimir su salida: %q", out)
+		t.Errorf("the command never printed its output: %q", out)
 	}
 }
 
-func TestRunShellCmdCapturaSalidaYExit(t *testing.T) {
+func TestRunShellCmdCapturesOutputAndExit(t *testing.T) {
 	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "echo hola && exit 0")
 	if code != 0 {
 		t.Fatalf("code = %d, quiero 0", code)
@@ -57,20 +46,18 @@ func TestRunShellCmdCapturaSalidaYExit(t *testing.T) {
 		t.Fatalf("code = %d, quiero 3", code2)
 	}
 	if !strings.Contains(out2, "stderr-va-junto") {
-		t.Fatalf("stderr no fue capturado: %q", out2)
+		t.Fatalf("stderr was not captured: %q", out2)
 	}
 }
 
-// flujo completo del modo comando: `!` abre el input al final de la ficha del
-// panel, teclear, enter lanza el comando en el repo y marca running "cmd".
-func TestBangModoComandoFlujo(t *testing.T) {
+func TestBangModeCommandFlow(t *testing.T) {
 	p := proj("demo", "/tmp/gitdash-test/demo", true)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
-	m, _ = press(m, "!") // abre el input
+	m, _ = press(m, "!") // opens the input
 	if !m.cmdOpen {
-		t.Fatal("! no abrió el modo comando")
+		t.Fatal("! did not open the command mode")
 	}
 
 	m, _ = press(m, "g")
@@ -82,15 +69,14 @@ func TestBangModoComandoFlujo(t *testing.T) {
 
 	m, _ = press(m, "enter")
 	if m.cmdOpen {
-		t.Fatal("enter no cerró el modo comando")
+		t.Fatal("enter did not close the command mode")
 	}
 	if m.running[p.Path] != "cmd" {
 		t.Fatalf("running = %q, quiero \"cmd\"", m.running[p.Path])
 	}
 }
 
-// esc cancela el input sin lanzar nada; enter con input vacío tampoco.
-func TestBangModoComandoCancelar(t *testing.T) {
+func TestBangModeCommandCancel(t *testing.T) {
 	p := proj("demo", "/tmp/gitdash-test/demo", true)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
@@ -98,26 +84,24 @@ func TestBangModoComandoCancelar(t *testing.T) {
 	m, _ = press(m, "!")
 	m, _ = press(m, "esc")
 	if m.cmdOpen {
-		t.Fatal("esc no cerró el modo comando")
+		t.Fatal("esc did not close the command mode")
 	}
 	if _, busy := m.running[p.Path]; busy {
-		t.Fatal("esc lanzó un comando")
+		t.Fatal("esc launched a command")
 	}
 
 	m, _ = press(m, "!")
 	m, cmd3 := press(m, "enter")
 	if m.cmdOpen {
-		t.Fatal("enter con input vacío no cerró el modo comando")
+		t.Fatal("enter with an empty input did not close the command mode")
 	}
-	// enter vacío abre shell interactiva ($SHELL), si existe
 	if _, err := shellPath(); err == nil && m.running[p.Path] != "shell" {
-		t.Fatalf("enter vacío debería abrir shell interactiva, running = %q", m.running[p.Path])
+		t.Fatalf("an empty enter should open an interactive shell, running = %q", m.running[p.Path])
 	} else if err != nil && cmd3 == nil {
-		t.Fatal("sin $SHELL debería notificar")
+		t.Fatal("without $SHELL it should notify")
 	}
 }
 
-// shellPath replica el fallback de openShellCmd.
 func shellPath() (string, error) {
 	s := os.Getenv("SHELL")
 	if s == "" {
@@ -126,34 +110,22 @@ func shellPath() (string, error) {
 	return exec.LookPath(s)
 }
 
-// ! en un repo sin git notifica en vez de abrir el input.
-func TestBangSinRepo(t *testing.T) {
+func TestBangWithoutRepo(t *testing.T) {
 	p := proj("bare", "/tmp/gitdash-test/bare", false)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
 	m, cmd := press(m, "!")
 	if m.cmdOpen {
-		t.Fatal("! abrió el input en un repo sin git")
+		t.Fatal("! opened the input in a repo without git")
 	}
 	if cmd == nil {
-		t.Fatal("sin repo debería notificar")
+		t.Fatal("without a repo it should notify")
 	}
 }
 
-// conLazygitFalso pone un lazygit de mentira lo PRIMERO en el PATH, para que el
-// LookPath de openLazygitCmd pase sin que la maquina tenga lazygit instalado.
-//
-// Es el mismo truco que usan las CLI de forge (forgeStub) y el propio
-// TestLazygitOcupadoDiceLaAccionQueCorre: lo que se prueba es lo que gitdash
-// hace alrededor del handoff, y el stub cierra ese circulo sin depender de que
-// la herramienta este en la maquina.
-//
-// Antes estos tests llevaban `t.Skip("lazygit no instalado")`, y en un runner sin
-// lazygit (que es el caso de CI) el camino ENTERO se saltaba: sus statements no
-// llegaban al perfil y la cobertura dependia de la maquina. Con el stub, local y
-// CI miden lo mismo.
-func conLazygitFalso(t *testing.T) {
+// A fake lazygit FIRST in the PATH, the same trick the forge CLIs use: with the old `t.Skip("lazygit not installed")` the whole path was skipped on CI and coverage depended on the machine.
+func withFakeLazygit(t *testing.T) {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "lazygit")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -162,9 +134,8 @@ func conLazygitFalso(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// tecla g: marca lazygit como running en el repo; sin repo solo notifica.
 func TestGLazygit(t *testing.T) {
-	conLazygitFalso(t) // el LookPath tiene que pasar en cualquier maquina
+	withFakeLazygit(t) // LookPath has to pass on any machine
 	p := proj("demo", "/tmp/gitdash-test/demo", true)
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
@@ -174,40 +145,34 @@ func TestGLazygit(t *testing.T) {
 		t.Fatalf("running = %q, quiero \"lazygit\"", m.running[p.Path])
 	}
 	if cmd == nil {
-		t.Fatal("g no devolvió tea.Cmd")
+		t.Fatal("g returned no tea.Cmd")
 	}
 
-	sin := proj("bare", "/tmp/gitdash-test/bare", false)
-	m2 := newTestModel(t, []discovery.Project{sin},
-		map[string]gitstatus.Snapshot{sin.Path: snapClean()})
+	without := proj("bare", "/tmp/gitdash-test/bare", false)
+	m2 := newTestModel(t, []discovery.Project{without},
+		map[string]gitstatus.Snapshot{without.Path: snapClean()})
 	m2, cmd2 := press(m2, "g")
-	if _, busy := m2.running[sin.Path]; busy {
-		t.Fatal("g lanzó lazygit en un repo sin git")
+	if _, busy := m2.running[without.Path]; busy {
+		t.Fatal("g launched lazygit in a repo without git")
 	}
 	if cmd2 == nil {
-		t.Fatal("sin repo debería notificar")
+		t.Fatal("without a repo it should notify")
 	}
 }
 
-// El cursor del input ! cae sobre el primer rune del placeholder (bubbles
-// v2 placeholderView): debe ser un espacio, no una letra que parezca
-// tecleada (bug del "! c" fantasma).
-func TestBangPlaceholderCursorLimpio(t *testing.T) {
+// The input cursor lands on the first rune of the placeholder (bubbles v2 placeholderView), which must be a space and not a letter that looks typed (the phantom "! c" bug).
+func TestBangPlaceholderCursorClean(t *testing.T) {
 	m := New(config.Defaults())
 	m.cmdOpen = true
 	v := stripANSI(m.cmdInput.View())
 	if !strings.HasPrefix(v, "!  ") {
-		t.Fatalf("view = %q, quizo empezar por \"!  \" (prompt + espacio del placeholder)", v)
+		t.Fatalf("view = %q, it wanted to start with \"!  \" (prompt + placeholder space)", v)
 	}
 }
 
-// El input de `!` se pinta al final de la ficha del panel y SIEMPRE visible:
-// aunque la ficha haya llenado la caja, lo que se recorta es la ficha, no el
-// prompt (escribir un comando sin verlo es escribir a ciegas).
-func TestBangInputVisibleEnElPanel(t *testing.T) {
+func TestBangInputVisibleInThePanel(t *testing.T) {
 	projects, states := fixtureProjects()
 	s := states["/tmp/dirty-api"]
-	// Ficha larga: ficheros y commits de sobra para llenar el panel.
 	for i := 0; i < 20; i++ {
 		s.Files = append(s.Files, gitstatus.FileEntry{Code: ".M", Path: fmt.Sprintf("pkg/f%02d.go", i)})
 	}
@@ -220,50 +185,43 @@ func TestBangInputVisibleEnElPanel(t *testing.T) {
 	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/dirty-api")
 	lay := m.layout()
 	if lay.previewLines < detailHeadLines+cmdInputLines {
-		t.Fatalf("precondición: el panel es demasiado pequeño (%d)", lay.previewLines)
+		t.Fatalf("precondition: the panel is too small (%d)", lay.previewLines)
 	}
 
 	m, _ = press(m, "!")
 	if !m.cmdOpen {
-		t.Fatal("! no abrió el input")
+		t.Fatal("! did not open the input")
 	}
 	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "dirty-api"))
 	if len(panel) != lay.previewLines {
-		t.Errorf("el panel mide %d líneas, want %d (el input no puede desbordarlo)",
+		t.Errorf("the panel measures %d lines, want %d (the input must not overflow it)",
 			len(panel), lay.previewLines)
 	}
 	if last := lastNonEmpty(panel); !strings.HasPrefix(last, "! ") {
-		t.Errorf("la última línea del panel es %q, want el prompt del input\n%v", last, panel)
+		t.Errorf("the panel's last line is %q, want the input's prompt\n%v", last, panel)
 	}
-	// Lo que se recorta es la ficha por arriba, no la cabecera: el repo y su
-	// estado siguen estando.
 	if !strings.HasPrefix(panel[0], "path") || !strings.Contains(panel[0], "/tmp/dirty-api") {
-		t.Errorf("la cabecera de la ficha no está: %q", panel[0])
+		t.Errorf("the card's header is missing: %q", panel[0])
 	}
-	// Con el input abierto la ficha no revive los keybinds del pie.
 	if strings.Contains(strings.Join(panel, "\n"), "g lazygit") {
-		t.Errorf("con el input abierto vuelven los keybinds del pie:\n%v", panel)
+		t.Errorf("with the input open the footer keybinds come back:\n%v", panel)
 	}
 }
 
-// Sin input abierto, la ficha no lleva pie: las teclas de la fila viven en la
-// sección de keybinds, y aquí solo se pintan datos del repo.
-func TestFichaNoRepiteLosKeybinds(t *testing.T) {
+func TestCardNotRepeatsTheKeybinds(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/old-clean")
 	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "old-clean"))
 	for _, dup := range []string{"g lazygit", "! cmd", "lazygit"} {
 		if last := lastNonEmpty(panel); strings.Contains(last, dup) {
-			t.Errorf("la ficha termina en %q, quiere un dato del repo", last)
+			t.Errorf("the card ends at %q, it wants some repo data", last)
 		}
 		if strings.Contains(strings.Join(panel, "\n"), dup) {
-			t.Errorf("la ficha repite %q, que ya está en keybinds:\n%v", dup, panel)
+			t.Errorf("the card repeats %q, which is already in keybinds:\n%v", dup, panel)
 		}
 	}
 }
 
-// panelLines devuelve el interior de una caja sin sus bordes laterales, para
-// poder mirar líneas concretas del panel.
 func panelLines(t *testing.T, box string) []string {
 	t.Helper()
 	var out []string
@@ -275,7 +233,6 @@ func panelLines(t *testing.T, box string) []string {
 	return out
 }
 
-// lastNonEmpty devuelve la última línea con contenido.
 func lastNonEmpty(lines []string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if s := strings.TrimSpace(lines[i]); s != "" {
@@ -285,30 +242,27 @@ func lastNonEmpty(lines []string) string {
 	return ""
 }
 
-// Un handoff (lazygit, editor, shell) que falla tiene que ENSEÑAR el motivo: el
-// toast es lo único que ve el usuario, porque la terminal ya se ha cerrado. Con
-// la guarda invertida, un handoff correcto avisaría de un error que no hubo, y
-// uno fallido no diría nada.
-func TestHandoffConErrorAvisa(t *testing.T) {
+// The toast is the only thing the user sees because the terminal has already closed, and with the guard inverted a correct handoff would warn about an error that did not happen while a failed one would say nothing.
+func TestHandoffWithErrorWarns(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 
 	for _, c := range []struct {
-		nombre   string
+		name     string
 		err      error
-		quiere   string
+		want     string
 		quiereNo string
 	}{
-		{"fallido avisa el motivo", errHandoff("no such file or directory"), "command", ""},
-		{"correcto no avisa nada", nil, "", "command:"},
+		{"the failed one reports the reason", errHandoff("no such file or directory"), "command", ""},
+		{"the successful one reports nothing", nil, "", "command:"},
 	} {
 		out, _ := m.Update(execDoneMsg{path: "/tmp/old-clean", action: "lazygit", err: c.err})
 		plano := stripANSI(out.(Model).View().Content)
-		if c.quiere != "" && !strings.Contains(plano, c.quiere) {
-			t.Errorf("%s: no se ve %q:\n%s", c.nombre, c.quiere, plano)
+		if c.want != "" && !strings.Contains(plano, c.want) {
+			t.Errorf("%s: %q is not visible:\n%s", c.name, c.want, plano)
 		}
 		if c.quiereNo != "" && strings.Contains(plano, c.quiereNo) {
-			t.Errorf("%s: avisó %q sin motivo:\n%s", c.nombre, c.quiereNo, plano)
+			t.Errorf("%s: it reported %q with no reason:\n%s", c.name, c.quiereNo, plano)
 		}
 	}
 }
@@ -317,39 +271,32 @@ type errHandoff string
 
 func (e errHandoff) Error() string { return string(e) }
 
-// El recuento del fetch distingue lo que fue de lo que falló: un fetch que
-// falla en un repo no puede terminar diciendo "todo ok". Los contadores se
-// publican en fetchDoneMsg, que es lo que la barra y el toast resumen.
-func TestFetchDoneReportaOkYFailed(t *testing.T) {
+func TestFetchDoneReportsOkAndFailed(t *testing.T) {
 	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 2, failed: 1})
 	m := out.(Model)
 	plano := stripANSI(m.View().Content)
 	if !strings.Contains(plano, "2 ok") && !strings.Contains(plano, "ok 2") {
-		t.Errorf("el resumen no dice cuántos fueron bien:\n%s", plano)
+		t.Errorf("the summary does not say how many succeeded:\n%s", plano)
 	}
 	if !strings.Contains(plano, "1 failed") && !strings.Contains(plano, "failed 1") {
-		t.Errorf("el resumen no dice cuántos fallaron:\n%s", plano)
+		t.Errorf("the summary does not say how many failed:\n%s", plano)
 	}
-	// Sin fallos no hay línea de fallo: la tabla está quieta.
 	out, _ = newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 3})
 	plano = stripANSI(out.(Model).View().Content)
 	if strings.Contains(plano, "failed") {
-		t.Errorf("sin fallos se pintó la línea de fallo:\n%s", plano)
+		t.Errorf("with no failures the failure line was painted:\n%s", plano)
 	}
 }
 
-// El recuento del fetch distingue lo que fue de lo que falló: con un repo roto
-// entre los que se barren, el resumen tiene que decir "1 failed", no "todo ok".
-// Los contadores se publican en fetchDoneMsg, que es lo que la barra resume.
-func TestFetchAllCuentaLosQueFallan(t *testing.T) {
-	bueno, _ := testutil.NewRepo(t, false)
+func TestFetchAllCountsTheOnesThatFail(t *testing.T) {
+	good, _ := testutil.NewRepo(t, false)
 	roto, _ := testutil.NewRepo(t, false)
-	testutil.BreakGit(t, roto) // el fetch de este repo falla
+	testutil.BreakGit(t, roto) // this repo's fetch fails
 	projects := []discovery.Project{
-		proj("bueno", bueno, true),
+		proj("good", good, true),
 		proj("roto", roto, true),
 	}
-	states := map[string]gitstatus.Snapshot{bueno: snapClean(), roto: snapClean()}
+	states := map[string]gitstatus.Snapshot{good: snapClean(), roto: snapClean()}
 	m := newTestModel(t, projects, states)
 
 	m, _ = press(m, "F") // fetch_all
@@ -362,7 +309,7 @@ func TestFetchAllCuentaLosQueFallan(t *testing.T) {
 				done = fd
 			}
 		case <-deadline:
-			t.Fatal("no se observó fetchDoneMsg")
+			t.Fatal("no fetchDoneMsg observed")
 		}
 	}
 	if done.ok != 1 || done.failed != 1 {
@@ -370,15 +317,11 @@ func TestFetchAllCuentaLosQueFallan(t *testing.T) {
 	}
 }
 
-// El plegado persistido se guarda como un mapa único: las claves de grupo tal
-// cual y los worktrees expandidos bajo su prefijo. Un repo expandido sin ningún
-// grupo plegado es el caso donde una pista de capacidad mal calculada se
-// convertiría en un tamaño negativo.
-func TestSaveCollapsedConMasExpandidosQuePlegados(t *testing.T) {
+func TestSaveCollapsedWithMoreExpandedThanFolded(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
 	m.expanded = map[string]bool{"/tmp/multi": true, "/tmp/otro": true, "/tmp/tercero": true}
-	m.collapsed = map[string]bool{} // ningún grupo plegado: hint negativo si se resta
+	m.collapsed = map[string]bool{} // no collapsed group: a negative hint if it is subtracted
 
 	m.saveCollapsed()
 
@@ -389,28 +332,22 @@ func TestSaveCollapsedConMasExpandidosQuePlegados(t *testing.T) {
 	for _, path := range []string{"/tmp/multi", "/tmp/otro", "/tmp/tercero"} {
 		key := state.WorktreePrefix + path
 		if !got[key] {
-			t.Errorf("falta la clave del worktree expandido %q: %v", key, got)
+			t.Errorf("the expanded worktree key %q is missing: %v", key, got)
 		}
 	}
 }
 
-// Una acción de git CORRIENDO de verdad: el ciclo completo tiene que cerrar —
-// el comando ejecuta con un timeout que no lo mata de entrada, publica su
-// resultado con el motivo real de git y, si fue bien, re-colecciona el estado
-// del repo. Un timeout de 0 (o un "solo re-colecta si falló") se ven aquí.
-func TestAccionDeGitCorreYReColecciona(t *testing.T) {
-	dir, origin := testutil.NewRepo(t, true)         // con upstream
-	testutil.PushUpstreamCommits(t, origin, 1, "up") // el repo local está detrás
-	testutil.FetchLocal(t, dir)                      // con eso, ff limpio
+func TestActionOfGitRunsAndReCollects(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)         // with upstream
+	testutil.PushUpstreamCommits(t, origin, 1, "up") // the local repo is behind
+	testutil.FetchLocal(t, dir)                      // with that, a clean fast-forward
 	states := map[string]gitstatus.Snapshot{dir: snapClean()}
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)}, states)
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "p") // arma el selector
-	m, _ = press(m, "p") // variante default → git pull
+	m, _ = press(m, "p") // arms the selector
+	m, _ = press(m, "p") // default variant -> git pull
 
-	// El re-collect va DESPUÉS del resultado, en la misma goroutine: hay que
-	// seguir leyendo después de ver la acción.
 	deadline := time.After(60 * time.Second)
 	var acc *actionMsg
 	var huboStatus bool
@@ -425,33 +362,26 @@ func TestAccionDeGitCorreYReColecciona(t *testing.T) {
 				huboStatus = true
 			}
 		case <-deadline:
-			t.Fatalf("la acción no cerró el ciclo (acc=%v status=%v)", acc != nil, huboStatus)
+			t.Fatalf("the action did not close the loop (acc=%v status=%v)", acc != nil, huboStatus)
 		}
 	}
 	if acc.err != "" {
-		t.Fatalf("un pull que debía integrar falló: %q (output %q)", acc.err, acc.output)
+		t.Fatalf("a pull that should have integrated failed: %q (output %q)", acc.err, acc.output)
 	}
 	if acc.kind != "pull" {
 		t.Errorf("kind = %q, want pull", acc.kind)
 	}
 	if !huboStatus {
-		t.Error("tras una acción correcta no se re-colectó el estado del repo")
+		t.Error("after a successful action the repo state was not re-collected")
 	}
 }
 
-// Un pull --rebase que choca no es un fallo limpio: deja el rebase a medias. El
-// mensaje tiene que llevar esa marca (rebaseInProgress), porque es lo que
-// cambia el consejo de "reintenta" por "resuelve el rebase". El flag se calcula
-// SOLO si la acción falló y era un pull: con la guarda al revés se consultaría
-// en los pulls correctos (donde nunca hay rebase) y nunca en los que chocan.
-func TestPullQueChocaMarcaElRebaseAMedias(t *testing.T) {
+// The flag is computed ONLY when the action failed and was a pull: with the guard reversed it would be consulted on the correct pulls (where there is never a rebase) and never on the clashing ones.
+func TestPullThatClashesMarksTheRebaseHalfDone(t *testing.T) {
 	dir, origin := testutil.NewRepo(t, true)
-	// El remoto cambia un fichero y el local el mismo con otro contenido: el
-	// pull --rebase no puede reconciliarlo.
 	testutil.PushUpstreamFile(t, origin, "conflicto.txt", "remoto", "remote")
 	testutil.CommitFiles(t, dir, map[string]string{"conflicto.txt": "local"}, "local")
 	testutil.FetchLocal(t, dir)
-	// Y el rebase a medias ya presente (lo que deja el intento anterior).
 	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +390,7 @@ func TestPullQueChocaMarcaElRebaseAMedias(t *testing.T) {
 	m = cursorOn(t, m, dir)
 
 	m, _ = press(m, "p")
-	m, _ = press(m, "r") // variante rebase explícita
+	m, _ = press(m, "r") // explicit rebase variant
 
 	deadline := time.After(60 * time.Second)
 	var acc *actionMsg
@@ -472,35 +402,32 @@ func TestPullQueChocaMarcaElRebaseAMedias(t *testing.T) {
 				acc = &cp
 			}
 		case <-deadline:
-			t.Fatal("el pull no publicó su resultado")
+			t.Fatal("the pull did not publish its result")
 		}
 	}
 	if acc.err == "" {
-		t.Fatal("un pull en conflicto no falló (el fixture no choca)")
+		t.Fatal("a clashing pull did not fail (the fixture does not clash)")
 	}
 	if !acc.rebaseInProgress {
-		t.Errorf("rebaseInProgress = false con rebase a medias: %+v", acc)
+		t.Errorf("rebaseInProgress = false with a mid-rebase: %+v", acc)
 	}
 }
 
-// La shell de `!` y del handoff es la del usuario ($SHELL), no /bin/sh por
-// defecto: es lo que hace que sus aliases y su configuración carguen. El argv
-// que queda en el command log es lo que lo demuestra, así que se mira ahí.
-func TestShellDelHandoffEsLaDelUsuario(t *testing.T) {
-	// La ruta del repo tiene que existir: la acción corre `sh -c` con ese cwd.
+// $SHELL (the user's) is what makes aliases and config load instead of /bin/sh, and the argv left in the command log is what proves it, so that is what is looked at.
+func TestShellOfTheHandoffIsTheOfTheUser(t *testing.T) {
 	dir := t.TempDir()
 	proyectos, states := fixtureProjects()
 	states[dir] = snapClean()
 	proyectos = append(proyectos, proj("cwd", dir, true))
 
-	escribir := func(m Model, texto string) Model {
-		for _, k := range texto {
+	escribir := func(m Model, text string) Model {
+		for _, k := range text {
 			m, _ = press(m, string(k))
 		}
 		return m
 	}
 
-	t.Run("con SHELL en el entorno", func(t *testing.T) {
+	t.Run("with SHELL in the environment", func(t *testing.T) {
 		bash := filepath.Join(t.TempDir(), "mishell")
 		if err := os.WriteFile(bash, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 			t.Fatal(err)
@@ -513,14 +440,14 @@ func TestShellDelHandoffEsLaDelUsuario(t *testing.T) {
 
 		m, _ = press(m, m.cfg.KeyFor("command"))
 		if !m.cmdOpen {
-			t.Fatal("la tecla ! no abrió el input de comando")
+			t.Fatal("the ! key did not open the command input")
 		}
 		m = escribir(m, "hola")
-		m, _ = press(m, "enter") // lanza el comando con la shell del usuario
+		m, _ = press(m, "enter") // runs the command with the user's shell
 		assertUltimoArgvShell(t, rec, bash, "cmd")
 	})
 
-	t.Run("sin SHELL, cae a /bin/sh", func(t *testing.T) {
+	t.Run("without SHELL it falls back to /bin/sh", func(t *testing.T) {
 		t.Setenv("SHELL", "")
 		m := newTestModel(t, proyectos, states)
 		rec := cmdlog.Active()
@@ -535,18 +462,15 @@ func TestShellDelHandoffEsLaDelUsuario(t *testing.T) {
 
 }
 
-// userShell es la resolución compartida por los DOS handoffs (`!` con texto y
-// la shell interactiva del input vacío). El interactivo no se puede ejercitar
-// aquí —tea.ExecProcess no corre sin TTY—, así que la función pura es la que
-// ata la garantía para los dos caminos.
+// The interactive one cannot be exercised here (tea.ExecProcess does not run without a TTY), so the pure function is what pins the guarantee for both paths.
 func TestUserShell(t *testing.T) {
-	t.Run("con SHELL", func(t *testing.T) {
+	t.Run("with SHELL", func(t *testing.T) {
 		t.Setenv("SHELL", "/opt/homebrew/bin/fish")
 		if got := userShell(); got != "/opt/homebrew/bin/fish" {
-			t.Errorf("userShell = %q, want la del usuario", got)
+			t.Errorf("userShell = %q, want the user's", got)
 		}
 	})
-	t.Run("sin SHELL", func(t *testing.T) {
+	t.Run("without SHELL", func(t *testing.T) {
 		t.Setenv("SHELL", "")
 		if got := userShell(); got != "/bin/sh" {
 			t.Errorf("userShell = %q, want /bin/sh", got)
@@ -554,14 +478,12 @@ func TestUserShell(t *testing.T) {
 	})
 }
 
-// assertUltimoArgvShell comprueba la shell con la que se registró el handoff de
-// la acción indicada (`cmd` para `!`, `shell` para la interactiva).
-func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, accion string) {
+func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, action string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		for _, e := range rec.Entries() {
-			if e.Action != accion || len(e.Argv) == 0 {
+			if e.Action != action || len(e.Argv) == 0 {
 				continue
 			}
 			if e.Argv[0] != want {
@@ -570,203 +492,160 @@ func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, accion stri
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no se registró el handoff %q con la shell %q", accion, want)
+			t.Fatalf("the handoff %q with the shell %q was not recorded", action, want)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// --- los tres huecos que el run destapó ---
-
-// El fetch de UN solo repo no lleva recuento: "fetch ok" y no "fetch ok (1
-// repos)", que además suena mal. El caso vive solo si nadie lo afirma: con la
-// condición invertida, un fetch de un repo caería en el mensaje de N.
-func TestFetchDeUnSoloRepoNoLlevaRecuento(t *testing.T) {
+func TestFetchOfAOnlyRepoNotCarriesCount(t *testing.T) {
 	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 1})
 	plano := stripANSI(out.(Model).View().Content)
 	if !strings.Contains(plano, "fetch ok") {
-		t.Errorf("el toast no dice que el fetch fue bien:\n%s", plano)
+		t.Errorf("the toast does not say the fetch went well:\n%s", plano)
 	}
 	if strings.Contains(plano, "(1 repos)") {
-		t.Errorf("un fetch de un repo no lleva recuento, y menos con la palabra \"repos\":\n%s", plano)
+		t.Errorf("a single-repo fetch carries no count, let alone the word \"repos\":\n%s", plano)
 	}
 }
 
-// El comando `!` distinguía el éxito del fallo por su código de salida, y con un
-// solo repo el mensaje de un fallo dice exit 0 y el de un éxito lo omite: un
-// toast que-announces "falló" con exit 0 hace que el usuario vaya a mirar un
-// comando que salió bien.
-func TestComandoExitoYSalidaNoSeConfunden(t *testing.T) {
+// A toast announcing "failed" with exit 0 sends the user to inspect a command that succeeded.
+func TestCommandSuccessAndOutputNotIsConfuse(t *testing.T) {
 	for _, c := range []struct {
-		nombre string
-		exit   string
-		quiere string
+		name string
+		exit string
+		want string
 	}{
-		{"exit 0 no es un fallo", "0", "ok"},
-		{"un código de salida sí lo es", "3", "exit 3"},
+		{"exit 0 is not a failure", "0", "ok"},
+		{"a non-zero exit code is", "3", "exit 3"},
 	} {
 		out, _ := newTestModel(t, nil, nil).Update(cmdResultMsg{
 			path: "/tmp/dirty-api", command: "echo hola", exit: c.exit,
 		})
 		m := out.(Model)
 		plano := stripANSI(m.View().Content)
-		if !strings.Contains(plano, c.quiere) {
-			t.Errorf("%s: el aviso no dice %q:\n%s", c.nombre, c.quiere, plano)
+		if !strings.Contains(plano, c.want) {
+			t.Errorf("%s: the warning does not say %q:\n%s", c.name, c.want, plano)
 		}
-		// El resultado queda guardado para la ficha aunque el comando falle: el
-		// código de salida es parte del dato, no solo del aviso.
 		if got := m.lastCmd["/tmp/dirty-api"]; got.exit != c.exit {
-			t.Errorf("%s: lastCmd.exit = %q, want %q", c.nombre, got.exit, c.exit)
+			t.Errorf("%s: lastCmd.exit = %q, want %q", c.name, got.exit, c.exit)
 		}
 		if got := m.lastCmd["/tmp/dirty-api"]; got.command != "echo hola" {
-			t.Errorf("%s: lastCmd.command = %q, want el comando tecleado", c.nombre, got.command)
+			t.Errorf("%s: lastCmd.command = %q, want the typed command", c.name, got.command)
 		}
-		// Y el repo queda libre: un `!` que falla no puede dejar la fila
-		// bloqueada con "already running" para siempre.
+		// A failed `!` must not leave the row blocked with "already running" forever.
 		if _, busy := m.running["/tmp/dirty-api"]; busy {
-			t.Errorf("%s: el repo quedó con una acción en curso tras el comando", c.nombre)
+			t.Errorf("%s: the repo was left with a running action after the command", c.name)
 		}
 	}
 }
 
-// `end` sobre una tabla VACÍA tiene que dejar el cursor en 0, no en un índice
-// que no existe: el clamp de max(0, len-1) existe justo para ese caso, y sin él
-// el cursor se sale de las entradas y el render lee una fila que no hay.
-func TestEndSobreTablaVaciaNoSeSaleDelCursor(t *testing.T) {
+func TestEndAboutTableEmptyNotIsExitsOfTheCursor(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	if len(m.entries()) != 0 {
-		t.Fatalf("el modelo sin proyectos tiene %d entradas, want 0", len(m.entries()))
+		t.Fatalf("the model with no projects has %d entries, want 0", len(m.entries()))
 	}
 
 	m, _ = press(m, "end")
 	if got := m.cursor; got != 0 {
-		t.Errorf("cursor = %d en una tabla vacía, want 0", got)
+		t.Errorf("cursor = %d in an empty table, want 0", got)
 	}
-	// Y con filas, `end` va a la última de verdad.
 	projects, states := fixtureProjects()
 	m2 := newTestModel(t, projects, states)
 	m2, _ = press(m2, "end")
 	if want := len(m2.entries()) - 1; m2.cursor != want {
-		t.Errorf("cursor = %d, want %d (la última fila)", m2.cursor, want)
+		t.Errorf("cursor = %d, want %d (the last row)", m2.cursor, want)
 	}
 }
 
-// El execDoneMsg de un handoff es lo que el comando de la TUI ve al VOLVER del
-// proceso, y de el salen dos cosas: la entrada del log de comandos (con la accion
-// y el argv) y el recollect del estado. Por eso la accion tiene que ser la de la
-// tecla que se pulso, no la de otra: con "editor" donde deberia decir "lazygit",
-// el panel muestra un comando que el usuario nunca ejecuto.
-//
-// Se prueba el metodo y no el closure de tea.ExecProcess porque el cuerpo de ese
-// closure solo corre cuando el proceso termina, con el programa suspendido: no
-// hay forma de escribir un test que lo alcance sin ceder la terminal de verdad.
-func TestHandoffDoneIdentificaLaAccion(t *testing.T) {
+// execDoneMsg is what the TUI command sees on returning from the handoff, so its action must be the key that was pressed; the closure inside tea.ExecProcess cannot be tested because it only runs with the program suspended.
+func TestHandoffDoneIdentifiesTheAction(t *testing.T) {
 	mm := newTestModel(t, nil, nil)
 	m := &mm
-	for _, accion := range []string{"editor", "lazygit", "pull_ai", "visual", "shell"} {
-		msg, ok := m.handoffDone(accion, "/tmp/repo", []string{"argv", "de", accion}, nil).(execDoneMsg)
+	for _, action := range []string{"editor", "lazygit", "pull_ai", "visual", "shell"} {
+		msg, ok := m.handoffDone(action, "/tmp/repo", []string{"argv", "de", action}, nil).(execDoneMsg)
 		if !ok {
-			t.Fatalf("handoffDone(%q) no devolvio un execDoneMsg", accion)
+			t.Fatalf("handoffDone(%q) returned no execDoneMsg", action)
 		}
-		if msg.action != accion {
-			t.Errorf("handoffDone(%q).action = %q, want %q (la accion va al log tal cual)",
-				accion, msg.action, accion)
+		if msg.action != action {
+			t.Errorf("handoffDone(%q).action = %q, want %q (the action goes to the log as is)",
+				action, msg.action, action)
 		}
 		if msg.path != "/tmp/repo" {
-			t.Errorf("handoffDone(%q).path = %q, want /tmp/repo", accion, msg.path)
+			t.Errorf("handoffDone(%q).path = %q, want /tmp/repo", action, msg.path)
 		}
-		if len(msg.argv) != 3 || msg.argv[2] != accion {
-			t.Errorf("handoffDone(%q).argv = %q, want el argv intacto (es lo que se registra)",
-				accion, msg.argv)
+		if len(msg.argv) != 3 || msg.argv[2] != action {
+			t.Errorf("handoffDone(%q).argv = %q, want the argv untouched (that is what gets recorded)",
+				action, msg.argv)
 		}
 		if msg.err != nil {
-			t.Errorf("handoffDone(%q).err = %v, want nil", accion, msg.err)
+			t.Errorf("handoffDone(%q).err = %v, want nil", action, msg.err)
 		}
 	}
 
-	// Y el error del proceso se propaga tal cual: un handoff que salio con
-	// codigo 1 tiene que recollectar igual, no quedarse creyendo que fue limpio.
-	boom := errors.New("salida con codigo 1")
+	boom := errors.New("output with code 1")
 	msg, ok := m.handoffDone("editor", "/tmp/repo", []string{"vim"}, boom).(execDoneMsg)
 	if !ok {
-		t.Fatal("handoffDone no devolvio un execDoneMsg")
+		t.Fatal("handoffDone returned no execDoneMsg")
 	}
 	if !errors.Is(msg.err, boom) {
-		t.Errorf("err = %v, want el error del proceso propagado", msg.err)
+		t.Errorf("err = %v, want the process error propagated", msg.err)
 	}
 }
 
-// Los dos handoffs con guarda LookPath comprueban el binario ANTES de mirar si
-// el repo ya esta ocupado, y en ese orden por un motivo concreto: si la Maquina
-// no tiene lazygit, el aviso tiene que ser "no instalado" y no "ya hay un
-// lazygit corriendo en este repo", que seria mentira.
-//
-// Se prueban las dos guardas por separado porque son guards distintas: la
-// primera es del entorno, la segunda es del modelo.
-func TestHandoffsConGuardaDeLookPath(t *testing.T) {
-	t.Run("lazygit no instalado", func(t *testing.T) {
-		t.Setenv("PATH", t.TempDir()) // sin lazygit
+// Both LookPath-guarded handoffs check the binary BEFORE the busy guard: on a machine without lazygit the warning must be "not installed" and not "a lazygit is already running here", which would be a lie.
+func TestHandoffsWithGuardOfLookPath(t *testing.T) {
+	t.Run("lazygit not installed", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir()) // no lazygit
 		mm := newTestModel(t, nil, nil)
 		m := &mm
 		msg, ok := m.openLazygitCmd("/tmp/repo")().(notifyMsg)
 		if !ok {
-			t.Fatal("openLazygitCmd sin lazygit no devolvio un notifyMsg")
+			t.Fatal("openLazygitCmd without lazygit returned no notifyMsg")
 		}
 		if msg.level != toastWarning || !strings.Contains(msg.text, "not installed") {
-			t.Errorf("aviso = %+v, want un warning de que no esta instalado", msg)
+			t.Errorf("notice = %+v, want a warning that it is not installed", msg)
 		}
-		// Y no se marco el repo como ocupado: no se lanzo nada.
 		if len(m.running) != 0 {
-			t.Errorf("running = %v, want vacio (no se lanzo el handoff)", m.running)
+			t.Errorf("running = %v, want empty (the handoff was not launched)", m.running)
 		}
 	})
 
-	t.Run("shell no encontrada", func(t *testing.T) {
-		t.Setenv("SHELL", "una-shell-que-no-existe-98765")
+	t.Run("shell not found", func(t *testing.T) {
+		t.Setenv("SHELL", "a-shell-that-does-not-exist-98765")
 		t.Setenv("PATH", t.TempDir())
 		mm := newTestModel(t, nil, nil)
 		m := &mm
 		msg, ok := m.openShellCmd("/tmp/repo")().(notifyMsg)
 		if !ok {
-			t.Fatal("openShellCmd sin shell no devolvio un notifyMsg")
+			t.Fatal("openShellCmd without a shell returned no notifyMsg")
 		}
 		if msg.level != toastWarning || !strings.Contains(msg.text, "shell") {
-			t.Errorf("aviso = %+v, want un warning de shell not found", msg)
+			t.Errorf("notice = %+v, want a shell-not-found warning", msg)
 		}
 		if len(m.running) != 0 {
-			t.Errorf("running = %v, want vacio", m.running)
+			t.Errorf("running = %v, want empty", m.running)
 		}
 	})
 
-	// La guarda de ocupado: con el repo ya en `running`, el segundo handoff se
-	// rechaza y lo dice. Aqui el binario SI esta (el shell del sistema), asi que
-	// se llega a la segunda guarda, que es la que se quiere probar.
-	t.Run("repo ya ocupado", func(t *testing.T) {
+	t.Run("repo already busy", func(t *testing.T) {
 		mm := newTestModel(t, nil, nil)
 		m := &mm
 		m.running = map[string]string{"/tmp/repo": "pull"}
 		msg, ok := m.openShellCmd("/tmp/repo")().(notifyMsg)
 		if !ok {
-			t.Fatal("openShellCmd con el repo ocupado no devolvio un notifyMsg")
+			t.Fatal("openShellCmd with the repo busy returned no notifyMsg")
 		}
 		if !strings.Contains(msg.text, "already running") {
-			t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+			t.Errorf("notice = %q, want it to say something is already running", msg.text)
 		}
 		if !strings.Contains(msg.text, "pull") {
-			t.Errorf("aviso = %q, want que nombre la accion que esta corriendo", msg.text)
+			t.Errorf("notice = %q, want it to name the action that is running", msg.text)
 		}
 	})
 }
 
-// recorder de handoffs: NO cede la terminal.
-//
-// tea.ExecProcess suspende el programa entero hasta que el proceso termina, y un
-// programa suspendido no lo reanuda nadie. Por eso el `return tea.ExecProcess(...)`
-// de cada handoff era un statement que no ejecutaba nadie: era el techo de la
-// cobertura de la TUI, no un hueco de tests. Con la inyeccion, el handoff se
-// ejecuta entero en el test —guardas, armado del comando y mensaje de salida— y
-// lo que se comprueba es lo de verdad: que el comando apunta al repo correcto y
-// que el execDoneMsg lleva la accion y el argv que el panel del log va a pintar.
+// A handoff recorder does NOT lend the terminal: tea.ExecProcess suspends the whole program and nobody resumes it, which is why every `return tea.ExecProcess(...)` was a statement nobody ran — the TUI's coverage ceiling.
 func handoffRecorder(t *testing.T) (*Model, *handoffSpy) {
 	t.Helper()
 	mm := newTestModel(t, nil, nil)
@@ -787,39 +666,30 @@ type handoffSpy struct {
 func (h *handoffSpy) exec(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
 	h.argv, h.dir = c.Args, c.Dir
 	h.vals++
-	// Se guarda el callback sin llamarlo: quien lo llama es el runtime, y el
-	// test lo invoca explicitamente para ver el mensaje de salida.
 	h.done = fn
 	return func() tea.Msg { return nil }
 }
 
-// salir entrega el mensaje de salida del proceso, como haria el runtime al
-// terminar el handoff.
 func (h *handoffSpy) salir(err error) tea.Msg {
 	h.t.Helper()
 	return h.done(err)
 }
 
-func TestHandoffEjecutaElProcesoEnElRepo(t *testing.T) {
+func TestHandoffRunsTheProcessInTheRepo(t *testing.T) {
 	for _, c := range []struct {
-		accion string
-		abrir  func(m *Model, path string) tea.Cmd
+		action string
+		open   func(m *Model, path string) tea.Cmd
 		argv0  string
 	}{
 		{"editor", (*Model).openEditorCmd, "vi"},
 		{"lazygit", (*Model).openLazygitCmd, "lazygit"},
 		{"shell", (*Model).openShellCmd, ""},
 	} {
-		t.Run(c.accion, func(t *testing.T) {
+		t.Run(c.action, func(t *testing.T) {
 			m, spy := handoffRecorder(t)
 			m.cfg.Editor = "vi"
-			// El handoff necesita que su binario exista en el PATH. Solo shell y
-			// lazygit lo miran: el editor no pasa por LookPath. Un switch en vez
-			// de if/else-if porque las ramas no son intercambiables — la de
-			// lazygit escribe un ejecutable falso para sortear el LookPath sin
-			// tener lazygit instalado, y sin lanzar nada (el handoff esta
-			// inyectado).
-			switch c.accion {
+			// Only shell and lazygit need the binary on the PATH (the editor does not go through LookPath), and a switch instead of if/else-if because the branches are not interchangeable: lazygit's writes a fake executable to get past LookPath without launching anything (the handoff is injected).
+			switch c.action {
 			case "shell":
 				t.Setenv("SHELL", "/bin/sh")
 			case "lazygit":
@@ -830,71 +700,60 @@ func TestHandoffEjecutaElProcesoEnElRepo(t *testing.T) {
 				t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
 			}
 
-			if c.abrir(m, "/tmp/repo") == nil {
-				t.Fatalf("%s no devolvio comando", c.accion)
+			if c.open(m, "/tmp/repo") == nil {
+				t.Fatalf("%s returned no command", c.action)
 			}
 			if spy.vals != 1 {
-				t.Fatalf("handoff llamado %d veces, want 1", spy.vals)
+				t.Fatalf("handoff called %d times, want 1", spy.vals)
 			}
 			if spy.dir != "/tmp/repo" {
-				t.Errorf("Dir = %q, want /tmp/repo (el handoff corre DENTRO del repo)", spy.dir)
+				t.Errorf("Dir = %q, want /tmp/repo (the handoff runs INSIDE the repo)", spy.dir)
 			}
 			if len(spy.argv) == 0 {
-				t.Fatalf("argv vacio")
+				t.Fatalf("empty argv")
 			}
-			// Al salir, el mensaje dice que repo y que accion, que es lo que
-			// despues aparece en el panel del log.
 			msg, ok := spy.salir(nil).(execDoneMsg)
 			if !ok {
-				t.Fatalf("el handoff de %s no devolvio execDoneMsg al salir", c.accion)
+				t.Fatalf("%s's handoff returned no execDoneMsg on exit", c.action)
 			}
-			if msg.path != "/tmp/repo" || msg.action != c.accion {
-				t.Errorf("execDoneMsg = %+v, want path=/tmp/repo action=%s", msg, c.accion)
+			if msg.path != "/tmp/repo" || msg.action != c.action {
+				t.Errorf("execDoneMsg = %+v, want path=/tmp/repo action=%s", msg, c.action)
 			}
 			if len(msg.argv) == 0 || msg.argv[0] != spy.argv[0] {
-				t.Errorf("execDoneMsg.argv = %q, want el mismo que se ejecuto (%q)", msg.argv, spy.argv)
+				t.Errorf("execDoneMsg.argv = %q, want the same that ran (%q)", msg.argv, spy.argv)
 			}
 		})
 	}
 }
 
-// Los dos handoffs que tienen guardas de dominio (el comando AI y el preview de
-// git-sim) llegan al handoff solo si todo lo de antes esta bien. Los dos casos
-// que se comprueban aqui son los que mas easily se rompen sin que se note:
-//
-//   - el repo ya esta ocupado (running): el segundo handoff se rechaza. Sin este
-//     test, dos teclas seguidas podrian ceder la terminal dos veces al mismo repo.
-//   - el handoff se arma en el repo, no en el directorio de gitdash.
-func TestHandoffsConGuardaDeOcupado(t *testing.T) {
-	t.Run("pull_ai con el repo ocupado", func(t *testing.T) {
+func TestHandoffsWithGuardOfBusy(t *testing.T) {
+	t.Run("pull_ai with the repo busy", func(t *testing.T) {
 		mm := newTestModel(t, nil, nil)
 		m := &mm
 		m.running = map[string]string{"/tmp/repo": "pull"}
 		msg, ok := m.openPullAICmd("/tmp/repo", []string{"ai-pull", "--x"})().(notifyMsg)
 		if !ok {
-			t.Fatal("openPullAICmd con el repo ocupado no devolvio un aviso")
+			t.Fatal("openPullAICmd with the repo busy returned no notice")
 		}
 		if !strings.Contains(msg.text, "already running") {
-			t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+			t.Errorf("notice = %q, want it to say something is already running", msg.text)
 		}
 	})
 
-	t.Run("visual con el repo ocupado", func(t *testing.T) {
+	t.Run("visual with the repo busy", func(t *testing.T) {
 		mm := newTestModel(t, nil, nil)
 		m := &mm
 		m.running = map[string]string{"/tmp/repo": "pull_ai"}
 		msg, ok := m.startVisualCmd("/tmp/repo", "origin/main", "merge")().(notifyMsg)
 		if !ok {
-			t.Fatal("startVisualCmd con el repo ocupado no devolvio un aviso")
+			t.Fatal("startVisualCmd with the repo busy returned no notice")
 		}
 		if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "pull_ai") {
-			t.Errorf("aviso = %q, want que nombre la accion que esta corriendo", msg.text)
+			t.Errorf("notice = %q, want it to name the action that is running", msg.text)
 		}
 	})
 
-	// Y el camino de verdad: sin nada ocupado, el handoff se arma con el argv de
-	// git-sim y en el repo. El LookPath necesita un git-sim en el PATH.
-	t.Run("visual arma el argv y el dir", func(t *testing.T) {
+	t.Run("visual builds the argv and the dir", func(t *testing.T) {
 		bin := filepath.Join(t.TempDir(), "git-sim")
 		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
@@ -909,112 +768,90 @@ func TestHandoffsConGuardaDeOcupado(t *testing.T) {
 
 		cmd := m.startVisualCmd("/tmp/repo", "origin/main", "rebase")
 		if cmd == nil {
-			t.Fatal("startVisualCmd devolvio nil")
+			t.Fatal("startVisualCmd returned nil")
 		}
-		// El handoff se arma AL INVOCAR el cmd, no al construirlo: el tea.Cmd
-		// es el que llama a m.handoff. Sin invocarlo, spy se queda vacio y las
-		// aserciones siguientes comparan vacio con vacio y pasan por accident.
+		// The handoff is armed when the Cmd is INVOKED, not when it is built: without invoking it, spy stays empty and the assertions below compare empty with empty and pass by accident.
 		cmd()
 		if spy.vals != 1 {
-			t.Fatalf("el handoff se lanzo %d veces, want 1", spy.vals)
+			t.Fatalf("the handoff launched %d times, want 1", spy.vals)
 		}
 		if spy.dir != "/tmp/repo" {
 			t.Errorf("Dir = %q, want /tmp/repo", spy.dir)
 		}
-		// merge/rebase necesitan el ref del upstream; pull no.
 		full := strings.Join(spy.argv, " ")
 		if !strings.Contains(full, "rebase") {
-			t.Errorf("argv = %q, want el subcomando rebase", full)
+			t.Errorf("argv = %q, want the rebase subcommand", full)
 		}
 		if !strings.Contains(full, "origin/main") {
-			t.Errorf("argv = %q, want el ref del upstream (rebase lo exige)", full)
+			t.Errorf("argv = %q, want the upstream's ref (rebase requires it)", full)
 		}
 		if !strings.Contains(full, "--media-dir") {
-			t.Errorf("argv = %q, want --media-dir SIEMPRE (sin el, git-sim ensucia el repo)", full)
+			t.Errorf("argv = %q, want --media-dir ALWAYS (without it git-sim dirties the repo)", full)
 		}
 		if m.running["/tmp/repo"] != "visual" {
-			t.Errorf("running = %v, want el repo marcado como visual en curso", m.running)
+			t.Errorf("running = %v, want the repo marked as visual in progress", m.running)
 		}
 
-		// El `pull` de git-sim NO lleva ref: no lo exige y pasarselo haria que
-		// git-sim comprobara otra cosa.
 		spy.vals = 0
 		cmd2 := m.startVisualCmd("/tmp/repo2", "origin/main", "pull")
 		if cmd2 == nil {
-			t.Fatal("startVisualCmd(pull) devolvio nil")
+			t.Fatal("startVisualCmd(pull) returned nil")
 		}
-		cmd2() // mismo motivo: el handoff se arma al invocar
+		cmd2() // same reason: the handoff is armed on invocation
 		if strings.Contains(strings.Join(spy.argv, " "), "origin/main") {
-			t.Errorf("argv = %q, want sin ref: el pull de git-sim no lleva argumento", spy.argv)
+			t.Errorf("argv = %q, want no ref: git-sim's pull takes no argument", spy.argv)
 		}
-		// Y al salir, el mensaje dice visual con el argv real: es lo que el
-		// panel del log ensea, donde el usuario ve que se ejecuto git-sim y con
-		// que ref.
 		msg, ok := spy.salir(nil).(execDoneMsg)
 		if !ok || msg.action != "visual" {
-			t.Fatalf("el mensaje de salida = %#v, want un execDoneMsg de visual", msg)
+			t.Fatalf("the returned message = %#v, want a visual execDoneMsg", msg)
 		}
 		if msg.path != "/tmp/repo2" || len(msg.argv) == 0 {
-			t.Errorf("execDoneMsg = %+v, want el repo y el argv del handoff", msg)
+			t.Errorf("execDoneMsg = %+v, want the handoff's repo and argv", msg)
 		}
 	})
 }
 
-// recollectCmd con el repo ocupado devuelve nil en vez de relanzar: el recollect
-// es una lectura, y relanzarla sobre un repo que ya tiene una acción de escritura
-// en marcha daría un snapshot a medio camino. Nil y no un aviso porque recollect
-// no es una tecla que el usuario haya pulsado con una intención (lo dispara el
-// propio programa al volver de un handoff).
-func TestRecollectConRepoOcupadoNoRelanza(t *testing.T) {
+// Nil and not a warning, because recollect is not a key the user pressed with an intent (the program itself triggers it on coming back from a handoff).
+func TestRecollectWithRepoBusyNotRelaunch(t *testing.T) {
 	mm := newTestModel(t, nil, nil)
 	m := &mm
 	m.running = map[string]string{"/tmp/api": "pull"}
 	antes := len(m.running)
 
 	if cmd := m.recollectCmd("/tmp/api"); cmd != nil {
-		t.Errorf("recollectCmd sobre un repo ocupado devolvió %#v, want nil", cmd())
+		t.Errorf("recollectCmd over a busy repo returned %#v, want nil", cmd())
 	}
-	// Y no lo ha marcado como ocupado otra vez: la guarda tiene que devolver
-	// ANTES de escribir en running, no despues.
 	if got := m.running["/tmp/api"]; got != "pull" {
-		t.Errorf("running = %q, want que siga siendo la accion original", got)
+		t.Errorf("running = %q, want it to still be the original action", got)
 	}
 	if len(m.running) != antes {
-		t.Errorf("running tiene %d entradas, want %d (la guarda no escribe)", len(m.running), antes)
+		t.Errorf("running has %d entries, want %d (the guard does not write)", len(m.running), antes)
 	}
 }
 
-// removeWorktreeCmd con el padre ocupado devuelve el aviso de busyActionCmd, y
-// no borra nada. El caso importa por lo que se ve: `d` sobre un worktree cuyo
-// repo principal esta haciendo un pull tiene que decir "ya hay un pull en
-// marcha", no fallar en silencio ni borrar igual.
-func TestRemoveWorktreeConPadreOcupadoAvisa(t *testing.T) {
+// `d` on a worktree whose main repo is pulling has to say "a pull is already running", and not fail silently nor delete anyway.
+func TestRemoveWorktreeWithParentBusyWarns(t *testing.T) {
 	mm := newTestModel(t, nil, nil)
 	m := &mm
 	m.running = map[string]string{"/tmp/api": "pull"}
 
 	cmd := m.removeWorktreeCmd("/tmp/api", "/tmp/api-wt", "api-wt", false, 1)
 	if cmd == nil {
-		t.Fatal("removeWorktreeCmd con el padre ocupado devolvio nil, want un aviso")
+		t.Fatal("removeWorktreeCmd with the parent busy returned nil, want a notice")
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok {
-		t.Fatalf("devolvió %T, want un aviso", cmd())
+		t.Fatalf("returned %T, want a notice", cmd())
 	}
 	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "pull") {
-		t.Errorf("aviso = %q, want que nombre la accion en marcha", msg.text)
+		t.Errorf("notice = %q, want it to name the action in progress", msg.text)
 	}
-	// Y no se ha escrito el flag de esta accion: sigue siendo el pull.
 	if got := m.running["/tmp/api"]; got != "pull" {
-		t.Errorf("running = %q, want pull (no worktree_remove)", got)
+		t.Errorf("running = %q, want pull (not worktree_remove)", got)
 	}
 }
 
-// openLazygitCmd con el repo ocupado: el LookPath pasa (hay un lazygit falso en
-// el PATH) y se llega a la segunda guarda. Es la unica forma de comprobar que el
-// orden de las dos guardas es el correcto: si la de ocupado fuera primero, con
-// lazygit ausente diria "ya hay algo en marcha" en una maquina sin lazygit.
-func TestLazygitOcupadoDiceLaAccionQueCorre(t *testing.T) {
+func TestLazygitBusyNamesTheRunningAction(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "lazygit")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1027,53 +864,39 @@ func TestLazygitOcupadoDiceLaAccionQueCorre(t *testing.T) {
 
 	msg, ok := m.openLazygitCmd("/tmp/api")().(notifyMsg)
 	if !ok {
-		t.Fatal("openLazygitCmd con el repo ocupado no devolvio un aviso")
+		t.Fatal("openLazygitCmd with the repo busy returned no notice")
 	}
 	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "push") {
-		t.Errorf("aviso = %q, want que nombre el push en marcha", msg.text)
+		t.Errorf("notice = %q, want it to name the push in progress", msg.text)
 	}
 }
 
-// `!` con el repo ocupado no abre una shell ni captura nada: avisa. Es el mismo
-// guard que los handoffs, aqui para el comando capturado, que ademas es la via
-// que mas se usa (no necesita tecla separada).
-func TestComandoCapturadoConRepoOcupadoAvisa(t *testing.T) {
+func TestCommandCapturedWithRepoBusyWarns(t *testing.T) {
 	mm := newTestModel(t, nil, nil)
 	m := &mm
 	m.running = map[string]string{"/tmp/api": "pull"}
 
 	msg, ok := m.openCmdCmd("/tmp/api", "git status")().(notifyMsg)
 	if !ok {
-		t.Fatal("openCmdCmd con el repo ocupado no devolvio un aviso")
+		t.Fatal("openCmdCmd with the repo busy returned no notice")
 	}
 	if !strings.Contains(msg.text, "already running") {
-		t.Errorf("aviso = %q, want que diga que ya hay algo en marcha", msg.text)
+		t.Errorf("notice = %q, want it to say something is already running", msg.text)
 	}
-	// Y no se ha lanzado nada: el flag sigue siendo el del pull.
 	if got := m.running["/tmp/api"]; got != "pull" {
-		t.Errorf("running = %q, want pull (el guard devuelve antes de escribir)", got)
+		t.Errorf("running = %q, want pull (the guard returns before writing)", got)
 	}
 }
 
-// El camino feliz de `p a`: el handoff AI se arma con el argv resuelto y corre en
-// el repo. Es el camino que los tres guards de startPullAICmd evitan, y sin el
-// el openPullAICmd de abajo queda sin ejecutar.
-//
-// El limite de confianza se comprueba de paso: el prompt viene del marcador
-// commiteado (input no confiable) y tiene que viajar como UN elemento de argv,
-// nunca dentro de un sh -c. Un prompt con punto y coma y una sustitucion de
-// shell llega al proceso como un solo argumento, sin interpretar.
-func TestPullAIHappyPathArmaElHandoff(t *testing.T) {
+// The trust boundary is checked on the way: the prompt comes from the committed marker (untrusted input) and has to travel as ONE argv element, never inside an sh -c.
+func TestPullAIHappyPathArmsTheHandoff(t *testing.T) {
 	dir := t.TempDir()
-	nasty := `arregla el rebase; rm -rf / $(whoami) | tee /etc/passwd`
-	// Literal TOML con comillas simples: un prompt con comillas dobles romperia
-	// el TOML, no por el prompt sino por como se escribe en el fichero. Lo que
-	// se prueba aqui es el argv, no el TOML.
+	nasty := `fix el rebase; rm -rf / $(whoami) | tee /etc/passwd`
+	// Literal TOML with single quotes: a prompt with double quotes would break the TOML, not because of the prompt but because of how it is written in the file; what is tested here is the argv, not the TOML.
 	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"),
 		[]byte("[ai.pull]\nprompt = '"+nasty+"'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// El ejecutable sale de la config GLOBAL y tiene que existir en el PATH.
 	bin := filepath.Join(t.TempDir(), "ai-pull")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1088,22 +911,18 @@ func TestPullAIHappyPathArmaElHandoff(t *testing.T) {
 
 	cmd := m.startPullAICmd(dir)
 	if cmd == nil {
-		t.Fatal("startPullAICmd devolvio nil, want un handoff")
+		t.Fatal("startPullAICmd returned nil, want a handoff")
 	}
-	// El handoff se arma AL INVOCAR el cmd, no al construirlo: el tea.Cmd es el
-	// que llama a m.handoff. Contar antes de invocarlo daria cero siempre.
 	cmd()
 	if spy.vals != 1 {
-		t.Fatalf("el handoff se lanzo %d veces, want 1", spy.vals)
+		t.Fatalf("the handoff launched %d times, want 1", spy.vals)
 	}
 	if spy.dir != dir {
-		t.Errorf("Dir = %q, want el repo del marcador", spy.dir)
+		t.Errorf("Dir = %q, want the marker's repo", spy.dir)
 	}
 	if len(spy.argv) < 2 || spy.argv[0] != "ai-pull" {
-		t.Fatalf("argv = %q, want el ejecutable de la config y al menos un argumento", spy.argv)
+		t.Fatalf("argv = %q, want the config's executable and at least one argument", spy.argv)
 	}
-	// El prompt entero es UN elemento de argv. Si se partiera en varios, o se
-	// metiera en un sh -c, los metacaracteres los ejecutaria la shell.
 	var promptArg string
 	for _, a := range spy.argv[1:] {
 		if a == nasty {
@@ -1111,13 +930,12 @@ func TestPullAIHappyPathArmaElHandoff(t *testing.T) {
 		}
 	}
 	if promptArg != nasty {
-		t.Errorf("ningun elemento de argv es el prompt entero; se ha partido o interpolado: %q", spy.argv)
+		t.Errorf("no argv element is the whole prompt; it got split or interpolated: %q", spy.argv)
 	}
-	// Y al salir se identifica como pull_ai, que es lo que va al log.
 	if msg, ok := spy.salir(nil).(execDoneMsg); !ok || msg.action != "pull_ai" {
-		t.Errorf("el mensaje de salida = %#v, want un execDoneMsg de pull_ai", msg)
+		t.Errorf("the returned message = %#v, want a pull_ai execDoneMsg", msg)
 	}
 	if m.running[dir] != "pull_ai" {
-		t.Errorf("running = %v, want el repo marcado como pull_ai en curso", m.running)
+		t.Errorf("running = %v, want the repo marked as pull_ai in progress", m.running)
 	}
 }

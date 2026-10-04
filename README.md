@@ -2,185 +2,186 @@
 
 [![CI](https://github.com/Sovengar/gitdash/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sovengar/gitdash/actions/workflows/ci.yml)
 
-Panel de estados git en TUI, estilo GitHub Desktop: todos tus repos marcados
-con `.gitdash.toml` en un dashboard, con branch, cambios pendientes
-(dirty) y **↑ahead / ↓behind** (qué hay que subir y bajar de un vistazo),
-más acciones rápidas.
+A git status dashboard in TUI form, GitHub Desktop style: every repo you mark
+with `.gitdash.toml` in one dashboard, with branch, pending changes (dirty) and
+**↑ahead / ↓behind** (what is to push and to pull at a glance), plus quick
+actions.
 
-Inspirado en [bircni/git-statuses](https://github.com/bircni/git-statuses)
-(Rust, CLI one-shot) — no es un fork: la idea del escaneo y el modelo de
-datos se reimplementaron en Go + Bubbletea v2 como TUI interactiva, con
-descubrimiento por **fichero marcador** en lugar de buscar `.git` suelto y
-**fetch automático en batches**.
+Inspired by [bircni/git-statuses](https://github.com/bircni/git-statuses)
+(Rust, one-shot CLI) — this is not a fork: the scanning idea and the data model
+were reimplemented in Go + Bubbletea v2 as an interactive TUI, with discovery by
+**marker file** instead of hunting for a loose `.git`, and **automatic batched
+fetch**.
 
-## Instalación
+## Install
 
 ```bash
-go install gitdash/cmd/gitdash@latest   # o, desde el repo:
-make install                            # instala en ~/.local/bin (soporta PREFIX/DESTDIR)
+go install gitdash/cmd/gitdash@latest   # or, from the repo:
+make install                            # installs into ~/.local/bin (honours PREFIX/DESTDIR)
 ```
 
-Requiere el binario `git` en el PATH (subprocess; sin cgo ni librerías git).
+Requires the `git` binary in PATH (subprocess; no cgo and no git libraries).
 
-## Uso
+## Usage
 
 ```bash
 gitdash            # TUI
-gitdash --print    # tabla one-shot en stdout (útil para scripts/debug)
+gitdash --print    # one-shot table on stdout (handy for scripts/debugging)
 ```
 
-Marcador `.gitdash.toml` en la raíz de cada proyecto (campos todos opcionales):
+Marker file `.gitdash.toml` at the root of each project (every field optional):
 
 ```toml
-name = "api"                # nombre mostrado (default: nombre del directorio)
-primary_group = "vsocial"   # grupo primario (nivel 1 plegable)
-secondary_group = "backend" # grupo secundario (nivel 2 plegable, dentro del primario)
-sync_branch = "main"        # rama de referencia de la columna SYNC (override del global)
+name = "api"                # displayed name (default: the directory's name)
+primary_group = "vsocial"   # primary group (level 1, foldable)
+secondary_group = "backend" # secondary group (level 2, foldable, inside the primary)
+sync_branch = "main"        # reference branch for the SYNC column (overrides the global)
 
 [ai.pull]
-prompt = "arreglá el rebase que quedó a medias"   # texto que recibe tu comando AI
+prompt = "fix the rebase that was left half-done"   # text your AI command receives
 ```
 
 ### Config
 
-`~/.config/gitdash/config.toml` (todo opcional, con estos defaults):
+`~/.config/gitdash/config.toml` (all optional, these are the defaults):
 
 ```toml
 marker      = ".gitdash.toml"
 roots       = ["~/dev"]
 exclude     = ["node_modules", "target", "vendor", "dist", "build", "out",
                "coverage", ".venv", "__pycache__", ".gradle", ".terraform"]
-editor      = "vi"        # $EDITOR si está definida
-sync_branch = "main"     # rama de referencia para la columna SYNC
+editor      = "vi"        # $EDITOR when it is set
+sync_branch = "main"     # reference branch for the SYNC column
 
 [fetch]
-auto        = true    # fetch automático tras cada scan/rescan
-concurrency = 4       # fetches en paralelo (batches)
-timeout     = "30s"   # timeout por fetch
+auto        = true    # automatic fetch after every scan/rescan
+concurrency = 4       # fetches in parallel (batches)
+timeout     = "30s"   # timeout per fetch
 
 [ai.pull]
-command = "jcode -run {prompt}"   # ejecutable de la variante AI del selector de pull
+command = "jcode -run {prompt}"   # executable behind the selector's AI pull variant
 ```
 
-El comando AI es **opt-in y el ejecutable sale siempre de la config global**
-(el marcador va al repo y no es de fiar): el `.gitdash.toml` solo aporta el
-texto del `prompt`. Ese texto entra como **un único argumento** del proceso,
-nunca interpolado en un `sh -c`, así que espacios, comillas o `$` no se
-interpretan. Placeholders de contexto opcionales: `{prompt}`, `{branch}`,
-`{upstream}`, `{state}`, `{ahead}`, `{behind}`, `{sync}`.
+The AI command is **opt-in and the executable always comes from the global
+config** (the marker travels with the repo and is not trustworthy): the
+`.gitdash.toml` only contributes the `prompt` text. That text goes in as **a
+single argument** of the process, never interpolated into an `sh -c`, so spaces,
+quotes or `$` are not interpreted. Optional context placeholders: `{prompt}`,
+`{branch}`, `{upstream}`, `{state}`, `{ahead}`, `{behind}`, `{sync}`.
 
-## El panel de debajo de la tabla
+## The panel below the table
 
-Entre el listado de repos y los atajos hay una **ficha del repo bajo el cursor**
-(estilo prdash). Se mueve con el cursor, así que `j`/`k` van leyendo los repos
-al pasar por encima. **Es la única vista de detalle**: no hay nada que abrir.
+Between the repo list and the shortcuts there is a **card for the repo under the
+cursor** (prdash style). It follows the cursor, so `j`/`k` read the repos as they
+go by. **It is the only detail view**: there is nothing to open.
 
-- Muestra la ficha del repo: path, branch, upstream, estado, sync, sus
-  worktrees, los ficheros cambiados, los commits, el resultado de la última
-  acción (con el argv que se ejecutó de verdad) y el del último `!`.
-- Con el cursor sobre un **header de grupo** no hay repo que describir, así que
-  muestra el agregado del grupo: cuántos repos tiene y cuántos están dirty,
-  ahead, behind o con error (solo los que hay: la tabla es quieta por el mismo
-  motivo).
-- Con el cursor sobre una **sub-fila de worktree** muestra su ficha mínima
-  (path, rama, head), sin inventar estado git.
-- `!` abre su input al final de la ficha, siempre visible: si la ficha llena la
-  caja, lo que se recorta es la ficha, nunca el prompt. `enter` lo ejecuta
-  (`$SHELL -c` en el repo del cursor; vacío = shell interactiva) y `esc` lo
-  cancela.
-- Las listas que no caben se anuncian (`… N más`) en vez de cortarse a medias.
+- It shows the repo's card: path, branch, upstream, state, sync, its worktrees,
+  the changed files, the commits, the result of the last action (with the argv
+  that really ran) and the one from the last `!`.
+- With the cursor on a **group header** there is no repo to describe, so it shows
+  the group's aggregate: how many repos it has and how many are dirty, ahead,
+  behind or in error (only those that exist: the table stays quiet for the same
+  reason).
+- With the cursor on a **worktree subrow** it shows its minimal card (path,
+  branch, head), without inventing git state.
+- `!` opens its input at the end of the card, always visible: if the card fills
+  the box, what gets cropped is the card, never the prompt. `enter` runs it
+  (`$SHELL -c` in the cursor's repo; empty means an interactive shell) and `esc`
+  cancels it.
+- Lists that do not fit are announced (`… N more`) instead of being cut in half.
 
-El panel es **aditivo**: se queda con su parte del alto libre solo si no le
-cuesta nada a lo que ya había. En una terminal donde no cabe (por debajo de ~22
-líneas con la config por defecto) no se dibuja y el dashboard es el de siempre.
+The panel is **additive**: it keeps its share of the free height only if it costs
+nothing to what was already there. On a terminal where it does not fit (below
+~22 lines with the default config) it is not drawn and the dashboard is the usual
+one.
 
-## Columnas de la tabla
+## Table columns
 
-La tabla es *quieta*: las celdas quedan vacías cuando no hay nada que
-comunicar y solo se pinta lo que pide atención (el orden sigue siendo
-attention-first).
+The table is *quiet*: cells stay empty when there is nothing to report and only
+what demands attention is painted (the order is still attention-first).
 
-- **BRANCH** rama actual; en detached `<sha> (detached)` (única mención del
-  estado en la fila).
-- **Work Tree** solo el working tree: `N ?M` = N ficheros trackeados
-  cambiados + M sin trackear; `∅` sin repo; `⚠` error git. Sin bola ni
-  flechas: los estados de commits viven en ↑↓up.
-- **↑↓up** deriva de commits contra el *upstream* de la rama actual (qué hay
-  que subir/bajar): `↑N↓N` diverged, `↑N`/`↓N`, `no-up` = rama sin upstream
-  trackeado ("sin cuerda al remoto": no hay contra qué comparar).
-- **SYNC** desviación respecto a la *sync branch* (`sync_branch` global,
-  overridable por repo en el marcador): `<rama> ↓N` = hay N commits en la
-  sync branch que tu rama no tiene — la pregunta CI-first "¿mi `feat/x`
-  tiene los últimos cambios de `main`?"; `<rama>` a secas = al día;
-  `<rama> —` = la ref no existe; `—` = sin rama resuelta. La rama elegida
-  es siempre visible. La frescura depende de que la ref local de la sync
-  branch esté actualizada; el fetch automático solo refresca remote-tracking
-  refs.
-- **ACTIVITY** último commit en tiempo relativo.
-- **FETCH** solo transitorio: `⟳ fetch` corriendo, `✗ fetch` fallo
-  (persistente hasta el próximo fetch de ese repo); el éxito no ocupa celda
-  (lo señala la notificación de la barra).
+- **BRANCH** current branch; when detached `<sha> (detached)` (the only mention
+  of the state in the row).
+- **Work Tree** the working tree only: `N ?M` = N tracked files changed + M
+  untracked; `∅` with no repo; `⚠` git error. No dot and no arrows: commit
+  states live in ↑↓up.
+- **↑↓up** derived from commits against the *upstream* of the current branch
+  (what is to push/pull): `↑N↓N` diverged, `↑N`/`↓N`, `no-up` = branch with no
+  tracked upstream ("no rope to the remote": there is nothing to compare
+  against).
+- **SYNC** deviation with respect to the *sync branch* (`sync_branch` global,
+  overridable per repo in the marker): `<branch> ↓N` = there are N commits on
+  the sync branch that your branch does not have — the CI-first question "does my
+  `feat/x` have the latest changes from `main`?"; plain `<branch>` = up to date;
+  `<branch> —` = the ref does not exist; `—` = no resolved branch. The chosen
+  branch is always visible. Freshness depends on the sync branch's local ref
+  being up to date; the automatic fetch only refreshes remote-tracking refs.
+- **ACTIVITY** last commit in relative time.
+- **FETCH** only transient: `⟳ fetch` running, `✗ fetch` failed (persistent
+  until the next fetch of that repo); success takes no cell (the bar's
+  notification says so).
 
-## Teclas
+## Keys
 
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `j/k`, `↑↓` | mover cursor (`g`/`G` extremos) |
-| `n` | alternar solo repos con cambios pendientes |
-| `/` | filtrar por nombre/grupo o por rama/basename de worktree (en vivo; `enter` confirma, `esc` limpia) |
-| `D` | borrar el worktree bajo el cursor (configurable, acción `worktree_remove`; solo el worktree, la rama se conserva) |
-| `r` | rescan completo (discovery + estados + fetch auto) |
-| `R` | re-coleccionar el repo del cursor |
-| `f` / `F` | fetch del repo / fetch de todos |
-| `p` | selector de pull (ver abajo) |
+| `j/k`, `↑↓` | move the cursor (`g`/`G` for the ends) |
+| `n` | toggle only repos with pending changes |
+| `/` | filter by name/group or by worktree branch/basename (live; `enter` confirms, `esc` clears) |
+| `D` | delete the worktree under the cursor (configurable, `worktree_remove` action; only the worktree, the branch is kept) |
+| `r` | full rescan (discovery + states + auto fetch) |
+| `R` | re-collect the cursor's repo |
+| `f` / `F` | fetch the repo / fetch everything |
+| `p` | pull selector (see below) |
 | `P` | push |
-| `e` | abrir `$EDITOR` en el directorio del repo |
-| `enter` | plegar/desplegar lo que hay bajo el cursor: los worktrees del repo, o el bloque de un header de grupo (configurable, acción `fold`) |
-| `enter` | detalle: ficheros cambiados, commits, worktrees, última acción; sobre un header de grupo pliega/despliega |
-| `l` | panel del command log: qué se ejecutó de verdad, con qué resultado y por qué (ver abajo) |
-| `q` | salir |
+| `e` | open `$EDITOR` in the repo's directory |
+| `enter` | fold/unfold whatever is under the cursor: the repo's worktrees, or a group header's block (configurable, `fold` action) |
+| `l` | command log panel: what really ran, with what result and why (see below) |
+| `q` | quit |
 
-### Pull: la política vive en tu gitconfig
+### Pull: the policy lives in your gitconfig
 
-`p` no ejecuta un pull: abre un selector y la **siguiente** tecla elige variante.
+`p` does not run a pull: it opens a selector and the **next** key picks the
+variant.
 
-| Tecla | Variante | Comando |
+| Key | Variant | Command |
 |---|---|---|
-| `p` `p` | default | `git pull` (sin flags) |
+| `p` `p` | default | `git pull` (no flags) |
 | `p` `r` | rebase | `git pull --rebase --autostash` |
 | `p` `f` | ff-only | `git pull --ff-only` |
 | `p` `m` | merge | `git pull --no-rebase` |
-| `p` `a` | AI | tu comando de `[ai.pull] command` (lanza directo) |
+| `p` `a` | AI | your `[ai.pull] command` command (launches straight away) |
 
-La variante **default va sin flags a propósito**: la política de reconciliación
-es de tu gitconfig (`pull.rebase`, `pull.ff`, …) y los flags en la línea de
-comandos la pisan. Con `--ff-only` hardcodeado, un `pull.rebase=true` en tu
-config quedaba ignorado. Las otras tres variantes existen para pisar la política
-sin tener que editar la config de gitdash.
+The **default variant carries no flags on purpose**: the reconciliation policy is
+yours (`pull.rebase`, `pull.ff`, …) and command-line flags override it. With
+`--ff-only` hardcoded, a `pull.rebase=true` in your config was ignored. The other
+three variants exist to override the policy without having to edit gitdash's
+config.
 
-La variante **AI** es un handoff de terminal: gitdash le presta la pantalla a tu
-comando (que corre en el directorio del repo, con el `prompt` del marcador) y al
-volver re-colecciona el estado. Sin prompt en el marcador, sin `[ai.pull]
-command` o sin el binario instalado solo avisa: nunca lanza a ciegas.
+The **AI** variant is a terminal handoff: gitdash lends the screen to your
+command (which runs in the repo's directory, with the marker's `prompt`) and
+re-collects the state on return. With no prompt in the marker, no
+`[ai.pull] command` or no installed binary it only warns: it never launches
+blind.
 
-Cualquier otra tecla cancela el selector y ejecuta su acción normal (`esc`
-cancela sin más). El repo objetivo se captura al pulsar `p`, así que la segunda
-tecla no puede operar sobre otra fila.
+Any other key cancels the selector and runs its normal action (`esc` just
+cancels). The target repo is captured when you press `p`, so the second key
+cannot operate on a different row.
 
-La **ficha de cada repo guarda el argv que se ejecutó de verdad** (última
-acción, en memoria, solo la última). Es la única forma de saber qué reconcilió:
-con `p` `p` no hay flags que leer, la decisión la tomó tu gitconfig.
+**Each repo's card stores the argv that really ran** (last action, in memory,
+only the last one). It is the only way to know what reconciled: with `p` `p` there
+are no flags to read, your gitconfig made the decision.
 
-Si un pull `--rebase` choca, el aviso **no** dice solo "falló": dice que el
-rebase quedó a medias y cómo continuar o abandonar. Decir "falló" invita a
-reintentar sobre un rebase sin resolver.
+If a `--rebase` pull clashes, the warning does **not** just say "failed": it says
+the rebase was left half-done and how to continue or abort. Saying "failed"
+invites you to retry on top of an unresolved rebase.
 
-## Command log: qué se ejecutó de verdad
+## Command log: what really ran
 
-`l` abre un panel con la cronología de la sesión: qué comando se lanzó, en qué
-repo, con qué resultado y cuánto tardó. Por defecto solo se ven las acciones
-del usuario; `a` amplía la vista a las lecturas del scan (`status`, `log`,
-`worktree list`, `rev-list`) y al `fetch` automático, y `j`/`k` desplazan.
+`l` opens a panel with the session's timeline: which command was launched, in
+which repo, with what result and how long it took. By default only the user's
+actions are shown; `a` widens the view to the scan's reads (`status`, `log`,
+`worktree list`, `rev-list`) and to the automatic fetch, and `j`/`k` scroll.
 
 ```
 22:23:13.378  key p    diverged-node   pull
@@ -188,96 +189,91 @@ del usuario; `a` amplía la vista a las lecturas del scan (`status`, `log`,
 22:23:14.529  exec     diverged-node   git pull --rebase --…  rebase+autostash
 ```
 
-Las líneas `key` son la tecla que pulsaste; las `exec`, el proceso que terminó.
-Las dos van porque el argv **no** dice qué política aplicó git: `p` `p` ejecuta
-`git pull` a secas, y si tu config tiene `pull.rebase=true` con
-`rebase.autostash=true` lo que integró fue un rebase con autostash. El resultado
-se deduce de la salida que git ya imprimió (con `LC_ALL=C` forzado, así que los
-mensajes no se traducen), no de leer la config: la precedencia de `pull.rebase`
-y `branch.<name>.rebase` cambia entre versiones de git, y lo que git **hizo**
-está en su output.
+The `key` lines are the key you pressed; the `exec` ones are the process that
+finished. Both are there because the argv does **not** say which policy git
+applied: `p` `p` runs plain `git pull`, and if your config has
+`pull.rebase=true` with `rebase.autostash=true` what got integrated was a rebase
+with autostash. The result is deduced from the output git already printed (with
+`LC_ALL=C` forced, so the messages are not localised), not from reading the
+config: the precedence of `pull.rebase` and `branch.<name>.rebase` changes across
+git versions, and what git **did** is in its output.
 
-Resultados que el panel distingue: `rebase`, `rebase+autostash`, `merge`,
+Results the panel tells apart: `rebase`, `rebase+autostash`, `merge`,
 `fast-forward`, `up-to-date`, `diverged`, `conflict`, `no-upstream`, `pushed`,
 `rejected`, `failed`.
 
-El log vive **solo en memoria y por sesión** (500 entradas): no escribe ningún
-fichero. Una intención sin `exec` detrás significa que la acción se rechazó
-después (el repo ya tenía una en curso, `lazygit` no está instalado, o al pull
-con IA le faltaba prompt, comando o binario); el motivo está en el toast del
-mismo momento.
+The log lives **in memory and per session only** (500 entries): it writes no
+file. An intent with no `exec` behind it means the action was rejected later (the
+repo already had one running, `lazygit` is not installed, or the AI pull lacked a
+prompt, command or binary); the reason is in the toast of that same moment.
 
-El **pull con IA** (`p` `a`) deja también sus dos líneas: la intención `key a` y
-el `exec` con el argv resuelto, cuyo último elemento es el prompt íntegro. El
-log es donde se audita qué se le pidió a la IA.
+The **AI pull** (`p` `a`) also leaves its two lines: the `key a` intent and the
+`exec` with the resolved argv, whose last element is the whole prompt. The log
+is where you audit what the AI was asked for.
 
-## Worktrees y grupos
+## Worktrees and groups
 
-- Los **worktrees** se muestran plegados bajo el repo principal con un
-  indicador `▸ (N wt)` y se **expanden/pliegan con `enter`** sobre su fila.
-  Expandido, cada worktree de `git worktree list` aparece como **sub-fila
-  navegable y operable** (incluidos los que no tienen marcador y los que
-  están fuera de los roots): el cursor puede posarse en ella y *todas* las
-  acciones de repo (fetch, pull, push, lazygit, editor, recollect y `!`) se
-  ejecutan contra el path de ese worktree, igual que la ficha. La
-  sub-fila muestra su rama (o `(detached)`) y deja vacías las celdas de
-  estado por-worktree (no se inventa dirty/ahead/behind/sync). El estado
-  expandido/plegado persiste entre sesiones (mismo `collapsed.json` que el
-  plegado de grupos, en un namespace propio). El filtro `/` encuentra
-  worktrees por rama o basename y revela su padre expandido de forma
-  transitoria (sin alterar la persistencia). Queda visible como fila propia
-  solo un worktree cuyo repo principal no está descubierto (tag `[wt]`).
-- Con el cursor sobre una **sub-fila de worktree**, `D` (acción
-  `worktree_remove`, configurable) borra el worktree: carpeta y registro en
-  `.git/worktrees`, **nunca la rama**. El primer `D` arma una confirmación
-  persistente (`remove worktree <nombre>? D to confirm, esc to cancel`); el
-  segundo `D` ejecuta `git worktree remove` desde el repo principal y, al
-  terminar, re-colecciona el padre para que la sub-fila desaparezca. Si el
-  worktree tiene cambios sin commitear o untracked, git falla: se muestra el
-  motivo real y se arma un segundo nivel (`D to force`) que reintenta con
-  `--force`; un fallo del forzado reporta el error y desarma (sin bucle).
-  `esc` cancela en cualquier punto, y cualquier otra tecla desarma. `D` sobre
-  una fila de repo, un header de grupo o la tabla vacía no hace nada (avisa
-  `select a worktree`).
-- Si algún marcador define `primary_group`, la tabla se **agrupa en dos
-  niveles** (patrón vroom): el bloque de cada grupo desde la posición de su
-  primer miembro con header `▾ nombre (n)`; dentro de un primario, cada
-  `secondary_group` forma un sub-bloque con header indentado. Ambos niveles
-   son plegables (plegar el primario oculta sus secundarios). Los repos sin
-   primario van a la sección `(ungrouped)` al final; un `secondary_group`
-   sin `primary_group` se ignora. La TUI no repite el grupo en una columna
-   (los headers plegables ya lo dicen); `--print` —tabla plana, sin
-   headers— sí muestra la columna GROUP. Sin grupos la tabla es plana.
+- **Worktrees** are shown folded under their main repo with a `▸ (N wt)`
+  indicator and are **expanded/folded with `enter`** on their row. Expanded,
+  every worktree of `git worktree list` appears as a **navigable and operable
+  subrow** (including the ones with no marker and the ones outside the roots):
+  the cursor can sit on it and *all* repo actions (fetch, pull, push, lazygit,
+  editor, recollect and `!`) run against that worktree's path, just like the
+  card. The subrow shows its branch (or `(detached)`) and leaves the per-worktree
+  state cells empty (no dirty/ahead/behind/sync is invented). The expanded/folded
+  state persists across sessions (the same `collapsed.json` as the group folding,
+  in its own namespace). The `/` filter finds worktrees by branch or basename
+  and reveals their parent expanded transiently (without changing what is
+  persisted). A worktree stays visible as its own row only when its main repo is
+  not discovered (tag `[wt]`).
+- With the cursor on a **worktree subrow**, `D` (the `worktree_remove` action,
+  configurable) deletes the worktree: folder and registration in
+  `.git/worktrees`, **never the branch**. The first `D` arms a persistent
+  confirmation (`remove worktree <name>? D to confirm, esc to cancel`); the
+  second `D` runs `git worktree remove` from the main repo and, on finishing,
+  re-collects the parent so the subrow disappears. If the worktree has
+  uncommitted or untracked changes, git fails: the real reason is shown and a
+  second level is armed (`D to force`) that retries with `--force`; a failure of
+  the forced run reports the error and disarms (no loop). `esc` cancels at any
+  point, and any other key disarms. `D` on a repo row, a group header or the
+  empty table does nothing (it warns `select a worktree`).
+- If any marker defines `primary_group`, the table is **grouped in two levels**
+  (the vroom pattern): each group's block starts at its first member's position
+  with the header `▾ name (n)`; inside a primary, each `secondary_group` forms a
+  sub-block with an indented header. Both levels are foldable (folding a primary
+  hides its secondaries). Repos without a primary go to the `(ungrouped)`
+  section at the end; a `secondary_group` without `primary_group` is ignored. The
+  TUI does not repeat the group in a column (the foldable headers already say
+  it); `--print` — flat table, no headers — does show the GROUP column. With no
+  groups the table is flat.
 
-## Cómo descubre repos
+## How it discovers repos
 
-Recorre los `roots` en profundidad ilimitada (podando ocultos y
-`exclude`), buscando el marcador. La carpeta del marcador ES el repo:
-`.git` directorio = repo normal, `.git` fichero = worktree (etiquetado
-`[wt]`), sin `.git` = visible como `no repo`. Los estados derivados:
-`clean`, `dirty`, `ahead`, `behind`, `diverged`, `no-upstream`,
-`detached`, `no repo`, `error` — ordenados atención-primero.
+It walks the `roots` with unlimited depth (pruning hidden dirs and `exclude`),
+looking for the marker. The marker's folder IS the repo: `.git` directory =
+normal repo, `.git` file = worktree (tagged `[wt]`), no `.git` = visible as
+`no repo`. The derived states: `clean`, `dirty`, `ahead`, `behind`, `diverged`,
+`no-upstream`, `detached`, `no repo`, `error` — ordered attention-first.
 
-## Desarrollo
+## Development
 
 ```bash
 go build ./... && go vet ./... && go test ./...
-./scripts/gen-fixtures.sh    # genera testdata/playground (repos fixture)
-XDG_CONFIG_HOME=$(mktemp -d) bin/gitdash --print   # prueba headless
+./scripts/gen-fixtures.sh    # generates testdata/playground (fixture repos)
+XDG_CONFIG_HOME=$(mktemp -d) bin/gitdash --print   # headless smoke test
 ```
 
-Arquitectura: `internal/config` (TOML XDG), `internal/discovery` (walk por
-marcador), `internal/gitstatus` (subprocess git + parsing `porcelain=v2`),
-`internal/cache` (pintura instantánea al arrancar), `internal/tui`
-(dashboard Bubbletea v2).
+Architecture: `internal/config` (XDG TOML), `internal/discovery` (marker walk),
+`internal/gitstatus` (git subprocess + `porcelain=v2` parsing), `internal/cache`
+(instant paint on startup), `internal/tui` (Bubbletea v2 dashboard).
 
 ## Roadmap
 
-- Sincronizar la rama con la *sync branch* (`git pull --rebase origin <sync>`):
-  la columna SYNC ya avisa del desfase, pero no hay tecla que lo arregle
-- Fetch de la sync branch (frescura de la columna SYNC sin pull manual)
-- Acciones grupales (fetch/pull de todo un grupo)
-- Acciones extra: stash, PRs
-- Fetch programado en background
+- Sync the branch with the *sync branch* (`git pull --rebase origin <sync>`):
+  the SYNC column already reports the gap, but there is no key that fixes it
+- Fetch the sync branch (refresh the SYNC column without a manual pull)
+- Group actions (fetch/pull a whole group)
+- Extra actions: stash, PRs
+- Scheduled background fetch
 
 MIT

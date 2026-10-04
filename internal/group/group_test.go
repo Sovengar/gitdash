@@ -1,4 +1,3 @@
-// Tests del arrangement de grupos.
 package group
 
 import (
@@ -18,7 +17,6 @@ func entry(path, primary, secondary string) Entry {
 	}
 }
 
-// Bloques anidados contiguos; ungrouped al final.
 func TestArrangeNestedBlocks(t *testing.T) {
 	in := []Entry{
 		entry("/a", "vsocial", "backend"),
@@ -46,7 +44,6 @@ func TestArrangeNestedBlocks(t *testing.T) {
 	}
 }
 
-// Primario en posición del primer miembro; orden de primera aparición.
 func TestArrangePrimaryPosition(t *testing.T) {
 	in := []Entry{
 		entry("/x", "otros", ""),
@@ -57,44 +54,40 @@ func TestArrangePrimaryPosition(t *testing.T) {
 	want := []string{"/x", "/z", "/y"}
 	for i, w := range want {
 		if got[i].Proj.Path != w {
-			t.Fatalf("posición %d = %q, want %q", i, got[i].Proj.Path, w)
+			t.Fatalf("position %d = %q, want %q", i, got[i].Proj.Path, w)
 		}
 	}
 }
 
-// Repo con primario y sin secundario conserva su posición de sort
-// dentro del primario, sin bloque propio que lo reordene.
 func TestArrangeMixedSecondary(t *testing.T) {
 	in := []Entry{
 		entry("/a", "p", "backend"),
-		entry("/b", "p", ""), // sin secundario, aparece entre bloques
+		entry("/b", "p", ""), // no secondary, it appears between blocks
 		entry("/c", "p", "backend"),
 	}
 	got := Arrange(in)
 	want := []string{"/a", "/c", "/b"}
 	for i, w := range want {
 		if got[i].Proj.Path != w {
-			t.Fatalf("posición %d = %q, want %q", i, got[i].Proj.Path, w)
+			t.Fatalf("position %d = %q, want %q", i, got[i].Proj.Path, w)
 		}
 		if i < 2 && (got[i].Secondary != "backend") {
-			t.Errorf("bloque backend roto en %d", i)
+			t.Errorf("broken backend block at %d", i)
 		}
 	}
 }
 
-// Aplicado a dos niveles: grupo de un solo miembro mantiene header.
 func TestArrangeSingleMember(t *testing.T) {
 	in := []Entry{entry("/a", "backend", ""), entry("/b", "solo", "")}
 	got := Arrange(in)
 	if len(got) != 2 || got[1].Primary != "solo" {
-		t.Errorf("miembro único: %+v", got)
+		t.Errorf("only member: %+v", got)
 	}
 	if !IsPrimaryHeader(got, 1) {
-		t.Errorf("'solo' debe tener header")
+		t.Errorf("'solo' must have a header")
 	}
 }
 
-// Sin primarios reales: vista plana sin headers, Primary queda "".
 func TestArrangeFlat(t *testing.T) {
 	in := []Entry{entry("/a", "", ""), entry("/b", "", "")}
 	got := Arrange(in)
@@ -108,16 +101,14 @@ func TestArrangeFlat(t *testing.T) {
 	}
 }
 
-// A través del arrangement: secondary sin primary ya llega vacío de
-// discovery, pero Arrange también lo defiende.
 func TestArrangeSecondaryIgnoredWithoutPrimary(t *testing.T) {
 	in := []Entry{
 		entry("/a", "p", ""),
-		entry("/b", "", "infra"), // normalizado a Ungrouped sin secundario
+		entry("/b", "", "infra"), // normalized to Ungrouped with no secondary
 	}
 	got := Arrange(in)
 	if got[1].Primary != Ungrouped || got[1].Secondary != "" {
-		t.Errorf("secondary sin primary: %+v", got[1])
+		t.Errorf("secondary without primary: %+v", got[1])
 	}
 }
 
@@ -141,7 +132,7 @@ func TestIsSecondaryHeader(t *testing.T) {
 		entry("/a", "vsocial", "backend"),
 		entry("/c", "vsocial", "backend"),
 		entry("/d", "vsocial", "frontend"),
-		entry("/e", "otros", ""), // primario sin secundario: nunca header 2
+		entry("/e", "otros", ""), // primary with no secondary: never a level-2 header
 	})
 	want := []bool{true, false, true, false}
 	for i, w := range want {

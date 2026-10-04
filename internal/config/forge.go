@@ -1,36 +1,4 @@
-// Configuración de forges: qué proveedor vive en qué host y en qué subcarpeta.
-//
-// Hace falta porque forge.ParseRemoteURL NO adivina: un host que no está
-// declarado devuelve false a propósito, porque de un host desconocido no se
-// puede saber a qué proveedor pertenece ni si su URL lleva prefijo, y adivinarlo
-// produce enlaces que abren 404 sin que nada falle visiblemente. Sin esto,
-// abrir un MR sobre el GitLab self-managed de la casa (que vive en /git/, no en
-// la raíz del host) no podría ni resolverse ni ejecutarse.
-//
-// La forma es [forge.<proveedor>], y el ejemplo que lo explica:
-//
-//	[forge.github]
-//	enabled = true
-//	host = "github.com"
-//
-//	[forge.gitlab]
-//	enabled = true
-//	host = "umane.emeal.nttdata.com"
-//	# api_base RELATIVO de la instancia ("/api/v4/", "/git/api/v4/"): de su
-//	# path sale el prefijo de la subcarpeta del clone ("git"). Vacío = raíz.
-//	api_base = "/git/api/v4/"
-//	# clone_base es el override explícito de ese prefijo, para cuando la
-//	# instancia no deduce su subcarpeta de la ruta del API. Vacío = derivado.
-//	clone_base = "git"
-//
-// Un host POR proveedor, no una lista: es una instancia por puerta (gh/glab), y
-// el prefijo sale del mismo dato que el host. enabled = false apaga el
-// proveedor entero (su host deja de resolver a forge), que es como se deja una
-// puerta instalada sin Instances declaradas.
-//
-// Los hosts públicos (github.com, gitlab.com) vienen de DefaultForges, derivados
-// de la misma tabla que usa forge: una sola lista, para que el mapa de runtime y
-// el parser no puedan discrepar.
+// Forge mapping is declared, never guessed: ParseRemoteURL refuses unknown hosts on purpose, since an unknown host cannot say which provider it is or whether its URLs carry a subfolder prefix, and a guess yields links that 404 without failing visibly.
 package config
 
 import (
@@ -39,44 +7,17 @@ import (
 	"gitdash/internal/forge"
 )
 
-// DefaultGitLabAPIBase es el api_base REST de una instancia de GitLab en la raíz
-// de su host ("/api/v4/", relativo como los que declara el usuario). Es el
-// único default que aporta algo: de él sale el prefijo de subcarpeta, y vacío
-// significa "la instancia vive en la raíz". GitHub no lleva ninguno porque su
-// api_base (/api/v3/) nunca lleva prefijo de clone, y declararlo sería un
-// default que no dice nada.
 const DefaultGitLabAPIBase = "/api/v4/"
 
-// ForgeConfig declara dónde vive un proveedor: un host, si está activo, el
-// api_base de esa instancia y el prefijo de subcarpeta (derivado, o forzado
-// con CloneBase).
 type ForgeConfig struct {
-	// Enabled es la puerta: apagado, su host no resuelve a ningún forge. El
-	// default es true, así que un proveedor declarado sin la clave sigue
-	// funcionando.
 	Enabled bool
-	// Host es la instancia donde vive el proveedor. Singular a propósito: la
-	// puerta (gh/glab) es la misma para todas las instancias, y el prefijo de
-	// subcarpeta sale de su api_base, así que una lista de hosts necesitaría un
-	// segundo dato que nadie tiene (a cuál de ellos aplica cada api_base).
-	Host string
-	// APIBase es el api_base REST RELATIVO de la instancia: "/api/v4/" o
-	// "/git/api/v4/". Vacío = la instancia vive en la raíz del host.
-	APIBase string
-	// CloneBase sobrescribe el prefijo de subcarpeta cuando el api_base no lo
-	// dice (una instancia montada fuera de la ruta estándar). Vacío = se deriva
-	// de APIBase.
+	// One host per provider on purpose: the door (gh/glab) is the same for every instance and the prefix comes from its api_base, so a host list would need a second datum nobody has.
+	Host      string
+	APIBase   string
 	CloneBase string
 }
 
-// ClonePrefix devuelve el relative URL root de la instancia: la subcarpeta en la
-// que vive el forge ("git" para un GitLab self-managed bajo /git/), vacía si
-// está en la raíz del host.
-//
-// CloneBase manda cuando viene, porque es el override explícito; si no, se
-// deriva del api_base con forge.PrefixFromAPIBase, que devuelve vacío ante una
-// forma inesperada en vez de adivinar. Nunca devuelve barras: el prefijo sale
-// limpio porque es el que se compara contra el path del remoto.
+// Returns no slashes, and without CloneBase derives the prefix with forge.PrefixFromAPIBase, which answers empty on an unexpected shape instead of guessing.
 func (f ForgeConfig) ClonePrefix() string {
 	if base := strings.Trim(strings.TrimSpace(f.CloneBase), "/"); base != "" {
 		return base
@@ -84,9 +25,7 @@ func (f ForgeConfig) ClonePrefix() string {
 	return forge.PrefixFromAPIBase(f.APIBase)
 }
 
-// DefaultForges son los proveedores que gitdash conoce sin que el usuario
-// declare nada: los dos públicos. Los hosts salen de forge (su tabla), así que
-// añadir ahí un host nuevo lo hace aparecer aquí sin tocar este paquete.
+// Hosts come from the forge package table, so a new host there shows up here without touching this package.
 func DefaultForges() map[string]ForgeConfig {
 	out := make(map[string]ForgeConfig, 2)
 	for host, name := range forge.PublicHosts() {
@@ -98,9 +37,7 @@ func DefaultForges() map[string]ForgeConfig {
 	return out
 }
 
-// supportedForge reporta si gitdash sabe abrir PRs en ese proveedor. La lista
-// son las dos constantes de forge, no una copia: una tercera puerta (glab) sin
-// su argv aquí sería una acción que falla sin explicación.
+// The list is the two forge constants, not a copy: a third door without its argv here would be an action that fails with no explanation.
 func supportedForge(name string) bool {
 	switch normalizeForgeName(name) {
 	case forge.ForgeGitHub, forge.ForgeGitLab:
@@ -109,15 +46,7 @@ func supportedForge(name string) bool {
 	return false
 }
 
-// addForge mezcla lo declarado por el usuario sobre lo que ya hay (los
-// defaults, o lo declarado antes). Cada clave sustituye a la anterior cuando
-// viene: con un host y un api_base por proveedor, "declarar" es exactamente
-// "sustituir la instancia". Lo ausente conserva lo anterior, y un valor vacío
-// se trata como ausente (mismo criterio que el resto del loader).
-//
-// El nombre del proveedor se normaliza a minúsculas: viene de una clave de
-// config escrita a mano, y un "GitLab" que no casara con la constante dejaría
-// la acción sin puerta.
+// Provider names are lowercased: they come from a hand-written config key, and a "GitLab" that missed the constant would leave the action with no door.
 func (c *Config) addForge(rawName string, f forgeConfig) {
 	name := normalizeForgeName(rawName)
 	if name == "" {
@@ -141,10 +70,7 @@ func (c *Config) addForge(rawName string, f forgeConfig) {
 	c.Forges[name] = cur
 }
 
-// ForgeHosts resuelve el mapa host → proveedor que consume
-// forge.ParseRemoteURL. Un proveedor deshabilitado no aporta su host, así que
-// sus remotos vuelven a ser "forge desconocido" en vez de esperar una puerta
-// apagada.
+// A disabled provider contributes no host, so its remotes fall back to "unknown forge" instead of waiting at a switched-off door.
 func (c Config) ForgeHosts() map[string]string {
 	out := make(map[string]string, len(c.Forges))
 	for name, f := range c.Forges {
@@ -158,13 +84,7 @@ func (c Config) ForgeHosts() map[string]string {
 	return out
 }
 
-// ForgePrefixes resuelve host → prefijo de subcarpeta del clone, derivado con
-// ForgeConfig.ClonePrefix. Un prefijo equivocado no rompe la creación (el argv
-// no lo lleva: el proyecto ya viene sin él) pero rompe la URL web, así que sale
-// del MISMO dato que el host en vez de declararse aparte.
-//
-// Solo entran los hosts con prefijo no vacío: la raíz del host es la ausencia de
-// prefijo, y una entrada "" solo añadiría ruido al mapa que lee el parser.
+// The prefix comes from the same datum as the host (not a separate declaration): a wrong prefix does not break creation but does break the web URL.
 func (c Config) ForgePrefixes() map[string]string {
 	out := make(map[string]string, len(c.Forges))
 	for _, f := range c.Forges {
@@ -182,15 +102,10 @@ func (c Config) ForgePrefixes() map[string]string {
 	return out
 }
 
-// normalizeForgeName baja a minúsculas y recorta el nombre del proveedor, como
-// el parser lo hace con el suyo: los dos vienen de la misma config y tienen que
-// casar con las mismas constantes.
 func normalizeForgeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-// normalizeHost baja a minúsculas el host: el nombre de un host no distingue
-// mayúsculas y el mapa de runtime se busca por él.
 func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSpace(host))
 }

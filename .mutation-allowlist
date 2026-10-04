@@ -12,275 +12,280 @@
 # not regenerate it wholesale (that would silently re-hide real gaps).
 #
 # ---------------------------------------------------------------------------
-# ESTADO
-# Medido con `make mutate-all` (gremlins sobre el modulo entero):
+# STATE
+# Measured with `make mutate-all` (gremlins over the whole module):
 #
-#   mutants_total 1004 · killed 987 · LIVED 17 · not_covered 83 · timed_out 8
-#   eficacia de test 98.31% · cobertura de mutadores 92.36%
+#   mutants_total 998 · killed 982 · LIVED 16 · not_covered 83 · timed_out 9
+#   test efficacy 98.40% · mutator coverage 92.32%
 #
-# Los 17 vivos están allowlistados y son los mismos de antes: ninguna entrada
-# nueva (las que hay son los mismos mutantes con la línea movida, y el texto lo
-# dice donde aplica). Los 12 que se quitaron ya no se generan, porque el sitio
-# mutado se borró al quitar código muerto.
+# The 16 survivors are allowlisted. Six entries were retired because their mutants
+# no longer exist or are now KILLED (the relativeTime bounds, the toast expiry
+# guard and the three `make` capacity hints, whose `+N` was removed from the code),
+# four entries were added for mutants the previous run did not report, and one real
+# gap was closed with a test (the detail.go list clip widths).
 #
-# OJO con `TIMED OUT`: no va a `mutants_total` y el gate solo mira `LIVED`, así
-# que un run con mutantes sin testear puede reportar 100% de eficacia. Ver el
-# MUTATE_TIMEOUT_COEFFICIENT del Makefile.
+# CAREFUL with `TIMED OUT`: it does not go into `mutants_total` and the gate only
+# looks at `LIVED`, so a run with untested mutants can report 100% efficacy. See
+# MUTATE_TIMEOUT_COEFFICIENT in the Makefile.
 #
-# Las dos clases con las que hay que decidir, que se repitieron en todo el repo:
+# The two classes you have to decide on, which repeated across the whole repo:
 #
-#   1. Hueco real de test -> se tapa con un test. Ejemplos: el valor exacto de
-#      un borde, el ancho que compone una celda, el reparto de un presupuesto.
-#   2. Mutación que es IDENTIDAD por construcción -> ningún test puede matarla,
-#      porque no hay bug que matar. Ahí lo honesto NO es allowlistarlo: es
-#      quitar el sitio mutado (reescribir el guard, borrarlo si era inútil) o,
-#      si la forma del código lo exige, allowlistarlo con la demostración.
+#   1. Real test gap -> cover it with a test. Examples: the exact value of a
+#      bound, the width a cell composes, how a budget is split.
+#   2. Mutation that is an IDENTITY by construction -> no test can kill it,
+#      because there is no bug to kill. There the honest move is NOT to
+#      allowlist it: it is to remove the mutated site (rewrite the guard, delete
+#      it if it was useless) or, if the shape of the code demands it, allowlist
+#      it with the demonstration.
 #
-# Cada entrada de abajo lleva esa demostración. El orden es por fichero.
+# Every entry below carries that demonstration. The order is by file.
 # ---------------------------------------------------------------------------
 
 # --- cmd/gitdash/print.go ------------------------------------------------
 # --- internal/tui/app.go -------------------------------------------------
-CONDITIONALS_NEGATION internal/tui/app.go:380
+CONDITIONALS_NEGATION internal/tui/app.go:282
 #   `if path, err := cache.Path(); err == nil { m.projects = cache.Load(...) }`.
-#   Invertida, la carga ocurre con una ruta que no se pudo resolver. cache.Load
-#   valida cada entrada contra la existencia del marcador en disco, así que con
-#   una ruta inválida no puede devolver ningún proyecto: el resultado es el
-#   mismo (m.projects vacío, que el scan de Init repuebla acto seguido). La
-#   mutación solo hace una lectura inútil. Y el error se puede forzar sin
-#   interceptar nada: con XDG_CACHE_HOME y HOME vacíos `cache.Path()` falla y la
-#   carga se salta. Tampoco se nota, porque lo que devuelva `cache.Load` con una
-#   ruta inválida se descarta igual. Es equivalente por resultado, no porque sea
-#   imposible de probar.
+#   Inverted, the load happens with a path that could not be resolved. cache.Load
+#   validates every entry against the existence of the marker on disk, so with an
+#   invalid path it cannot return any project: the result is the same (m.projects
+#   empty, which Init's scan repopulates right after). The mutation only performs a
+#   useless read. And the error can be forced without intercepting anything: with
+#   XDG_CACHE_HOME and HOME empty `cache.Path()` fails and the load is skipped.
+#   It is not noticed either, because whatever `cache.Load` returns with an invalid
+#   path is discarded anyway. Equivalent by result, not because it is impossible
+#   to test.
 
-# RETIRADA en 82bd563: la guarda `if cmdlog.Active() == nil { return }` de
-#   logIntent ya la mata un test. Se deja el motivo por el que esa guarda era
-#   solo una optimización, no la garantía: RecordIntent ES un no-op sin recorder
-#   (`if current.Load() != nil`), o sea que la exterior y la interior cubren lo
-#   mismo.
+# RETIRED in 82bd563: the `if cmdlog.Active() == nil { return }` guard of
+#   logIntent is already killed by a test. The reason that guard was only an
+#   optimisation, not the guarantee, is left here: RecordIntent IS a no-op without
+#   a recorder (`if current.Load() != nil`), so the outer and the inner guard cover
+#   the same thing.
 
-#   Las dos guardas de cancelación de startScanCmd (después de publicar los
-#   proyectos y después del StreamPool). Son EQUIVALENTES POR CONTRATO, y el
-#   contrato es sendEvent: su select tiene `case <-ctx.Done()`, así que con el
-#   contexto ya cancelado NADA de lo que se envíe llega al canal. Invertir la
-#   guarda solo cambia cuántos subprocess se spawnean (StreamPool con un ctx
-#   muerto falla enseguida, y sus envíos se descartan igual), nunca lo que el
-#   modelo ve. El corte evita trabajo, no cambia el resultado: un test que
-#   cancelara a mitad de scan vería exactamente los mismos eventos.
+#   The two cancellation guards of startScanCmd (after publishing the projects and
+#   after the StreamPool). They are EQUIVALENT BY CONTRACT, and the contract is
+#   sendEvent: its select has `case <-ctx.Done()`, so with the context already
+#   cancelled NOTHING that is sent reaches the channel. Inverting the guard only
+#   changes how many subprocesses are spawned (StreamPool with a dead ctx fails
+#   immediately, and its sends are discarded anyway), never what the model sees.
+#   The cut avoids work, it does not change the result: a test that cancelled half
+#   way through a scan would see exactly the same events.
+
+# --- internal/tui/layout.go ----------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/layout.go:63
+#   `if top < detailHeadLines` in panelCandidates. With `top == detailHeadLines`
+#   (== 5) the only extra candidate is preview=5, and top can only BE 5 when the
+#   free height is exactly 5 (top = min(max(minPreviewLines=10, free*2/5), free),
+#   so free >= 10 gives top >= 10). fitLayout then leaves
+#   bodyLines = max(1, free - previewChrome - 5) = 1, below minBodyLines (3), so
+#   computeLayout rejects that candidate anyway (`l.bodyLines >= minBodyLines`).
+#   The guard is redundant, not load-bearing: with it or without it no dashboard
+#   ever paints a 5-line panel.
 
 # --- internal/tui/table.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:292
-#   El comparador de rowLess: `if sa != sb { return sa > sb }`. La guarda ES la
-#   negación de la comparación que devuelve, así que dentro de la rama `sa` y
-#   `sb` son distintos por construcción: `>` y `>=` dan lo mismo. Idéntico con
-#   LastCommit (línea 292). La TERCERA clave (el nombre) sí está cubierta: ahí no
-#   hay guarda que compare antes, y un `<=` invierte el orden.
+CONDITIONALS_BOUNDARY internal/tui/table.go:213
+#   `if j > 0` in the insertion sort's inner loop, where `for k := range i + 1`
+#   makes j = i+1-k run over [1, i+1]. j is NEVER 0, so the guard is an identity on
+#   its own terms; `j >= 0` is always true and the swap that follows (`rows[j],
+#   rows[j-1]`) can never index -1. A real defensive guard would have to be
+#   `k < i` (an index bound), not a bound on j.
+
+CONDITIONALS_BOUNDARY internal/tui/table.go:223
+#   The rowLess comparator: `if sa != sb { return sa > sb }`. The guard IS the
+#   negation of the comparison it returns, so inside the branch `sa` and `sb` are
+#   different by construction: `>` and `>=` give the same.
 #
-#   Las líneas cambiaron de 273/270 a 295/292 al reescribir sortRows con `range`
-#   (ver el comentario de sortRows en table.go: era un bucle cuyo mutante
-#   INCREMENT_DECREMENT era un cuelgue infinito). Es el mismo mutante con otra
-#   línea, porque el allowlist se indexa por línea; la demostración no cambia.
+#   The lines moved when sortRows was rewritten with `range` (see the sortRows
+#   comment in table.go: it was a loop whose INCREMENT_DECREMENT mutant was an
+#   infinite hang). It is the same mutant with another line, because the allowlist
+#   is indexed by line; the demonstration does not change.
+
+CONDITIONALS_BOUNDARY internal/tui/table.go:226
+#   `if a.snap.LastCommit != b.snap.LastCommit { return a.snap.LastCommit >
+#   b.snap.LastCommit }`, the SECOND key of rowLess. Same demonstration as the
+#   first: with `>=` the branch is entered when the two commits are equal, and
+#   inside it `a > b` is false for equal values, so the fall-through to the name
+#   comparison happens exactly as before. The THIRD key (the name) is NOT covered
+#   by this argument and IS tested: there is no guard comparing before it, and a
+#   `<=` inverts the order.
+
+# The relativeTime bucket bounds used to be allowlisted here (639/641). They are
+# no longer: their mutants are KILLED now, so the entries were retired instead of
+# being left as dead allowlist lines. The bounds that CAN be pinned are tested
+# (TestRelativeTimeBuckets): inside each bucket and with the roundings above and
+# below.
 
 # --- internal/tui/update.go ----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/update.go:307
-#   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. El && cortocircuita:
-#   la segunda condición solo se evalúa cuando la tecla ES esc, y ahí clear() es
-#   una operación real sobre tokens en vuelo. Para el resto de teclas no se
-#   ejecuta nada, diga lo que diga la guarda. Con `>= 0` el resultado es idéntico
-#   en los tres casos (con tokens, sin tokens, y tecla distinta de esc).
+CONDITIONALS_BOUNDARY internal/tui/update.go:248
+#   `if key == "esc" && len(m.removeTokens) > 0 { clear(...) }`. The && short
+#   circuits: the second condition is only evaluated when the key IS esc, and there
+#   clear() is a real operation on tokens in flight. For every other key nothing
+#   runs, whatever the guard says. With `>= 0` the result is identical in all three
+#   cases (with tokens, without tokens, and a key other than esc).
 
 # --- internal/tui/detail.go ----------------------------------------------
-#   `if avail < minListBlockLines { return 0, false }` de listBudget. Con
-#   avail == minListBlockLines los DOS caminos devuelven lo mismo: room == 0, y
-#   entonces `n <= room` solo es cierto con n == 0, mientras que `room < 1`
-#   devuelve (0, false) para cualquier n. La función entera vale (0, false) en
-#   todo avail <= minListBlockLines, así que mover el borde un paso no la cambia.
+CONDITIONALS_BOUNDARY internal/tui/detail.go:17
+#   `if avail < minListBlockLines { return 0, false }` of listBudget. With
+#   avail == minListBlockLines BOTH paths return the same thing: room == 0, and
+#   then `n <= room` is only true with n == 0, while `room < 1` returns (0, false)
+#   for any n. The whole function is worth (0, false) for every
+#   avail <= minListBlockLines, so moving the bound one step does not change it.
 
 # --- internal/tui/toast.go -----------------------------------------------
-CONDITIONALS_BOUNDARY internal/tui/toast.go:263
-#   `for ansi.StringWidth(w) > maxWidth` del word-wrap. Solo difiere con una
-#   palabra de ancho EXACTO maxWidth, y en ese caso el resultado es el mismo: la
-#   palabra ocupaba una línea entera de todos modos. Con la mutación el corte
-#   devuelve (w, "") y la línea se cierra igual. Es la misma clase que truncar a
-#   un ancho >= el suyo.
+CONDITIONALS_BOUNDARY internal/tui/toast.go:154
+#   `for ansi.StringWidth(w) > maxWidth` of the word-wrap. It only differs with a
+#   word of EXACTLY maxWidth, and there the result is the same: the word occupied a
+#   whole line anyway. With the mutation the cut returns (w, "") and the line
+#   closes the same way. It is the same class as truncating to a width >= its own.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:250
-CONDITIONALS_NEGATION internal/tui/toast.go:250
-#   Las dos guardas de entrada de overlayToasts. Con width == 0 (y no < 0) el
-#   splice es una identidad pura: x == 0 y bw == 0, así que
-#   `Truncate(l,0) + bloque + TruncateLeft(l,0)` reconstruye la línea. Con
-#   height == len(lines) las dos ramas asignan el mismo valor (height ya está
-#   acotado). Ni width == 0 ni height == len(lines) cambian nada observable.
+CONDITIONALS_BOUNDARY internal/tui/toast.go:199
+#   `if len(blocks) == 0 || width <= 0`, the first entry guard of overlayToasts.
+#   With width == 0 (and not < 0) the guard still returns base, and even if it did
+#   not, the splice below is a pure identity at width 0: x == 0 and bw == 0, so
+#   `Truncate(l,0) + block + TruncateLeft(l,0)` rebuilds the line. Neither boundary
+#   changes anything observable.
 
-#   `if top < 0` del bloque que no cabe entero. Solo difiere con top == 0, donde
-#   keep == bottom+1 == bh: el recorte `block[bh-keep:]` deja el bloque entero.
-#   Es la guarda de "no cabe" escrita al revés por un paso, y en el borde exacto
-#   no recorta nada.
+CONDITIONALS_BOUNDARY internal/tui/toast.go:203
+CONDITIONALS_NEGATION internal/tui/toast.go:203
+#   `if height <= 0 || height > len(lines)`, the second entry guard of
+#   overlayToasts. With height == len(lines) the two branches assign the same value
+#   (height is already bounded), and with height == 0 the splice is a pure identity:
+#   x == 0 and bw == 0, so `Truncate(l,0) + block + TruncateLeft(l,0)` rebuilds the
+#   line. Neither boundary changes anything observable.
 
-# --- Ruido de medición (no son huecos: hay test que los mata) -----------
-# El de abajo está VERIFICADO A MANO con la suite completa: mutando el fichero,
-# el test falla. aun así gremlins lo reporta a veces como LIVED, y en el MISMO
-# run marca KILLED y LIVED mutaciones idénticas (mismo tipo, misma línea, misma
-# columna, mismo código resultante). La causa es que la mutación dispara un
-# bucle enormouso y el resultado depende de si el proceso mutantado llega a
-# terminar antes del timeout de la máquina. No es un hueco de test: allowlistarlo
-# evita el rojo espurio del gate, y si el test que lo mata desaparece, el
-# NOT COVERED de esa línea lo delata.
-CONDITIONALS_BOUNDARY internal/tui/toast.go:75
-#   La guarda de expiración (`now.Sub(created) < duration`). La mata
-#   TestToastDuracionCeroExpiraYa (un toast con duration 0 está expirado ya).
-#   (Las sumas internas del alto libre del panel, que también entraban aquí por
-#   ruido, ya NO están: las mata TestPreviewConFiltroRespetaElShareDelHueco.)
+CONDITIONALS_BOUNDARY internal/tui/toast.go:216
+#   `if top < 0` of the block that does not fit whole. It only differs with
+#   top == 0, where keep == bottom+1 == bh: the slice `block[bh-keep:]` leaves the
+#   block whole. It is the "does not fit" guard written backwards by one step, and
+#   at the exact bound it clips nothing.
 
-# --- internal/tui/table.go (relativeTime) ---------------------------------
-CONDITIONALS_BOUNDARY internal/tui/table.go:783
-CONDITIONALS_BOUNDARY internal/tui/table.go:789
-CONDITIONALS_BOUNDARY internal/tui/table.go:792
-#   Los cinco bordes de los buckets de "ahora": <1m, <1h, <24h, <7d, <30d.
-#   Todos son identidades por la granularidad del dato, no por el reloj: la
-#   funcion recibe un epoch de SEGUNDO ENTERO (LastCommit), asi que
-#   `time.Since(time.Unix(epoch, 0))` siempre cae con un resto sub-segundo
-#   (los nanosegundos del instante actual). No puede valer EXACTAMENTE un
-#   umbral, ni approaching desde dentro: el valor mas pequeno que puede tomar
-#   junto al borde es 59.999999s o 60.000001s. Mutar `<` por `<=` cambia el
-#   caso que cae exactamente en el umbral, y ese caso no existe. Ningun test
-#   puede matarlos porque no hay entrada que los alcance, y no es un hueco del
-#   test: es que el dominio del valor no incluye el borde.
-#   Los bordes ESCOGIDOS si estan probados (TestRelativeTimePinnaLosBordes):
-#   dentro de cada bucket y con los五条 redondeos de abajo y arriba. Lo que no
-#   se puede fijar es el borde exacto, y no por falta de test.
+# --- Measurement noise (not gaps: a test kills them) ----------------------
+# gremlins sometimes reports a mutation as LIVED and, in the SAME run, marks an
+# identical one (same type, same line, same column, same resulting code) as KILLED.
+# The cause is that the mutation triggers an enormous loop and the result depends on
+# whether the mutated process finishes before the machine's timeout. It is not a
+# test gap: allowlisting it avoids the gate's spurious red, and if the test that
+# kills it disappears, the NOT COVERED of that line gives it away.
+
+# The toast expiry guard used to be allowlisted here (61) as "measurement noise".
+# Its site no longer exists in toast.go, so the entry was retired; if a mutation of
+# that shape shows up again it must be allowlisted with its own demonstration.
 
 # --- internal/tui/cmdlogpanel.go -----------------------------------------
-ARITHMETIC_BASE internal/tui/cmdlogpanel.go:104
-#   El segundo clamp del offset: `min(m.logOffset, max(0, len(entries)-visible))`.
-#   logOffset ya está acotado a [0, maxOffset] en logScroll, así que este clamp
-#   es la red de seguridad para cuando cambia `visible` (un resize) y el offset
-#   guardado se queda pasado. Ampliar ese techo con la mutación no cambia nada
-#   observable: el offset que llega aquí nunca lo supera, y el único sitio donde
-#   se usa es `len(entries)-visible-offset`, cuyo recorte por start ya lo acota.
+ARITHMETIC_BASE internal/tui/cmdlogpanel.go:85
+#   The second clamp of the offset: `min(m.logOffset, max(0, len(entries)-visible))`.
+#   logOffset is already bounded to [0, maxOffset] in logScroll, so this clamp is
+#   the safety net for when `visible` changes (a resize) and the stored offset is
+#   left over. Raising that ceiling with the mutation changes nothing observable:
+#   the offset that arrives here never exceeds it, and the only place it is used is
+#   `len(entries)-visible-offset`, whose clipping by start already bounds it.
 
-ARITHMETIC_BASE internal/tui/cmdlogpanel.go:108
-INVERT_NEGATIVES internal/tui/cmdlogpanel.go:108
-#   El segundo término del min de la ventana: `min(visible, len(entries)-start)`.
-#   Es una IDENTIDAD, y la demostración es el offset de al lado. offset >= 0
-#   siempre (logScroll lo acota con max(0, ...), y el resto de sitios lo ponen a
-#   0), así que:
-#     · start == 0  →  len(entries)-0 == len(entries)+0. Las dos formas dan lo
-#       mismo sin más.
-#     · start > 0   →  start == len(entries)-visible-offset, luego
-#       len(entries)-start == visible+offset >= visible, o sea que el min ya
-#       devuelve `visible`. Con `+start` el segundo término es todavía mayor,
-#       así que el min sigue devolviendo `visible`.
-#   En los dos casos el min devuelve lo mismo con el signo cambiado: ninguna
-#   ventana puede cambiar de tamaño. El `min` NO se borra (con pocas entradas
-#   y un panel alto, start == 0 y len < visible: ahí sí recorta), pero su
-#   segundo término no puede ser el que decide.
+INVERT_NEGATIVES internal/tui/cmdlogpanel.go:85
+#   The second term of the window's min: `min(visible, len(entries)-start)`.
+#   It is an IDENTITY, and the demonstration is the offset next to it. offset >= 0
+#   always (logScroll bounds it with max(0, ...), and the rest of the places set it
+#   to 0), so:
+#     · start == 0  ->  len(entries)-0 == len(entries)+0. Both forms give the same
+#       thing, no more.
+#     · start > 0   ->  start == len(entries)-visible-offset, hence
+#       len(entries)-start == visible+offset >= visible, so the min already
+#       returns `visible`. With `+start` the second term is even bigger, so the
+#       min still returns `visible`.
+#   In both cases the min returns the same thing with the sign flipped: no window
+#   can change size. The `min` is NOT removed (with few entries and a tall panel,
+#   start == 0 and len < visible: there it does clip), but its second term cannot
+#   be the deciding one.
 
 # --- internal/tui/proverlay.go -------------------------------------------
-# El presupuesto del formulario ya NO tiene vivos: los mata
-# TestPROverlayElPresupuestoEsElQueDiceElComentario, que lo sujeta por su
-# COMPOSICIÓN (prMinBodyLines == prFixedLines+2, prMinValueWidth ==
-# prLabelWidth, prMinWidth == 2+prLabelWidth+prValueSlack+prMinValueWidth) en vez
-# de contra las constantes, porque un test que usa la constante se mueve con ella
-# cuando el mutante la mueve.
-# El `1` de prValueSlack sigue siendo un parámetro libre dentro de un mínimo (su
-# requisito es "reservar la celda del cursor", o sea >= 1), pero su mutante ya no
-# sale como vivo: la composición lo ata igual.
+# The form's budget has NO survivors any more: they are killed by
+# TestPROverlayTheBudgetIsTheOneTheCommentStates, which holds it by its
+# COMPOSITION (prMinBodyLines == prFixedLines+2, prMinValueWidth ==
+# prLabelWidth, prMinWidth == 2+prLabelWidth+prValueSlack+prMinValueWidth) instead
+# of against the constants, because a test that uses the constant moves with it
+# when the mutant moves it.
+# The `1` of prValueSlack is still a free parameter inside a minimum (its
+# requirement is "reserve the cursor's cell", i.e. >= 1), but its mutant no longer
+# comes out as a survivor: the composition ties it down just the same.
 
 # --- internal/tui/prcreate.go --------------------------------------------
-#   El `>= 0` del `strings.Index(reason, "]: ")` de prGitReason. Es una
-#   IDENTIDAD, y la demostración es la guarda de fuera: ese index solo se mira
-#   dentro de `if strings.HasPrefix(reason, "git ")`, así que el motivo empieza
-#   por "git " y la llave "]: " no puede estar en la posición 0 (ahí tendría que
-#   empezar la cadena). Dentro de la rama, i >= 4, luego `i >= 0` y `i > 0` dan
-#   el mismo corte. La TERCERA forma (un motivo que NO empieza por "git ") no
-#   entra en la rama y por eso no se recorta, y eso está sujeto con test.
-
-# --- internal/tui/update.go -------------------------------------------------
-#   El `c != nil` que decide encolar el fetch al terminar el scan.
-#   `fetchBatchCmd` devuelve SIEMPRE nil (app.go:544, sin excepción: con o sin
-#   targets solo lanza la goroutine y publishes por el canal de eventos). La
-#   llamada ocurre en la propia inicialización del if, así que el fetch se
-#   lanza igual con `c == nil`; lo único que cambia es que se Encole un nil, y
-#   `tea.Batch` los descarta (`compactCmds` ignora los nil). Equivalente por
-#   contrato de la función que llama. La prueba de que el fetch sí sale está en
-#   TestElFinDelScanLanzaElFetchAutomatico: mira el evento, no el retorno.
+CONDITIONALS_BOUNDARY internal/tui/prcreate.go:104
+#   The `>= 0` of the `strings.Index(reason, "]: ")` in prGitReason. It is an
+#   IDENTITY, and the demonstration is the outer guard: that index is only looked
+#   at inside `if strings.HasPrefix(reason, "git ")`, so the reason starts with
+#   "git " and the "]: " cannot be at position 0 (the string would have to start
+#   there). Inside the branch, i >= 4, so `i >= 0` and `i > 0` give the same cut.
+#   The THIRD form (a reason that does NOT start with "git ") does not enter the
+#   branch and so is not clipped, and that is held down by a test.
 
 # --- internal/gitstatus/status.go ----------------------------------------
-ARITHMETIC_BASE internal/config/forge.go:149
-ARITHMETIC_BASE internal/config/forge.go:169
-#   La pista de capacidad de los dos mapas que resuelven los forges:
-#   `make(map[string]string, len(c.Forges)+2)`. El segundo argumento del make
-#   con tamaño NO es contenido: solo reserva buckets para que la inserción no
-#   crezca a mitad de la vuelta. Cambiar el + por un -, o por el número tal
-#   cual, no cambia ni una clave del mapa resultante: el bucle que lo llena es
-#   el mismo, con las mismas inserciones sobre la misma clave. Es una IDENTIDAD
-#   por construcción de la firma de make, no un hueco de test: ningún test
-#   puede distinguirla porque no hay nada que distinguir (la única forma de
-#   verlo sería medir las reasignaciones internas del runtime, que no son del
-#   contrato del código).
+# The capacity hints of the two forge maps and of the env slice used to be
+# allowlisted here (ARITHMETIC_BASE on `len(c.Forges)+2` and `len(env)+4`). The
+# `+N` was removed from the code, so there is no `+` left to mutate and the entries
+# were retired rather than left as dead lines.
 
 # --- internal/forge/tool/tool.go ----------------------------------------
-ARITHMETIC_BASE internal/forge/tool/tool.go:110
-#   Lo mismo, con la firma de make([]T, len, cap): `make([]string, 0,
-#   len(env)+4)`. El 0 es la longitud (se empieza vacío y se rellena con
-#   append) y len(env)+4 es la capacidad reservada. Mutar el signo o el número
-#   cambia cuántas celdas se reservan por adelantado, no el slice que sale: el
-#   len final lo fija el bucle y los tres append de fuera.
+# (the same three capacity hints, now gone from the code)
 
 # --- internal/forge/parse.go ---------------------------------------------
-CONDITIONALS_BOUNDARY internal/forge/parse.go:45
-#   `if colon < 0` sobre el `strings.Index(rest, ":")` del remote scp. Solo
-#   difiere con colon == 0, es decir un remote que empieza por ":"
-#   ("git@:acme/widget.git"): el host queda VACÍO y el path es el resto.
-#   Equivalente DADO EL CONTRATO del mapa que recibe la función: con el host
-#   vacío, `hosts[""]` no puede existir. El único que construye ese mapa es
-#   config.ForgeHosts, que normaliza cada host y se salta los vacíos
-#   (`if h := normalizeHost(f.Host); h != ""`), así que el lookup falla y los
-#   dos caminos devuelven (RepoRef{}, false). Con un `colon <= 0` la función
-#   recorre un paso más de camino antes de llegar al MISMO return. La
-#   demostración depende de ese contrato y por eso está escrita aquí: si
-#   alguien llegara a pasar un mapa con la clave "", el invariante se rompe y
-#   el NOT COVERED lo delataría al desaparecer esta entrada.
+CONDITIONALS_BOUNDARY internal/forge/parse.go:28
+#   `if colon < 1` over the `strings.Index(rest, ":")` of the scp remote. It only
+#   differs with colon == 0, i.e. a remote starting with ":"
+#   ("git@:acme/widget.git"): the host comes out EMPTY and the path is the rest.
+#   Equivalent GIVEN THE CONTRACT of the map the function receives: with an empty
+#   host, `hosts[""]` cannot exist. The only thing that builds that map is
+#   config.ForgeHosts, which normalises every host and skips the empty ones
+#   (`if h := normalizeHost(f.Host); h != ""`), so the lookup fails and both paths
+#   return (RepoRef{}, false). With `colon <= 1` the function walks one step
+#   further before reaching the SAME return. The demonstration depends on that
+#   contract, which is why it is written here: if someone ever passed a map with
+#   the "" key, the invariant would break and the NOT COVERED would give it away
+#   the moment this entry disappeared.
 
 # ---------------------------------------------------------------------------
-# Backlog real, aún sin test: ninguno. Los 215 mutantes NOT COVERED del primer
-# run eran casi todos la copia del repo dentro de .worktrees/ (Worktrunk), que
-# gremlins mutaba y contaba como si fuera código del módulo: por eso el target
-# ahora lo excluye. Los que quedaban de verdad (print.go, que no tenía un solo
-# test de sus columnas) están cerrados.
+# Real backlog, still untested: none. The 215 NOT COVERED mutants of the first run
+# were almost all the copy of the repo inside .worktrees/ (Worktrunk), which
+# gremlins mutated and counted as if it were module code: that is why the target
+# now excludes it. The ones that were genuinely left (print.go, which had not a
+# single test for its columns) are closed.
 #
-# La apertura de PR/MR (internal/forge, internal/config/forge.go,
-# internal/tui/proverlay.go, update.go) entró con 19 supervivientes y no deja
-# ninguno detrás: 15 eran huecos de test —el borde exacto del alto y del
-# ancho, el rótulo que se resalta, el nivel del aviso, el reparto del hueco
-# entre los widgets— y los 4 de arriba son identidades de construcción.
+# The PR/MR opening (internal/forge, internal/config/forge.go,
+# internal/tui/proverlay.go, update.go) came in with 19 survivors and leaves none
+# behind: 15 were test gaps — the exact bound of the height and of the width, the
+# label that gets highlighted, the level of the warning, how the gap is split
+# among the widgets — and the 4 above are construction identities.
+#
+# One gap was found and CLOSED while translating the repo: the files/commits clip
+# widths in detail.go (`max(20, m.width-8)` and `max(20, m.width-24)`) had a test
+# that recomputed its expectation with the same expression, so it moved with every
+# mutant of it. TestCardClipsTheListsToLiteralWidths now asserts the EXACT length
+# of the painted run (51 and 35 runes at width 60) and those four mutants are
+# killed; each of the four was verified by mutating the line by hand, which is the
+# same bar as the entries below.
 #
 # ---------------------------------------------------------------------------
-# Cómo se tria un NOT COVERED (el gate de arriba solo mira los LIVED, asi que
-# esto no lo bloquea: es el trabajo de fondo).
+# How a NOT COVERED is triaged (the gate above only looks at LIVED, so this does
+# not block: it is background work).
 #
-# El NOT COVERED de gremlins NO es veredicto, es sospecha, por dos razones que se
-# pueden medir y no hay que creer:
+# gremlins' NOT COVERED is NOT a verdict, it is a suspicion, for two reasons that
+# can be measured and need not be believed:
 #
-# 1. Mapeo de cobertura roto. gremlins busca un bloque que EMPIECE en la linea
-#    del mutante; la cobertura de Go se emite por bloques que ABARCAN un rango
-#    (linea.col, linea.col). Un mutante en la columna 22 de una linea cuyo
-#    bloque empieza en la 54 esta dentro de ese bloque y sale NOT COVERED igual.
-#    Con el perfil propio (go test -covermode=count -coverpkg=./... -coverprofile)
-#    y buscando el bloque que CONTIENE la posicion, los 912 mutantes KILLED de un
-#    run caen dentro de un bloque con count > 0: los 912, sin fallos. Ese es el
-#    control que hace fiable el metodo.
+# 1. Broken coverage mapping. gremlins looks for a block that STARTS on the
+#    mutant's line; Go's coverage is emitted per block that SPANS a range
+#    (line.col, line.col). A mutant in column 22 of a line whose block starts at
+#    54 is inside that block and still comes out NOT COVERED. With our own profile
+#    (go test -covermode=count -coverpkg=./... -coverprofile) and looking for the
+#    block that CONTAINS the position, the 912 KILLED mutants of a run all fall
+#    inside a block with count > 0: all 912, no failures. That is the control that
+#    makes the method reliable.
 #
-# 2. `-coverpkg=./...` es obligatorio con este layout. internal/testutil lo usan
-#    los tests de otros paquetes, y sin -coverpkg el perfil solo mide el paquete
-#    bajo test: sus 14 NOT COVERED eran callers vivos. Con -coverpkg pasan a
-#    ARTEFACTO.
+# 2. `-coverpkg=./...` is mandatory with this layout. internal/testutil is used by
+#    other packages' tests, and without -coverpkg the profile only measures the
+#    package under test: its 14 NOT COVERED were live callers. With -coverpkg they
+#    become an ARTEFACT.
 #
-# Reparto de un run completo (180 NOT COVERED): 48 artefactos de mapeo, 114 lineas
-# sin bloque instrumentable (const, firmas, comentarios: los mutantes no son
-# codigo ejecutable y los de `+` entre strings ni compilan al mutarlos), 18 huecos
-# de verdad, de los que 11 no son viables, 2 son codigo de main() sin tests, 3 son
-# identidades (esta seccion + la de app.go), y 2 eran trabajo real:
-# app.go:454 (el error de discovery.Scan no llegaba al usuario) y update.go:60
-# (la cache no se guardaba nunca). Los dos cerrados con test.
+# Breakdown of a full run (180 NOT COVERED): 48 mapping artefacts, 114 lines with
+# no instrumentable block (const, signatures, comments: the mutants are not
+# executable code and the `+` ones between strings do not even compile when
+# mutated), 18 real gaps, of which 11 are not viable, 2 are main() code with no
+# tests, 3 are identities (this section + the app.go one), and 2 were real work:
+# app.go:454 (the discovery.Scan error never reached the user) and update.go:60
+# (the cache was never saved). Both closed with a test.

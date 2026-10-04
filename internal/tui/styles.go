@@ -1,21 +1,18 @@
-// Estilos lipgloss del dashboard.
 package tui
 
 import "charm.land/lipgloss/v2"
 
-// lipglossStyle alias corto para las firmas de las celdas.
 type lipglossStyle = lipgloss.Style
 
-// anchos de columna de la tabla (todo ancho > longitud de
-// su header para que pad() garantice separador entre columnas).
+// Column widths, all wider than their header so pad() guarantees a separator between columns.
 const (
 	colName     = 26
 	colBranch   = 24
-	colWT       = 11 // "Work Tree" (9) + separador
-	colUpDown   = 9  // "↑↓up"
-	colSync     = 12 // "SYNC" + "<rama> ↓NN"
-	colActivity = 10 // "ACTIVITY" (8) + separador
-	colFetch    = 9  // "FETCH"
+	colWT       = 11
+	colUpDown   = 9
+	colSync     = 12
+	colActivity = 10
+	colFetch    = 9
 )
 
 var (
@@ -23,12 +20,12 @@ var (
 	styleDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	styleClean    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleDirty    = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amarillo
-	styleAhead    = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // verde
-	styleBehind   = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))  // cian
-	styleDiverged = lipgloss.NewStyle().Foreground(lipgloss.Color("201")) // magenta
-	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // rojo
-	styleWarn     = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // naranja
+	styleDirty    = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	styleAhead    = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+	styleBehind   = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	styleDiverged = lipgloss.NewStyle().Foreground(lipgloss.Color("201"))
+	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	styleWarn     = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
 	styleFetchRun = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	styleFetchBad = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
@@ -36,26 +33,20 @@ var (
 	styleHint = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	styleSel  = lipgloss.NewStyle().Bold(true)
 
-	// Header de grupo (vroom)
-	styleGroupHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	// Header secundario (nivel 2, menos protagonista)
+	styleGroupHeader     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	styleSecondaryHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
-	// Sub-fila de worktree (indentada, distinta de repo/header)
 	styleWorktree = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
 	styleDetailKey = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 
-	// Panel del command log: la ejecución se lee normal y la intención
-	// (la tecla) queda tenue, porque es contexto y no resultado.
+	// Command log panel: the execution reads normal while the intent (the key) stays faint, because it is context and not result.
 	styleLogExec   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	styleLogIntent = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleLogOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
 
-	// color del borde de las secciones (gris tenue, no compite con el contenido)
 	borderColor = lipgloss.Color("238")
 
-	// Toasts: mismo código de color que los estados de la tabla
 	styleToastSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
 	styleToastError   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	styleToastInfo    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))

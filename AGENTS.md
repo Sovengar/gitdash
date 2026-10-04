@@ -1,422 +1,433 @@
 # AGENTS.md — gitdash
 
-Guía para agentes sin contexto previo sobre este proyecto.
+A guide for agents with no prior context on this project.
 
-## Qué es
+## What it is
 
-TUI (Go + Bubbletea v2) que muestra el estado de todos los repos git del
-usuario descubiertos por **fichero marcador** `.gitdash.toml`: branch, cambios
-pendientes (dirty) y **↑ahead/↓behind**, con fetch automático en batches y
-acciones rápidas (pull/push/editor). Inspirado en
-[bircni/git-statuses](https://github.com/bircni/git-statuses) — no es un
-fork: solo comparte la idea.
+A TUI (Go + Bubbletea v2) that shows the state of every git repo of the user,
+discovered by a **marker file** `.gitdash.toml`: branch, pending changes (dirty)
+and **↑ahead/↓behind**, with automatic batched fetch and quick actions
+(pull/push/editor). Inspired by
+[bircni/git-statuses](https://github.com/bircni/git-statuses) — it is not a fork:
+it only shares the idea.
 
 ## Stack
 
 - Go 1.26+, module `gitdash`
 - `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`
-  (import paths `charm.land`, NO github.com/charmbracelet)
+  (import paths `charm.land`, NOT github.com/charmbracelet)
 - `github.com/BurntSushi/toml`
-- Sin cgo: git vía subprocess (`git status --porcelain=v2 --branch`)
+- No cgo: git via subprocess (`git status --porcelain=v2 --branch`)
 
-## Comandos
+## Commands
 
 ```bash
 go build ./... && go vet ./... && go test ./...   # build + lint + tests
-go build -o bin/gitdash ./cmd/gitdash              # binario (artefacto de build)
-make install                                       # instala bin/gitdash en ~/.local/bin (PREFIX/DESTDIR)
-go mod tidy                                        # tras añadir deps
+go build -o bin/gitdash ./cmd/gitdash              # binary (a build artefact)
+make install                                       # installs bin/gitdash into ~/.local/bin (PREFIX/DESTDIR)
+go mod tidy                                        # after adding deps
 ```
 
 ```bash
-make coverage-check                                # perfil de cobertura + gate (diff al 100%, total con suelo)
-make mutate-all                                    # mutation testing del modulo entero, ajustado a esta maquina
-./scripts/gen-fixtures.sh                          # regenera testdata/playground
-bin/gitdash --print                                # modo tabla one-shot
-# smoke test de la TUI (ver Gotcha 3):
+make coverage-check                                # coverage profile + gate (diff at 100%, total with a floor)
+make mutate-all                                    # mutation testing of the whole module, tuned to this machine
+./scripts/gen-fixtures.sh                          # regenerates testdata/playground
+bin/gitdash --print                                # one-shot table mode
+# TUI smoke test (see Gotcha 3):
 tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux capture-pane -t gd -p
 ```
 
-**REGLA**: al terminar cualquier cambio de código, INSTALAR el binario
-(`make install`). El usuario ejecuta el de `~/.local/bin`: un bin stale con
-cambios ya hechos causa síntomas falsos (ej. "no encuentra repos" por el
-rename del marcador).
+**RULE**: when you finish any code change, INSTALL the binary
+(`make install`). The user runs the one in `~/.local/bin`: a stale binary with
+changes already made causes false symptoms (e.g. "it finds no repos" because of
+the marker's rename).
 
-## CI y protección de `main`
+## CI and `main`'s protection
 
-Hay **dos workflows** y **cuatro required checks**: `Build`, `Lint`, `Test` y
-`Mutation (diff)`. Todos corren sin filtros `paths` a propósito: un workflow
-filtrado se salta, y un check obligatorio saltado se queda en *pending* para
-siempre y bloquea todos los PRs que no toquen las rutas filtradas.
+There are **two workflows** and **four required checks**: `Build`, `Lint`, `Test`
+and `Mutation (diff)`. All of them run without `paths` filters on purpose: a
+filtered workflow is skipped, and a skipped required check stays *pending*
+forever and blocks every PR that does not touch the filtered paths.
 
-### `CI` (`.github/workflows/ci.yml`) — PR y push a `main`
+### `CI` (`.github/workflows/ci.yml`) — PR and push to `main`
 
-- **`Build`**: `go build ./...` y `go vet ./...`.
+- **`Build`**: `go build ./...` and `go vet ./...`.
 - **`Lint`**: `make lint` → vet + fmt-check (gofmt) + golangci-lint
-  **v2.13.2** (pineado en el `Makefile`; no hay `.golangci.yml`, corre el set de
-  linters por defecto).
-- **`Test`**: tres steps.
+  **v2.13.2** (pinned in the `Makefile`; there is no `.golangci.yml`, so it runs
+  the default linter set).
+- **`Test`**: three steps.
   1. `go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...`
-     (suite completa, sin `-short`). La suite es **autocontenida**: cada fixture
-     git se crea bajo `t.TempDir()` con `internal/testutil`, así que CI **no**
-     necesita `make fixtures` ni `testdata/playground`.
-  2. `Coverage of the subprocess`: `go build -cover` + `GOCOVERDIR` para medir
-     `func main()`, que llama `os.Exit` y no puede correr en el binario de test.
-     **`-coverpkg ./...` no es opcional**: sin él el perfil no incluye los
-     paquetes cruzados y los helpers usados desde otros (`internal/testutil`)
-     salen sin cubrir. Medido: 97.30% sin él, 98.17% con él.
-  3. `Coverage gate` → `scripts/diff-coverage.sh`: el **diff del PR al 100%** y
-     el **total con suelo** (`scripts/coverage-floor`, commiteado y solo
-     sube). La base del diff es el **merge-base explícito**, no el nombre de la
-     rama: en el runner `git diff main...HEAD` sale vacío y el gate aprobaría en
-     silencio. Por eso el checkout va con `fetch-depth: 0`.
+     (the whole suite, no `-short`). The suite is **self-contained**: every git
+     fixture is created under `t.TempDir()` with `internal/testutil`, so CI does
+     **not** need `make fixtures` nor `testdata/playground`.
+  2. `Coverage of the subprocess`: `go build -cover` + `GOCOVERDIR` to measure
+     `func main()`, which calls `os.Exit` and cannot run in the test binary.
+     **`-coverpkg ./...` is not optional**: without it the profile does not
+     include the cross packages and the helpers used from others
+     (`internal/testutil`) come out uncovered. Measured: 97.30% without it,
+     98.17% with it.
+  3. `Coverage gate` → `scripts/diff-coverage.sh`: the **PR's diff at 100%** and
+     the **total with a floor** (`scripts/coverage-floor`, committed and only
+     goes up). The diff's base is the **explicit merge-base**, not the branch
+     name: on the runner `git diff main...HEAD` comes out empty and the gate
+     would approve in silence. That is why the checkout uses `fetch-depth: 0`.
 
-### `Mutation (diff)` (`.github/workflows/mutation.yml`) — solo PR
+### `Mutation (diff)` (`.github/workflows/mutation.yml`) — PR only
 
-Mutation testing con gremlins **sobre el diff del PR**, no el módulo entero (por
-eso dura ~20s; `make mutate` sobre el módulo entero son ~10min). Falla si aparece
-un mutante `LIVED` nuevo que no esté en `.mutation-allowlist`.
+Mutation testing with gremlins **over the PR's diff**, not the whole module
+(which is why it takes ~20s; `make mutate` over the whole module is ~10min). It
+fails if a new `LIVED` mutant appears that is not in `.mutation-allowlist`.
 
-**El job no se salta nunca**, y esa es la condición para que sea required: la
-calibración del allowlist es un *step*, no un `needs:` + `if:`. Si falta el
-allowlist, el job **falla** diciendo cómo sembrarlo. Con la estructura anterior
-(el job saltándose) el gate no podía ser obligatorio: un check saltado se queda
-en pending para siempre.
+**The job is never skipped**, and that is the condition for it to be required:
+the allowlist's calibration is a *step*, not a `needs:` + `if:`. If the allowlist
+is missing the job **fails** saying how to seed it. With the previous structure
+(the job skipping itself) the gate could not be mandatory: a skipped check stays
+pending forever.
 
-Reglas de la rama `main` (ruleset **`protect-main`**, reproducible con
-`scripts/setup-repo-protection.sh`, idempotente y con `--dry-run`):
+`main`'s rules (ruleset **`protect-main`**, reproducible with
+`scripts/setup-repo-protection.sh`, idempotent and with `--dry-run`):
 
-- Merge **solo vía PR**, con los **cuatro** checks en verde; force-push y borrado
-  de `main` bloqueados.
-- Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
-  admin *podría* pushear directo, pero la intención de trabajo es siempre el
-  camino PR. Ningún actor no-admin puede hacerlo.
-- `delete_branch_on_merge=true`: GitHub borra la rama remota al mergear.
+- Merge **only via PR**, with all **four** checks green; force-push and deleting
+  `main` are blocked.
+- There is an **admin bypass** and it is **deliberate** (approved by the user): an
+  admin *could* push straight to main, but the working intention is always the PR
+  path. No non-admin actor can do it.
+- `delete_branch_on_merge=true`: GitHub deletes the remote branch on merge.
 
-### Trampas de los workflows (las dos se han pagado)
+### The workflows' traps (both have been paid for)
 
-- **`runs-on` duplicado hace que GitHub rechace el workflow entero**, con
-  `conclusion: failure` y **0 jobs**. PyYAML no se queja: en un mapa una clave
-  repetida se pisa en silencio, así que el YAML "valida" y el workflow no existe
-  para Actions. Al tocar estos ficheros, comprobar claves duplicadas.
-- **Los logs de un run se leen del ZIP**, no con `gh run view --log`: la API de
-  `gh` los trunca a ~300 líneas y el step que falla suele estar después. Para ver
-  un step concreto, `curl` con token a `/actions/runs/<id>/logs` y descomprimir.
-- **Un gate nuevo no está probado hasta que ha pasado de verdad.** El de
-  cobertura falló dos veces en el PR #19, y las dos por el workflow, no por el
-  código: faltaba `-coverpkg` y la base del diff era una ref no comparable.
-- **Esperar a un run con `gh run watch`, nunca con `sleep N; gh pr checks`.** No
-  hay websocket ni SSE para el estado de jobs: `gh run watch <id> --interval 5
-  --exit-status` es el canal de facto (bloquea con polling interno y sale con el
-  código del run). El polling a mano cuesta minutos por run y además se queda en
-  runs *stale*: tras un force-push hay que volver a pedir el id, porque el anterior
-  ya no describe el commit. Con `watch` se pide el id una vez y se bloquea.
+- **A duplicated `runs-on` makes GitHub reject the whole workflow**, with
+  `conclusion: failure` and **0 jobs**. PyYAML does not complain: in a map a
+  repeated key is silently overwritten, so the YAML "validates" and the workflow
+  does not exist for Actions. When touching these files, check for duplicate
+  keys.
+- **A run's logs are read from the ZIP**, not with `gh run view --log`: the `gh`
+  API truncates them to ~300 lines and the failing step is usually after that.
+  To see a specific step, `curl` with a token to `/actions/runs/<id>/logs` and
+  unzip.
+- **A new gate is untested until it has actually passed.** The coverage one
+  failed twice in PR #19, and both times because of the workflow, not the code:
+  `-coverpkg` was missing and the diff's base was a non-comparable ref.
+- **Wait for a run with `gh run watch`, never with `sleep N; gh pr checks`.**
+  There is no websocket nor SSE for job status: `gh run watch <id> --interval 5
+  --exit-status` is the channel of record (it blocks with internal polling and
+  exits with the run's code). Polling by hand costs minutes per run and also
+  leaves you on *stale* runs: after a force-push you have to ask for the id
+  again, because the previous one no longer describes the commit. With `watch`
+  you ask for the id once and block.
 
-Ante un merge: verificar que el workflow `push` de `main` quedó verde y que el
-badge del README reporta `passing` (el badge cachea unos segundos).
+On a merge: verify that main's `push` workflow went green and that the README
+badge reports `passing` (the badge caches for a few seconds).
 
-`make smoke` (tmux + pty, ver Gotcha 3) queda **manual y fuera de CI**: necesita
-un terminal interactivo que el runner no garantiza.
+`make smoke` (tmux + pty, see Gotcha 3) stays **manual and out of CI**: it needs
+an interactive terminal that the runner does not guarantee.
 
-**Trampa del smoke**: aísla `XDG_CONFIG_HOME`, y git lee su config global de
-`$XDG_CONFIG_HOME/git/config`. Con la config del usuario oculta, un `git pull`
-sobre un repo divergido **falla** ("divergent branches") donde en tu terminal
-rebasa, y parece un bug de gitdash. Para probar la política real del usuario,
-enlaza la config de git al directorio aislado
+**Smoke trap**: it isolates `XDG_CONFIG_HOME`, and git reads its global config
+from `$XDG_CONFIG_HOME/git/config`. With the user's config hidden, a `git pull`
+on a diverged repo **fails** ("divergent branches") where in your terminal it
+rebases, and it looks like a gitdash bug. To exercise the user's real policy,
+link git's config into the isolated directory
 (`ln -s ~/.config/git/config "$tmp/git/config"`).
 
-## Arquitectura (flujo de datos)
+## Architecture (data flow)
 
 ```
-config → discovery (walk por marcador) → gitstatus (subprocess por repo, pool)
-       → eventos por canal → tui (Update/View) → render
+config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
+       → events over a channel → tui (Update/View) → render
 ```
 
-| Package | Rol |
+| Package | Role |
 |---|---|
-| `internal/config` | TOML XDG. `Load()` nunca falla: defaults + warning string |
-| `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. La carpeta del marcador ES el repo (no se busca `.git` hacia arriba). Poda ocultos + `exclude`. `MainRepo` enlaza worktree→repo principal |
-| `internal/gitstatus` | `parse.go` puro (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: qué hizo git de verdad). El `Snapshot` lleva `Err` embebido y también la desviación vs sync branch (`SyncBehind`) y sus worktrees; nunca falla duro. `runGit`/`runGitCombined` son el **único** punto por el que sale un subprocess git, y ambos dejan entrada en el command log |
-| `internal/forge` | Puro (sin I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/proyecto, con el prefijo de subcarpeta), `WebURL`, `ForgeForHost`/`PublicHosts` (hosts públicos) y `BuildCreateArgv`/`CreateBin`/`PromptEnv` (el argv de `gh pr create` / `glab mr create`). La ejecución NO es de aquí: es de `internal/forge/tool` (Runner con plazo de 30 s y `Error` con exit code) |
-| `internal/cache` | `repos.json` para pintar instantáneo al arrancar; validación por existencia del marcador; corrupto = silencioso |
-| `internal/cmdlog` | Ring acotado en memoria (500) de lo que se ejecutó: entries de `intent` (tecla) y `exec` (proceso con argv, exit, duración y resultado). Global con default no-op; solo la TUI lo instala (`tui.New`) |
-| `internal/tui` | `app.go` (modelo + pipelines de fondo), `update.go` (Update/View/teclas), `table.go` (filas/orden/celdas/agrupación), `detail.go`, `proverlay.go` (formulario de PR) + `prcreate.go` (su ejecución), `cmdlogpanel.go` (panel del log), `styles.go` |
-| `internal/group` | Arrangement de la vista agrupada a 2 niveles (estilo vroom): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
-| `internal/testutil` | helpers para crear repos git fixture reales en `t.TempDir()` (bare origin, push upstream, worktrees, ramas) |
-| `cmd/gitdash` | `main.go` (TUI) + `print.go` (modo `--print`, tabwriter, mismo orden) |
+| `internal/config` | XDG TOML. `Load()` never fails: defaults + a warning string |
+| `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. The marker's folder IS the repo (there is no search for `.git` upwards). Prunes hidden dirs + `exclude`. `MainRepo` links worktree→main repo |
+| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
+| `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
+| `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
+| `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
+| `internal/tui` | `app.go` (model + background pipelines), `update.go` (Update/View/keys), `table.go` (rows/order/cells/grouping), `detail.go`, `proverlay.go` (PR form) + `prcreate.go` (its execution), `cmdlogpanel.go` (the log panel), `styles.go` |
+| `internal/group` | Arrangement of the 2-level grouped view (vroom style): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
+| `internal/testutil` | helpers to create real git fixture repos in `t.TempDir()` (bare origin, upstream push, worktrees, branches) |
+| `cmd/gitdash` | `main.go` (TUI) + `print.go` (`--print` mode, tabwriter, same ordering) |
 
-## Convenciones
+## Conventions
 
-- Comentarios de código en **español**, **sin referencias a specs ni a IDs de
-  requisito/escenario**: el código es la fuente de verdad. No hay artefactos
-  SDD en el repo y no se crean (`proposal.md`, `spec.md`, specs con IDs de
-  requisito/escenario, `R#n SHALL`, `S#n.#`).
-- `docs/planning/<NNNN>-<tipo>-<slug>/` NO es un artefacto SDD: es el paquete
-  que deposita el pipeline de planificación como andamiaje suyo, así que es
-  válido en el repo y no se retira.
-- Tests del modelo **directo** (construir Model, enviar msgs con Update,
-  inspeccionar estado) — sin teatest. Patrón: `internal/tui/app_test.go`.
-- Estados derivados con precedencia: `diverged > dirty > ahead > behind >
-  detached > no-upstream > clean`. `State.Score()` (gitstatus) da el orden
-  atención-primero compartido por TUI y `--print`.
-- Las celdas de tabla devuelven `(texto, estilo)`: el render hace
-  `pad(texto)` ANTES de aplicar estilo (el ANSI rompe el cálculo de ancho).
+- Code comments in **English**, and only the ones that justify the **WHY** (a
+  decision that is not readable in the code), never the HOW nor a godoc that
+  repeats the name. Each one fits in **one line**: if it needs more, the design
+  goes in the sections below (or in `docs/`), not in the code.
+- **No references to specs or requirement/scenario IDs**: the code is the source
+  of truth. There are no SDD artefacts in the repo and none are created
+  (`proposal.md`, `spec.md`, specs with requirement/scenario IDs, `R#n SHALL`,
+  `S#n.#`).
+- `docs/planning/<NNNN>-<type>-<slug>/` is NOT an SDD artefact: it is the package
+  the planning pipeline deposits as its scaffolding, so it is valid in the repo
+  and is not removed.
+- **Direct** model tests (build the Model, send msgs with Update, inspect state)
+  — no teatest. Pattern: `internal/tui/app_test.go`.
+- Derived states with precedence: `diverged > dirty > ahead > behind >
+  detached > no-upstream > clean`. `State.Score()` (gitstatus) gives the
+  attention-first ordering shared by the TUI and `--print`.
+- Table cells return `(text, style)`: the render does `pad(text)` BEFORE
+  applying the style (ANSI breaks the width calculation).
 
-## Gotchas críticos
+## Critical gotchas
 
-1. **Event pump**: cada `tea.Cmd` lee UN evento del canal. SIEMPRE rearmar
-   `waitForEvent` (helper `withPump`) en Update tras consumir un evento del
-   canal. Sin esto solo llega el primer mensaje y los estados nunca pintaan.
-2. **ahead/behind requieren fetch**: los remote-tracking refs solo se
-   actualizan con `git fetch`. Los tests que simulan behind/diverged deben
-   hacer `testutil.FetchLocal` tras pushear al origin.
-3. **TUI smoke tests**: usar **tmux** (`capture-pane`). `script` NO funciona:
-   bubbletea v2 bloquea el primer render esperando las respuestas a las
-   queries de capacidades kitty del pty tonto (síntoma: alt-screen en
-   blanco, proceso vivo, sin stderr).
-4. **porcelain v2**: líneas `1 ` → 7 campos antes del path; `2 ` (renames) →
-   8 y emite `<nuevo>\t<viejo>`; `u ` → 9. `# branch.oid` da el sha para
-   detached. La ruta es TODO lo restante (puede contener espacios).
-5. **Fixtures**: el marcador debe commitearse en el commit base, si no
-   aparece como untracked y ensucia el estado dirty de todos los repos.
-6. **La cobertura NO puede depender de la máquina**: dos trampas que ya se
-   pagaron, y las dos hacen que local y CI midan distinto.
-   - **Permisos**: un test con `0o000` mide una cosa en local y otra en CI,
-     porque root lee un `0o000` (y root corre en algunos runners, no en otros).
-     Para "este fichero no se puede leer" usa **EISDIR**: un *directorio* con el
-     nombre del marcador. Falla igual y falla siempre.
-   - **Herramientas instaladas**: un `t.Skip("lazygit no instalado")` salta el
-     camino entero y sus statements no llegan al perfil. Para una herramienta
-     externa usa un **stub en el PATH** (como `forgeStub` con las CLI de forge),
-     no un skip.
-   Por eso el suelo de `scripts/coverage-floor` es 100.00% y da igual en los dos:
-   está medido con un PATH sin lazygit, no supuesto.
-7. **textinput v2 con teclas sintéticas**: `tea.KeyPressMsg` necesita
-   `Code` Y `Text` — solo `Code` no inserta runas en el input.
-8. **La política de pull es del usuario, no nuestra**: `commands.pull` va
-   **sin flags** a propósito. Los flags en la línea de comandos pisan el
-   gitconfig, así que un `--ff-only` hardcodeado anulaba un `pull.rebase=true`
-   del usuario (comprobado: el mismo repo divergente rebasea con `git pull` pelado
-   y no con `git pull --ff-only`). Las variantes con flags existen solo para el
-   selector de `p`, que ofrece la política explícita. **No reintroduzcas flags en
-   el default.**
-9. **Un pull --rebase que choca no es un fallo limpio**: deja el rebase a medias
-   (`rebase-merge`/`rebase-apply` en el dir del worktree). Por eso
-   `gitstatus.RebaseInProgress` existe y el aviso tiene prioridad sobre los
-   hints de divergencia/upstream: decir "falló" invita a reintentar sobre un
-   rebase sin resolver. Se resuelve con `git rev-parse --git-path`, no mirando
-   `.git/rebase-*` a pelo, porque en un worktree `.git` es un fichero.
-10. **El argv resuelto viaja en `actionMsg`/`actionResult`**: con la política
-   delegada en el gitconfig, el kind ya no implica los flags. El detalle lo
-   muestra; sin eso la UI miente sobre lo que reconcilió.
-11. **Las filas se ordenan attention-first**: la posición del cursor NO es la del
-   fixture de test. Los tests que necesitan una fila concreta la localizan por
-   path (`cursorOn`), no por índice.
+1. **Event pump**: every `tea.Cmd` reads ONE event from the channel. ALWAYS
+   rearm `waitForEvent` (the `withPump` helper) in Update after consuming an
+   event from the channel. Without this only the first message arrives and
+   states never paint.
+2. **ahead/behind require a fetch**: remote-tracking refs are only updated with
+   `git fetch`. Tests that simulate behind/diverged must call
+   `testutil.FetchLocal` after pushing to the origin.
+3. **TUI smoke tests**: use **tmux** (`capture-pane`). `script` does NOT work:
+   bubbletea v2 blocks the first render waiting for the answers to the kitty
+   capability queries of the dumb pty (symptom: blank alt-screen, live process,
+   no stderr).
+4. **porcelain v2**: `1 ` lines → 7 fields before the path; `2 ` (renames) → 8
+   and it emits `<new>\t<old>`; `u ` → 9. `# branch.oid` gives the sha for
+   detached. The path is EVERYTHING that is left (it can contain spaces).
+5. **Fixtures**: the marker must be committed in the base commit, otherwise it
+   shows up as untracked and dirties the state of every repo.
+6. **Coverage CANNOT depend on the machine**: two traps that have already been
+   paid for, and both make local and CI measure different things.
+   - **Permissions**: a test with `0o000` measures one thing locally and another
+     in CI, because root reads a `0o000` (and root runs on some runners, not on
+     others). For "this file cannot be read" use **EISDIR**: a *directory* named
+     after the marker. It fails the same and fails always.
+   - **Installed tools**: a `t.Skip("lazygit not installed")` skips the whole
+     path and its statements never reach the profile. For an external tool use a
+     **stub in the PATH** (like `forgeStub` for the forge CLIs), not a skip.
+   That is why `scripts/coverage-floor`'s floor is 100.00% and holds in both: it
+   is measured with a PATH without lazygit, not assumed.
+7. **textinput v2 with synthetic keys**: `tea.KeyPressMsg` needs `Code` AND
+   `Text` — `Code` alone does not insert runes into the input.
+8. **The pull policy is the user's, not ours**: `commands.pull` goes **without
+   flags** on purpose. Flags on the command line override the gitconfig, so a
+   hardcoded `--ff-only` was cancelling the user's `pull.rebase=true` (checked:
+   the same diverged repo rebases with plain `git pull` and does not with
+   `git pull --ff-only`). The variants with flags exist only for the `p`
+   selector, which offers the explicit policy. **Do not reintroduce flags in the
+   default.**
+9. **A clashing `pull --rebase` is not a clean failure**: it leaves the rebase
+   half-done (`rebase-merge`/`rebase-apply` in the worktree's dir). That is why
+   `gitstatus.RebaseInProgress` exists and the warning has priority over the
+   divergence/upstream hints: saying "failed" invites you to retry on top of an
+   unresolved rebase. It is resolved with `git rev-parse --git-path`, not by
+   looking at `.git/rebase-*` directly, because in a worktree `.git` is a file.
+10. **The resolved argv travels in `actionMsg`/`actionResult`**: with the policy
+    delegated to the gitconfig, the kind no longer implies the flags. The detail
+    shows it; without that the UI lies about what it reconciled.
+11. **Rows are ordered attention-first**: the cursor's position is NOT the
+    fixture's. Tests that need a specific row locate it by path (`cursorOn`),
+    not by index.
 
-## Gotcha de diseño: el selector de pull
+## Design gotcha: the pull selector
 
-`p` no ejecuta: arma `pullArmed` con el path capturado, y la **siguiente** tecla
-elige variante (`p`/`r`/`f`/`m` en `PullKinds`, más `a` para la variante AI, que
-no es un pull de git y se resuelve aparte). Dos reglas:
+`p` does not run: it arms `pullArmed` with the captured path, and the **next**
+key picks the variant (`p`/`r`/`f`/`m` in `PullKinds`, plus `a` for the AI
+variant, which is not a git pull and is resolved separately). Two rules:
 
-- Las teclas de variante **chocan con acciones reales** de la tabla (`p`=pull,
-  `r`=rescan, `f`=fetch), así que el estado armado tiene que consumir la tecla
-  **antes** del enrutado normal en `handleKey`.
-- Cualquier otra tecla **cancela y sigue su curso normal** (no se consume): es
-  lo que evita que la app quede pegada esperando una segunda pulsación. Es el
-  patrón de prefix-key, no un modo bloqueante.
+- The variant keys **clash with real actions** of the table (`p`=pull, `r`=rescan,
+  `f`=fetch), so the armed state has to consume the key **before** the normal
+  routing in `handleKey`.
+- Any other key **cancels and carries on with its normal course** (it is not
+  consumed): that is what stops the app from being stuck waiting for a second
+  press. It is the prefix-key pattern, not a blocking mode.
 
-El prompt se pinta en la **sección keybinds, sustituyendo las hints**, no en un
-toast: los toasts expiran a los 3 s y el selector vive hasta la siguiente tecla.
-Keybinds es su sitio porque comparte función con las hints ("qué hago ahora"), y
-el banner de stats queda para el resumen y la actividad en curso. Lo mismo aplica
-a `removePrompt`: los dos avisos salen de `armedPrompt()`, que devuelve uno u
-otro, y `keybindsLines()` deriva de ahí el presupuesto de alto (1 línea con
-aviso armado, `defaultHintLines` sin él) para que la caja nunca mida más que su
-contenido. Con un aviso armado, `computeLayout` degrada **stats antes que
-keybinds** (`keepKeybinds`): si la caja del aviso cayera, la app quedaría
-esperando una tecla sin decir cuáles.
+The prompt is painted in the **keybinds section, replacing the hints**, not in a
+toast: toasts expire after 3 s and the selector lives until the next key.
+Keybinds is its place because it shares a function with the hints ("what do I do
+now"), and the stats banner stays for the summary and the activity in progress.
+The same applies to `removePrompt`: both warnings come out of `armedPrompt()`,
+which returns one or the other, and `keybindsLines()` derives the height budget
+from there (1 line with a warning armed, `defaultHintLines` without it) so the box
+never measures more than its content. With a warning armed, `computeLayout`
+degrades **stats before keybinds** (`keepKeybinds`): if the warning's box were to
+fall, the app would be waiting for a key without saying which ones.
 
-## Gotcha de diseño: el panel de preview
+## Design gotcha: the preview panel
 
-Debajo de la tabla hay una ficha del repo bajo el cursor (estilo prdash), entre
-el listado y los keybinds. **Es la única vista de detalle**: no hay `enter`
-detalle, ni `detailSection`, ni `detailOpen`. Decisiones que no son evidentes:
+Below the table there is a card for the repo under the cursor (prdash style),
+between the list and the keybinds. **It is the only detail view**: there is no
+`enter` detail, no `detailSection`, no `detailOpen`. Decisions that are not
+evident:
 
-- **El título va solo en el borde.** `detailTitle`/`worktreeTitle` componen el
-  título de la caja y `renderDetail` NO lo repite como primera línea: pintado en
-  los dos sitios, el mismo texto salía duplicado justo bajo el borde.
-- **El panel es aditivo.** `computeLayout` busca el mayor alto de panel que
-  (a) deje `minBodyLines` filas de tabla y (b) no obligue a recortar hints ni a
-  ocultar stats/keybinds (`mismaChromeQue`). Si no hay ninguno, el panel no se
-  dibuja. Por debajo de ~21 líneas (config por defecto) el dashboard es
-  exactamente el que había antes de la feature. Ese suelo sale de
-  `detailHeadLines`, así que `minPanelHeight` (test) lo deriva en vez de
-  mendigar el número.
-- **El share se mide sobre el alto LIBRE**, no sobre el terminal: contra el
-  total, una ventana de 30 líneas se quedaba con 12 para la ficha y 3 para la
-  tabla.
-- **El presupuesto de la ficha son sus líneas**, no las de la terminal:
-  `renderDetail(r, rows)` reserva `detailHeadLines` para la cabecera de estado y
-  reparte el resto con `listBudget`, que reserva la línea del aviso `… N más`
-  cuando la lista no cabe entera. `rows` es `lay.previewLines`. Sin eso, las
-  listas se cuentan como si cupieran y luego las recorta la caja sin avisar.
-- **El path es un campo, no una línea suelta**: `path` va en la misma columna
-  clave/valor que `branch`/`upstream`/`state`/`sync`, y su valor sale atenuado
-  (es contexto, no estado). En línea propia con el hueco que la separaba se
-  llevaba una altura que las listas necesitan; al ser campo, la cabecera son
-  `detailHeadLines` = 5 líneas.
-- **La ficha no repite las teclas de la fila**: `g lazygit · ! cmd` ya están en
-  la sección de keybinds, así que la ficha no lleva pie (`fichaTail` solo añade
-  el input de `!`). Duplicarlas costaba una línea de alto útil y dos fuentes que
-  podían divergir con un rebind.
-- **El input de `!` va al FINAL de la ficha y siempre se ve** (`fichaTail`): si
-  la ficha llenó la caja, se recorta la ficha por arriba. Escribir un comando sin
-  ver el prompt es escribir a ciegas.
-- **La caja se rellena** (`fitLines`): el alto lo dice el layout, no la ficha. Sin
-  el relleno, una ficha corta haría subir los keybinds y la vista no ocuparía la
-  terminal.
+- **The title goes only on the border.** `detailTitle`/`worktreeTitle` compose
+  the box's title and `renderDetail` does NOT repeat it as the first line:
+  painted in both places, the same text came out duplicated right under the
+  border.
+- **The panel is additive.** `computeLayout` looks for the largest panel height
+  that (a) leaves `minBodyLines` table rows and (b) does not force cropping the
+  hints nor hiding stats/keybinds (`mismaChromeQue`). If there is none, the panel
+  is not drawn. Below ~21 lines (default config) the dashboard is exactly what it
+  was before the feature. That floor comes out of `detailHeadLines`, so
+  `minPanelHeight` (test) derives it instead of begging for the number.
+- **The share is measured over the FREE height**, not over the terminal: against
+  the total, a 30-line window kept 12 for the card and 3 for the table.
+- **The card's budget is its own lines**, not the terminal's: `renderDetail(r,
+  rows)` reserves `detailHeadLines` for the state header and splits the rest with
+  `listBudget`, which reserves the `… N more` warning line when the list does not
+  fit whole. `rows` is `lay.previewLines`. Without that, the lists are counted as
+  if they fit and then the box crops them without warning.
+- **The path is a field, not a loose line**: `path` goes in the same key/value
+  column as `branch`/`upstream`/`state`/`sync`, and its value is dimmed (it is
+  context, not state). On its own line, with the gap that separated it, it took a
+  height the lists need; as a field the header is `detailHeadLines` = 5 lines.
+- **The card does not repeat the row's keys**: `g lazygit · ! cmd` are already in
+  the keybinds section, so the card has no footer (`fichaTail` only adds the `!`
+  input). Duplicating them cost a line of useful height and two sources that
+  could diverge on a rebind.
+- **The `!` input goes at the END of the card and is always visible**
+  (`fichaTail`): if the card filled the box, the card is cropped from the top.
+  Typing a command without seeing the prompt is typing blind.
+- **The box is filled** (`fitLines`): the height comes from the layout, not from
+  the card. Without the fill, a short card would push the keybinds up and the
+  view would not fill the terminal.
 
-Con el cursor sobre un **header de grupo** el panel no tiene ficha que enseñar:
-muestra el agregado del grupo (`groupStats`, sobre `rows()` y antes del
-plegado, que es lo mismo que cuenta su header). Los estados a cero no se pintan.
+With the cursor on a **group header** the panel has no card to show: it shows the
+group's aggregate (`groupStats`, over `rows()` and before folding, which is what
+its header counts). States at zero are not painted.
 
-## Gotcha de diseño: `enter` es la única tecla de plegado
+## Design gotcha: `enter` is the only folding key
 
-`enter` (acción `fold`) pliega **lo que hay bajo el cursor**, y cada fila tiene una
-cosa distinta debajo: un header pliega su bloque, una fila de repo pliega sus
-sub-filas de worktree, y una sub-fila de worktree no tiene nada que plegar (no-op,
-y a propósito: plegar el grupo del padre desde la sub-fila sería una sorpresa).
-No hay vista de detalle que abrir, así que `enter` quedó libre para esto; `tab`
-(plegado) y `space` (expansión) se eliminaron por redundantes.
+`enter` (the `fold` action) folds **whatever is under the cursor**, and each row
+has something different under it: a header folds its block, a repo row folds its
+worktree subrows, and a worktree subrow has nothing to fold (no-op, and on
+purpose: folding the parent's group from the subrow would be a surprise). There
+is no detail view to open, so `enter` was free for this; `tab` (fold) and `space`
+(expand) were removed as redundant.
 
-Los dos estados se siguen persistiendo en el mismo `collapsed.json` (worktrees
-bajo su prefijo), así que el plegado sobrevive entre sesiones.
+Both states still persist in the same `collapsed.json` (worktrees under their
+prefix), so folding survives across sessions.
 
-Los hints llevan la acción SIN la tecla dentro (`hintLabels`): la tecla la
-antepone `HintBarLines`. Si la etiqueta la llevara, un rebind producía hints
-como `w enter fold`. Y `config.LoadFrom` avisa (toast + stderr) de las acciones
-de `[keybindings]` que ya no existen: sin ese aviso, un `detail = "enter"` de una
-config vieja deja `enter` muerta y parece un bug de la TUI.
-## Gotcha de diseño: el command log (`l`)
+The hints carry the action WITHOUT the key inside (`hintLabels`): `HintBarLines`
+prepends the key. If the label carried it, a rebind would produce hints like
+`w enter fold`. And `config.LoadFrom` warns (toast + stderr) about
+`[keybindings]` actions that no longer exist: without that warning, a
+`detail = "enter"` from an old config leaves `enter` dead and it looks like a TUI
+bug.
 
-El argv **no** dice qué política de pull aplicó git. `commands.pull` va sin flags
-a propósito, así que `p` `p` ejecuta `git pull` y con `pull.rebase=true` en el
-gitconfig del usuario eso integró con rebase. El log resuelve el "qué pasó de
-verdad" con dos piezas:
+## Design gotcha: the command log (`l`)
 
-- **`gitstatus.Classify(args, out, exit)`** deduce el resultado de la salida que
-  git ya imprimió (`Successfully rebased and updated` → `rebase`,
+The argv **does not** say which pull policy git applied. `commands.pull` goes
+without flags on purpose, so `p` `p` runs `git pull` and with `pull.rebase=true`
+in the user's gitconfig that integrated with rebase. The log answers "what really
+happened" with two pieces:
+
+- **`gitstatus.Classify(args, out, exit)`** deduces the result from the output
+  git already printed (`Successfully rebased and updated` → `rebase`,
   `Applied autostash` → `rebase+autostash`, `Merge made by` → `merge`,
   `Fast-forward`, `up to date`, `Not possible to fast-forward` → `diverged`,
-  `could not apply`/`CONFLICT` → `conflict`…). Subprocess extra: **cero**.
-- Las **intenciones** (tecla + acción + repo) las registra `handleKey`, porque el
-  argv no distingue "pulsé p y elegí rebase" de "el gitconfig decidió por mí".
+  `could not apply`/`CONFLICT` → `conflict`…). Extra subprocesses: **zero**.
+- The **intents** (key + action + repo) are recorded by `handleKey`, because the
+  argv does not tell "I pressed p and picked rebase" from "the gitconfig decided
+  for me".
 
-**No sondees `git config` para deducir la política**: `branch.<name>.rebase`
-pisa al `pull.rebase` global, esa precedencia cambia entre versiones de git
-(`branch.<name>.rebase` está deprecado a favor de `branch.<name>.pullrebase`) y
-gitdasharía devolviendo una respuesta plausible y equivocada. Lo que git HIZO
-está en su output, y con `LC_ALL=C` forzado en `gitEnv` los mensajes no se
-localizan.
+**Do not probe `git config` to deduce the policy**: `branch.<name>.rebase`
+overrides the global `pull.rebase`, that precedence changes across git versions
+(`branch.<name>.rebase` is deprecated in favour of `branch.<name>.pullrebase`)
+and gitdash would return a plausible and wrong answer. What git DID is in its
+output, and with `LC_ALL=C` forced in `gitEnv` the messages are not localised.
 
-**El reflog se descartó como fuente** (comprobado con git real, no de memoria):
-`git pull` pelado deja `pull (start)/(pick)/(finish)` si rebasea,
-`pull: Merge made by the 'ort' strategy.` si hace merge y `pull: Fast-forward`
-si ff, pero **no escribe ninguna entrada** cuando ya estaba al día — justo el caso
-en que se pregunta "¿qué pasó con el pp?" — y no distingue un pull de gitdash de
-uno manual en tu terminal, ni cubre push/fetch/`!`/worktree remove. Si algún día
-se quiere como modo forense, es un `git reflog show --date=iso` **bajo demanda**
-(una llamada al abrir el detalle de un repo), no por acción.
+**The reflog was discarded as a source** (checked with real git, not from
+memory): plain `git pull` leaves `pull (start)/(pick)/(finish)` when it rebases,
+`pull: Merge made by the 'ort' strategy.` when it merges and `pull: Fast-forward`
+when it ff's, but it **writes no entry at all** when it was already up to date —
+exactly the case where you ask "what happened with the pp?" — and it does not
+tell a gitdash pull from a manual one in your terminal, nor cover
+push/fetch/`!`/worktree remove. If it is ever wanted as a forensic mode, it is a
+`git reflog show --date=iso` **on demand** (one call when opening a repo's
+detail), not per action.
 
-Reglas del panel (`internal/tui/cmdlogpanel.go`):
+Panel rules (`internal/tui/cmdlogpanel.go`):
 
-- Es un **view mode**, no un overlay: `logOpen` toma el cuerpo y comparte el
-  chrome del detalle. Sus teclas se consultan **antes** del enrutado normal
-  (como los estados armados) porque `j`/`k` chocan con la navegación; el resto de
-  teclas sigue su curso normal, así la app no queda encerrada.
-- `promptLine()` (antes `armedPrompt`) es el **único** punto por el que keybinds
-  pinta un aviso: los dos armados y la leyenda del panel. `keybindsLines()` y
-  `keepKeybinds` derivan de ahí, así que añadir un aviso nuevo es añadir un
-  `case` y nada más.
-- Abrir el panel **suelta los estados armados**: el aviso queda sin sentido fuera
-  de su vista y dejarlo armado obligaría a acertar la tecla siguiente desde un
-  panel que ya no está.
-- `launchesCommand` / `actionNeedsRow` deciden qué acciones dejan intención. Las
-  de navegación pura (filtro, plegado, detalle, el propio panel) no: el log es de
-  comandos, no de teclas. Sin fila bajo el cursor tampoco (una `key p` sin repo
-  ni `exec` confunde).
-- El offset cuenta **desde la cola** (0 = lo más reciente al final): en un log se
-  mira lo último, y las entradas nuevas no te sacan de sitio si estabas
-  scrolleado arriba. Se recorta contra las líneas visibles, nunca deja huecos.
-- **El argv es texto no confiable** (lleva el prompt del marcador en `pull_ai`):
-  `logLine` lo pasa por `sanitizeLogText` antes de pintarlo. Sin eso, una
-  secuencia OSC/CSI inyectada se renderiza tal cual, un carácter de formato
-  (bidi/zero-width) reordena la línea y un prompt multilínea rompe el alto del
-  panel (una entrada = una línea). El saneo quita control (C0/C1/DEL), Cf
-  (bidi, zero-width) y U+2028/U+2029, además de las secuencias ESC, y es **solo
-  de pintura**: el argv ejecutado y el registrado no se tocan.
-- `computeLogColumns` degrada columnas por valor (veredicto → resultado → repo →
-  kind) y da al argv lo que sobra: por debajo de `logMinArgv` (20, lo que cabe
-  `git pull --ff-only`) el comando se lee a medias, que es lo que el panel existe
-  para evitar.
+- It is a **view mode**, not an overlay: `logOpen` takes over the body and shares
+  the detail's chrome. Its keys are consulted **before** the normal routing
+  (like the armed states) because `j`/`k` clash with navigation; every other key
+  carries on normally, so the app is not trapped.
+- `promptLine()` (formerly `armedPrompt`) is the **only** place keybinds paints a
+  warning: the two armed ones and the panel's legend. `keybindsLines()` and
+  `keepKeybinds` derive from there, so adding a new warning is adding a `case`
+  and nothing else.
+- Opening the panel **drops the armed states**: the warning makes no sense
+  outside its view, and leaving it armed would force you to guess the next key
+  from a panel that is no longer there.
+- `launchesCommand` / `actionNeedsRow` decide which actions leave an intent. The
+  pure navigation ones (filter, folding, detail, the panel itself) do not: the
+  log is about commands, not keys. Neither does having no row under the cursor (a
+  `key p` with no repo and no `exec` is confusing).
+- The offset counts **from the tail** (0 = the most recent at the end): in a log
+  you look at the latest, and new entries do not move you if you were scrolled
+  up. It is clamped against the visible lines and never leaves gaps.
+- **The argv is untrusted text** (it carries the marker's prompt in `pull_ai`):
+  `logLine` runs it through `sanitizeLogText` before painting it. Without that, an
+  injected OSC/CSI sequence renders as is, a format character (bidi/zero-width)
+  reorders the line and a multiline prompt breaks the panel's height (one entry =
+  one line). The sanitising removes control (C0/C1/DEL), Cf (bidi, zero-width)
+  and U+2028/U+2029, plus the ESC sequences, and it is **painting only**: the
+  executed and the recorded argv are untouched.
+- `computeLogColumns` degrades columns by value (verdict → result → repo → kind)
+  and gives the argv whatever is left: below `logMinArgv` (20, what fits
+  `git pull --ff-only`) the command is read half-way, which is exactly what the
+  panel exists to avoid.
 
-## Gotcha de diseño: el guard de no-op del preview visual (`v m` / `v r`)
+## Design gotcha: the visual preview's no-op guard (`v m` / `v r`)
 
-git-sim **aborta con código 1** cuando el ref que le pasas ya está contenido en
-HEAD: `merge.py` y `rebase.py` imprimen `Branch 'origin/main' is already
-included in the history of active branch 'main'` y salen. Eso no es un bug de
-gitdash, es la respuesta correcta, pero reproducirla en pantalla cuesta un
-handoff completo de terminal para leer un error que el snapshot ya anticipaba:
-`Status.Behind == 0` **es** la condición que git-sim comprueba
-(`git branch --contains <ref>`).
+git-sim **aborts with code 1** when the ref you pass is already contained in
+HEAD: `merge.py` and `rebase.py` print `Branch 'origin/main' is already included
+in the history of active branch 'main'` and exit. That is not a gitdash bug, it
+is the correct answer, but reproducing it on screen costs a full terminal handoff
+to read an error the snapshot already anticipated: `Status.Behind == 0` **is**
+the condition git-sim checks (`git branch --contains <ref>`).
 
-Por eso el selector bloquea con toast antes de ceder la terminal, y por eso
-`armedVisual` captura `behind` **al armar**, junto al path y al upstream: el
-guard tiene que decidirse sobre la fila elegida, no sobre la que esté bajo el
-cursor cuando llegue la segunda tecla.
+That is why the selector blocks with a toast before handing over the terminal, and
+why `armedVisual` captures `behind` **when arming**, along with the path and the
+upstream: the guard has to be decided on the chosen row, not on whatever is under
+the cursor when the second key arrives.
 
-- **El guard es de las variantes con ref (`merge`/`rebase`), no del selector.**
-  `pull` no lleva argumento posicional y git-sim `pull` clona y simula de
-  verdad, sin ese chequeo: con `behind == 0` se lanza igual. Guardarlo sería
-  inventar una restricción que la herramienta no tiene.
-- **`ahead` no afloja el bloqueo**: un repo con `↑2 ↓0` sigue teniendo el
-  upstream contenido en HEAD, así que git-sim fallaría igual.
-- **El aviso nombra la tecla de fetch con `cfg.KeyFor("fetch")`**, nunca un
-  `f` hardcodeado: `behind` viene del último fetch, así que si el
-  remote-tracking está viejo la simulación bloqueada sí tenía contenido y el
-  aviso tiene que decir cómo arreglarlo. Los hints del dashboard se pintan
-  igual (etiqueta sin tecla, la antepone `HintBarLines`); un toast no pasa por
-  ahí, y es el único sitio donde la tecla se escribe a mano.
+- **The guard belongs to the variants with a ref (`merge`/`rebase`), not to the
+  selector.** `pull` takes no positional argument and git-sim's `pull` really
+  clones and simulates, without that check: with `behind == 0` it launches
+  anyway. Guarding it would be inventing a restriction the tool does not have.
+- **`ahead` does not loosen the block**: a repo at `↑2 ↓0` still has its upstream
+  contained in HEAD, so git-sim would fail just the same.
+- **The warning names the fetch key with `cfg.KeyFor("fetch")`**, never a
+  hardcoded `f`: `behind` comes from the last fetch, so if the remote-tracking is
+  stale the blocked simulation did have content and the warning has to say how to
+  fix it. The dashboard's hints are painted the same way (label without key,
+  `HintBarLines` prepends it); a toast does not go through there, and it is the
+  only place where the key is written by hand.
 
-## Gotcha de diseño: abrir un PR/MR (`O`)
+## Design gotcha: opening a PR/MR (`O`)
 
-`O` abre un overlay que recoge título, cuerpo, base y draft (`proverlay.go`), y
-`ctrl+s` lo envía a `gh pr create` / `glab mr create` (`prcreate.go`). Decisiones
-que no son evidentes:
+`O` opens an overlay that collects title, body, base and draft (`proverlay.go`),
+and `ctrl+s` sends it to `gh pr create` / `glab mr create` (`prcreate.go`).
+Decisions that are not evident:
 
-- **NO es un handoff de terminal.** gh y glab son no interactivos con todos los
-  flags dados, y `BuildCreateArgv` garantiza eso (el cuerpo se emite siempre, y
-  glab lleva su `-y`). Así que no hay TTY que ceder: se captura la salida con
-  `forge/tool.Runner`, como el comando `!`. Por eso, y solo por eso, esta acción
-  **sí mide duración** en el command log: los handoffs van con `Dur = 0` porque
-  medir su proceso exigiría guardar el arranque en el modelo.
-- **La cadena es larga y cada paso corta antes de ejecutar**: remote →
-  `ParseRemoteURL` → `BuildCreateArgv` → `LookPath` → ejecución. Un PR creado
-  contra el repo equivocado no falla visiblemente (gh deduciría el destino), así
-  que “no sé de dónde es esto” es un toast que dice qué hacer y NADA ejecutado.
-  Los cuatro rechazos son `m.running[path]` liberado, sin exec en el log y sin
-  recollect: no pasó nada.
-- **El remote se lee on demand** (`gitstatus.RemoteURL`, `ClassRead`), no en
-  `Collect`: sumarlo al scan sería un `git remote get-url` por repo y por ciclo
-  para un dato que casi nadie mira. Va por `runGit` como todo lo demás, así que
-  es auditable desde el panel con `a` (show all).
-- **El forge sale de la config, no de una heurística**: `forge.ForgeForHost` solo
-  conoce `github.com` y `gitlab.com`, y adivinar el proveedor de un host
-  desconocido produce enlaces que abren 404 sin que nada falle. `Config.ForgeHosts()`
-  y `Config.ForgePrefixes()` (`internal/config/forge.go`) resuelven los dos mapas
-  que consume `ParseRemoteURL`; los hosts públicos salen de `forge.PublicHosts()`
-  para que la lista no pueda duplicarse, y los self-managed se declaran:
+- **It is NOT a terminal handoff.** gh and glab are non-interactive with all the
+  given flags, and `BuildCreateArgv` guarantees that (the body is always emitted,
+  and glab carries its `-y`). So there is no TTY to hand over: the output is
+  captured with `forge/tool.Runner`, like the `!` command. That, and only that, is
+  why this action **does measure duration** in the command log: handoffs go with
+  `Dur = 0` because measuring their process would require storing the start in
+  the model.
+- **The chain is long and every step cuts before executing**: remote →
+  `ParseRemoteURL` → `BuildCreateArgv` → `LookPath` → execution. A PR created
+  against the wrong repo does not fail visibly (gh would deduce the destination),
+  so "I don't know where this comes from" is a toast that says what to do and
+  NOTHING executed. The four rejections release `m.running[path]`, with no exec in
+  the log and no recollect: nothing happened.
+- **The remote is read on demand** (`gitstatus.RemoteURL`, `ClassRead`), not in
+  `Collect`: adding it to the scan would be a `git remote get-url` per repo and
+  per cycle for data almost nobody looks at. It goes through `runGit` like
+  everything else, so it is auditable from the panel with `a` (show all).
+- **The forge comes from the config, not from a heuristic**: `forge.ForgeForHost`
+  only knows `github.com` and `gitlab.com`, and guessing the provider of an
+  unknown host produces links that open 404 without anything failing.
+  `Config.ForgeHosts()` and `Config.ForgePrefixes()` (`internal/config/forge.go`)
+  resolve the two maps that `ParseRemoteURL` consumes; the public hosts come from
+  `forge.PublicHosts()` so the list cannot be duplicated, and the self-managed
+  ones are declared:
 
   ```toml
   [forge.gitlab]
@@ -424,92 +435,91 @@ que no son evidentes:
   hosts = ["git.example.com"]
   ```
 
-  El `api_base` **absoluto nombra el host al que aplica**, y de su path sale el
-  prefijo de la subcarpeta (`/git/api/v4/` → `git`, con
-  `forge.PrefixFromAPIBase`): es lo que hace que un GitLab en `/git/` resuelva
-  `grupo/sub/widget` y no `git/grupo/sub/widget`. Un `api_base` relativo no
-  nombra ningún host y aplica a todos los del proveedor; los hosts que no nombra
-  se quedan con el default del proveedor. Un proveedor que no soportamos avisa al
-  cargar en vez de aceptarse en silencio.
-- **El argv se registra CRUDO y lo sanea quien pinta.** El título y el cuerpo los
-  escribió una persona y acaban en el panel del log, así que pasan por
-  `sanitizeLogText` (ver la sección del command log). El registro guarda lo que
-  se ejecutó, tal cual: un log “limpiado” puede mentir.
-- **Aceptar y ejecutar son dos pasos.** El overlay publica el envío en
-  `m.prPending` y devuelve un `tea.Cmd` que emite `prStartMsg`; `prCreateCmd` lo
-  consume. El seam existe para que un test vea el envío aceptado sin que ningún
-  proceso haya salido, que es la mitad que un handoff no tiene.
-- **La intención la deja el enrutado genérico**, como toda acción de
-  `commandActions`: `key O pr` en el log, y debajo el exec con el argv. Con el
-  panel del log abierto la tecla está en el guard que impide abrir overlays (si
-  no, dejaría una intención por algo que no ocurrió).
-- **La tecla de abrir la resuelve la config** (`cfg.KeyFor("pr")`) hasta en el
-  aviso del panel: un texto fijo dejaría mintiendo al usuario tras un rebind. La
-  de enviar (`ctrl+s`) NO sale de la config porque no es una acción
-  rebindeable.
+  An **absolute `api_base` names the host it applies to**, and its path yields the
+  subfolder prefix (`/git/api/v4/` → `git`, with `forge.PrefixFromAPIBase`): that
+  is what makes a GitLab at `/git/` resolve `group/sub/widget` and not
+  `git/group/sub/widget`. A relative `api_base` names no host and applies to all
+  of that provider's; the hosts it does not name keep the provider's default. A
+  provider we do not support warns on load instead of being accepted silently.
+- **The argv is recorded RAW and sanitised by whoever paints it.** A person wrote
+  the title and body and they end up in the log panel, so they go through
+  `sanitizeLogText` (see the command log section). The record keeps what ran, as
+  is: a "cleaned" log can lie.
+- **Accepting and executing are two steps.** The overlay publishes the submit in
+  `m.prPending` and returns a `tea.Cmd` that emits `prStartMsg`; `prCreateCmd`
+  consumes it. The seam exists so a test can see the submit accepted with no
+  process having gone out, which is the half a handoff does not have.
+- **The intent is left by the generic routing**, like every `commandActions`
+  action: `key O pr` in the log, and below it the exec with the argv. With the log
+  panel open the key is in the guard that prevents opening overlays (otherwise it
+  would leave an intent for something that did not happen).
+- **The open key is resolved by the config** (`cfg.KeyFor("pr")`) down to the
+  panel's warning: a fixed text would leave the user being lied to after a
+  rebind. The submit key (`ctrl+s`) does NOT come from the config because it is
+  not a rebindable action.
 
-## Gotcha de diseño: pull con IA (`p a`)
+## Design gotcha: the AI pull (`p a`)
 
-El selector de `p` tiene una quinta variante, `a`, que hace handoff al comando AI
-configurado. `p a` **lanza directamente** (sin preview ni confirmación: la
-segunda tecla es la decisión). Decisiones que no son evidentes:
+The `p` selector has a fifth variant, `a`, which hands over to the configured AI
+command. `p a` **launches straight away** (no preview and no confirmation: the
+second key is the decision). Decisions that are not evident:
 
-- **El límite de confianza es el eje de la feature**: el ejecutable/argv sale
-  SOLO de la config global (`[ai.pull] command` en
-  `~/.config/gitdash/config.toml`); el marcador commiteado
-  (`.gitdash.toml`, input no fiable) aporta SOLO el texto del prompt. Ese texto
-  entra como **un único elemento de argv** (`config.BuildAIArgv`), jamás
-  interpolado en un `sh -c`. Si duplicas la sustitución en otro sitio, rompes el
-  límite.
-- **`pull_ai` NO es un `PullKind`**: `PullKinds` alimenta
-  `startActionCmd → cfg.CmdArgs → gitstatus.Run` y el guard de
-  `RebaseInProgress`, que son caminos de git. `pull_ai` se resuelve como un
-  `case` explícito de `a` dentro del bloque `pullArmed` de `update.go` (el
-  estado armado consume la tecla antes del enrutado normal, como p/r/f/m).
-- **El prompt se relee on demand** con `discovery.MarkerPrompt` y **no** se
-  guarda en `discovery.Project`: así no engorda `repos.json`, no queda obsoleto
-  tras editar el marcador y se resuelve en la pulsación, no por frame.
-- **`pullOptions` es la fuente única de variantes**: `PullKinds`, `pullPrompt()`
-  y `pullVariantLabel()` derivan de ella. El bug latente que arregla es real: el
-  prompt tenía `[]string{"p","r","f","m"}` hardcodeado y una variante nueva no
-  aparecía.
-- **Un rebase a medias no bloquea la variante AI**: sin preview no hay nada que
-  surfacear, y resolver el rebase puede ser justo la intención del prompt. No se
-  consulta `RebaseInProgress` (a diferencia de los pull de git).
-- **Handoff sin timeout ni captura**, como lazygit: la terminal es del hijo y al
-  volver `execDoneMsg` registra el exec en el command log (`Dur=0`, argv con el
-  prompt íntegro) y re-colecta el estado. Sin prompt, sin comando o sin binario
-  (`exec.LookPath`) solo hay toast.
+- **The trust boundary is the axis of the feature**: the executable/argv comes
+  ONLY from the global config (`[ai.pull] command` in
+  `~/.config/gitdash/config.toml`); the committed marker (`.gitdash.toml`,
+  untrusted input) contributes ONLY the prompt text. That text goes in as **a
+  single argv element** (`config.BuildAIArgv`), never interpolated into an
+  `sh -c`. If you duplicate that substitution elsewhere you break the boundary.
+- **`pull_ai` is NOT a `PullKind`**: `PullKinds` feeds
+  `startActionCmd → cfg.CmdArgs → gitstatus.Run` and the `RebaseInProgress`
+  guard, which are git paths. `pull_ai` is resolved as an explicit `case` for
+  `a` inside the `pullArmed` block of `update.go` (the armed state consumes the
+  key before the normal routing, like p/r/f/m).
+- **The prompt is re-read on demand** with `discovery.MarkerPrompt` and is **not**
+  stored in `discovery.Project`: that way it does not bloat `repos.json`, does not
+  go stale after editing the marker and is resolved on the press, not per frame.
+- **`pullOptions` is the single source of variants**: `PullKinds`, `pullPrompt()`
+  and `pullVariantLabel()` derive from it. The latent bug it fixes is real: the
+  prompt had `[]string{"p","r","f","m"}` hardcoded and a new variant did not
+  appear.
+- **A half-done rebase does not block the AI variant**: with no preview there is
+  nothing to surface, and resolving the rebase may be exactly the prompt's
+  intention. `RebaseInProgress` is not consulted (unlike the git pulls).
+- **Handoff without timeout nor capture**, like lazygit: the terminal belongs to
+  the child and on return `execDoneMsg` records the exec in the command log
+  (`Dur=0`, argv with the whole prompt) and re-collects the state. With no
+  prompt, no command or no binary (`exec.LookPath`) there is only a toast.
 
-## Gotchas de cableado
+## Wiring gotchas
 
-- **Todo exec de git pasa por `runGit`/`runGitCombined`** (`gitstatus`), que miden
-  y registran. Si añades un verbo git nuevo fuera de ahí, no aparece en el log.
-  Los 6 `exec.Command` de `tui/app.go` (editor, lazygit, `pull_ai`, visual, `!`,
-  shell) están fuera: se registran a mano, en `execDoneMsg` (handoffs, al
-  volver) y en `openCmdCmd` (el `!`, que sí mide duración). Los handoffs van con
-  `Dur = 0`: medirlo exigiría guardar el arranque en el modelo. `gh`/`glab` no
-  son git: salen por `forge/tool.Runner` y los registra `prCreateCmd`, también a
-  mano (y SÍ midiendo).
-- **`gitstatus.Fetch` recibe la `cmdlog.Class` del caller**: `git fetch --prune`
-  es el mismo comando lo lanzan el scan automático y la tecla `f`, y solo el
-  origen los separa. Es el único exec cuya clase no se deduce del argv.
-- `RemoveWorktreeArgv` existe para que el log, el detail y `RemoveWorktree` no
-  puedan discrepar. Si duplicas la construcción del argv en otro sitio, el log
-  puede mentir sobre lo que se ejecutó.
-- `forge.BuildCreateArgv` es la fuente única del argv de creación (y
-  `forge.CreateBin`/`PromptEnv`, la de la puerta y la del host): si los armas en
-  otro sitio, el log puede enseñar un comando que no es el que salió.
+- **Every git exec goes through `runGit`/`runGitCombined`** (`gitstatus`), which
+  measure and record. If you add a new git verb outside them, it does not appear
+  in the log. The 6 `exec.Command`s of `tui/app.go` (editor, lazygit, `pull_ai`,
+  visual, `!`, shell) are outside: they are recorded by hand, in `execDoneMsg`
+  (handoffs, on return) and in `openCmdCmd` (the `!`, which does measure
+  duration). Handoffs go with `Dur = 0`: measuring them would require storing the
+  start in the model. `gh`/`glab` are not git: they leave through
+  `forge/tool.Runner` and `prCreateCmd` records them, also by hand (and it DOES
+  measure).
+- **`gitstatus.Fetch` takes the `cmdlog.Class` from the caller**: `git fetch
+  --prune` is the same command the automatic scan and the `f` key launch, and
+  only the origin separates them. It is the only exec whose class is not deduced
+  from the argv.
+- `RemoveWorktreeArgv` exists so the log, the detail and `RemoveWorktree` cannot
+  disagree. If you build the argv somewhere else, the log can lie about what ran.
+- `forge.BuildCreateArgv` is the single source of the creation argv (and
+  `forge.CreateBin`/`PromptEnv` the ones of the door and the host): if you build
+  them elsewhere, the log can show a command that is not the one that ran.
 
-## Probar
+## Trying it
 
 ```bash
-# config real del usuario (roots default: ~/dev)
+# the user's real config (default roots: ~/dev)
 bin/gitdash
 ```
 
 ```bash
-# aislada contra los fixtures
+# isolated against the fixtures
 XDG_CONFIG_HOME=$(mktemp -d) bin/gitdash --print
-# con config: crea <tmp>/gitdash/config.toml con roots=["<repo>/testdata/playground"]
+# with a config: create <tmp>/gitdash/config.toml with roots=["<repo>/testdata/playground"]
 ```

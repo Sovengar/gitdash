@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// El namespace [ai.*] es abierto: cada acción AI declara su plantilla de
-// comando; el marcador (input no confiable) no aporta ejecutable.
 func TestAICommandOverride(t *testing.T) {
 	path := write(t, `[ai.pull]
 command = "jcode -run {prompt}"
@@ -19,12 +17,10 @@ command = "jcode -run {prompt}"
 		t.Errorf("AICommand(pull) = %q, want la plantilla", got)
 	}
 	if got := cfg.AICommand("commit"); got != "" {
-		t.Errorf("AICommand(commit) = %q, want vacío (no configurada)", got)
+		t.Errorf("AICommand(commit) = %q, want empty (not configured)", got)
 	}
 }
 
-// Una acción ausente no existe: la extensibilidad del namespace no inventa
-// plantillas.
 func TestAICommandExtensible(t *testing.T) {
 	path := write(t, `[ai.commit]
 command = "ai commit {prompt}"
@@ -34,14 +30,12 @@ command = "ai commit {prompt}"
 		t.Errorf("AICommand(commit) = %q", got)
 	}
 	if got := cfg.AICommand("pull"); got != "" {
-		t.Errorf("AICommand(pull) = %q, want vacío", got)
+		t.Errorf("AICommand(pull) = %q, want empty", got)
 	}
 }
 
-// El límite de seguridad: el prompt del marcador entra como UN elemento de
-// argv, jamás interpolado en un `sh -c`. Espacios, `;`, comillas y `$` no
-// cambian el número de elementos.
-func TestBuildAIArgvPromptEsUnSoloElemento(t *testing.T) {
+// The security boundary: the marker prompt enters as ONE argv element and is never interpolated into an `sh -c`, so spaces, `;`, quotes and `$` do not change the element count.
+func TestBuildAIArgvPromptIsAOnlyElement(t *testing.T) {
 	prompt := `he said "hi"; rm -rf / && echo $HOME`
 	argv := BuildAIArgv("jcode -run {prompt}", prompt, nil)
 	want := []string{"jcode", "-run", prompt}
@@ -50,28 +44,24 @@ func TestBuildAIArgvPromptEsUnSoloElemento(t *testing.T) {
 	}
 }
 
-// Los placeholders de contexto se sustituyen por campo.
 func TestBuildAIArgvContextPlaceholders(t *testing.T) {
 	argv := BuildAIArgv("ai --branch {branch} --behind {behind} {prompt}",
-		"arregla", map[string]string{"branch": "main", "behind": "3"})
-	want := []string{"ai", "--branch", "main", "--behind", "3", "arregla"}
+		"fix", map[string]string{"branch": "main", "behind": "3"})
+	want := []string{"ai", "--branch", "main", "--behind", "3", "fix"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Errorf("argv = %#v, want %#v", argv, want)
 	}
 }
 
-// El reemplazo es de una sola pasada: un prompt que contiene `{branch}` queda
-// literal (no se expande en cascada).
-func TestBuildAIArgvNoReescaneaElPrompt(t *testing.T) {
-	argv := BuildAIArgv("ai {prompt}", "usa {branch}", map[string]string{"branch": "main"})
-	if len(argv) != 2 || argv[1] != "usa {branch}" {
-		t.Errorf("argv = %#v, want el prompt literal", argv)
+func TestBuildAIArgvNotRescansThePrompt(t *testing.T) {
+	argv := BuildAIArgv("ai {prompt}", "uses {branch}", map[string]string{"branch": "main"})
+	if len(argv) != 2 || argv[1] != "uses {branch}" {
+		t.Errorf("argv = %#v, want the literal prompt", argv)
 	}
 }
 
-// Plantilla vacía = sin argv; la TUI lo rechaza antes de lanzar nada.
-func TestBuildAIArgvPlantillaVacia(t *testing.T) {
+func TestBuildAIArgvTemplateEmpty(t *testing.T) {
 	if argv := BuildAIArgv("", "algo", nil); len(argv) != 0 {
-		t.Errorf("argv = %#v, want vacío", argv)
+		t.Errorf("argv = %#v, want empty", argv)
 	}
 }

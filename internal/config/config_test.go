@@ -31,7 +31,7 @@ func TestDefaults(t *testing.T) {
 		t.Errorf("fetch defaults = %+v", cfg)
 	}
 	if cfg.Editor == "" {
-		t.Error("editor default vacío")
+		t.Error("editor default empty")
 	}
 	found := false
 	for _, ex := range cfg.Exclude {
@@ -40,7 +40,7 @@ func TestDefaults(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("exclude default sin testdata: %v", cfg.Exclude)
+		t.Errorf("exclude default without testdata: %v", cfg.Exclude)
 	}
 }
 
@@ -54,7 +54,7 @@ func TestPartialOverride(t *testing.T) {
 		t.Errorf("roots = %v", cfg.Roots)
 	}
 	if cfg.Marker != ".gitdash.toml" || !cfg.FetchAuto || cfg.FetchConcurrency != 4 {
-		t.Errorf("defaults no conservados: %+v", cfg)
+		t.Errorf("defaults not kept: %+v", cfg)
 	}
 }
 
@@ -62,10 +62,10 @@ func TestMalformed(t *testing.T) {
 	path := write(t, `roots = [`)
 	cfg, warn := LoadFrom(path)
 	if warn == "" {
-		t.Fatal("se esperaba warning de parseo")
+		t.Fatal("expected a parse warning")
 	}
 	if cfg.Marker != ".gitdash.toml" || !cfg.FetchAuto {
-		t.Errorf("no se usaron defaults: %+v", cfg)
+		t.Errorf("defaults were not used: %+v", cfg)
 	}
 }
 
@@ -100,7 +100,7 @@ timeout = "10s"
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if cfg.FetchAuto {
-		t.Error("auto debería ser false")
+		t.Error("auto should be false")
 	}
 	if cfg.FetchConcurrency != 8 || cfg.FetchTimeout != 10*time.Second {
 		t.Errorf("fetch = %+v", cfg)
@@ -118,32 +118,28 @@ timeout = "nope"
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if cfg.FetchConcurrency != 4 || cfg.FetchTimeout != 30*time.Second {
-		t.Errorf("valores inválidos no ignorados: %+v", cfg)
+		t.Errorf("invalid values not ignored: %+v", cfg)
 	}
 }
 
-// El mínimo válido de concurrency es 1 (un único fetch a la vez), no 0 ni 2: el
-// borde de la guarda `c >= 1` es exactamente este valor.
-func TestFetchConcurrencyMinimoAceptado(t *testing.T) {
+func TestFetchConcurrencyMinimumAccepted(t *testing.T) {
 	path := write(t, "[fetch]\nconcurrency = 1\n")
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if cfg.FetchConcurrency != 1 {
-		t.Errorf("concurrency = %d, want 1 (mínimo válido aceptado)", cfg.FetchConcurrency)
+		t.Errorf("concurrency = %d, want 1 (minimum valid accepted)", cfg.FetchConcurrency)
 	}
 }
 
-// Un timeout de 0 (o negativo) es tan inválido como "nope": cae al default. El
-// borde de la guarda `d > 0` es el 0, así que es 0 y no "un valor raro".
-func TestFetchTimeoutNoPositivoIgnorado(t *testing.T) {
+func TestFetchTimeoutNotPositiveIgnored(t *testing.T) {
 	for _, timeout := range []string{"0s", "0", "-1s", "-30m"} {
 		t.Run(timeout, func(t *testing.T) {
 			path := write(t, "[fetch]\ntimeout = "+quote(timeout)+"\n")
 			cfg, _ := LoadFrom(path)
 			if cfg.FetchTimeout != 30*time.Second {
-				t.Errorf("timeout %q → %s, want el default 30s", timeout, cfg.FetchTimeout)
+				t.Errorf("timeout %q → %s, want the 30s default", timeout, cfg.FetchTimeout)
 			}
 		})
 	}
@@ -151,10 +147,7 @@ func TestFetchTimeoutNoPositivoIgnorado(t *testing.T) {
 
 func quote(s string) string { return `"` + s + `"` }
 
-// Una clave ausente conserva su default: el `nil` del puntero y la ausencia de
-// la clave son la misma cosa, y el valor por defecto sobrevive a cualquier
-// config parcial.
-func TestClavesAusentesConservanDefaults(t *testing.T) {
+func TestKeysMissingKeepDefaults(t *testing.T) {
 	path := write(t, `roots = ["/tmp"]`)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
@@ -164,7 +157,7 @@ func TestClavesAusentesConservanDefaults(t *testing.T) {
 		t.Errorf("marker = %q, want %q", cfg.Marker, DefaultMarker)
 	}
 	if !reflect.DeepEqual(cfg.Exclude, DefaultExclude) {
-		t.Errorf("exclude = %v, want los defaults %v", cfg.Exclude, DefaultExclude)
+		t.Errorf("exclude = %v, want the defaults %v", cfg.Exclude, DefaultExclude)
 	}
 	if cfg.Editor != Defaults().Editor {
 		t.Errorf("editor = %q, want %q", cfg.Editor, Defaults().Editor)
@@ -174,9 +167,7 @@ func TestClavesAusentesConservanDefaults(t *testing.T) {
 	}
 }
 
-// Una clave presente pero vacía conserva el default: escribir `marker = ""` no
-// es "quitar el marcador", es no decir nada.
-func TestValoresVaciosConservanDefaults(t *testing.T) {
+func TestValuesEmptyKeepDefaults(t *testing.T) {
 	path := write(t, `
 marker = ""
 editor = ""
@@ -194,26 +185,23 @@ sync_branch = ""
 	}
 }
 
-// `exclude = []` es una intención explícita (no podar nada) y sustituye a los
-// defaults igual que cualquier otra lista: es lo que distingue "clave ausente"
-// de "lista vacía".
-func TestExcludeVacioDesactivaPodas(t *testing.T) {
+// `exclude = []` is an explicit intent (prune nothing) and replaces the defaults like any other list: that is what tells "key absent" from "empty list" apart.
+func TestExcludeEmptyDeactivatesPrunes(t *testing.T) {
 	path := write(t, "exclude = []\n")
 	cfg, _ := LoadFrom(path)
 	if len(cfg.Exclude) != 0 {
-		t.Errorf("exclude = %v, want vacío (podas desactivadas)", cfg.Exclude)
+		t.Errorf("exclude = %v, want empty (pruning off)", cfg.Exclude)
 	}
 }
 
-// El editor por defecto sale de $EDITOR y solo cae a "vi" cuando no hay ninguno.
-func TestEditorDefaultDesdeEntorno(t *testing.T) {
-	t.Run("con EDITOR", func(t *testing.T) {
+func TestEditorDefaultFromEnvironment(t *testing.T) {
+	t.Run("with EDITOR", func(t *testing.T) {
 		t.Setenv("EDITOR", "nano -w")
 		if got := Defaults().Editor; got != "nano -w" {
 			t.Errorf("editor = %q, want nano -w", got)
 		}
 	})
-	t.Run("sin EDITOR", func(t *testing.T) {
+	t.Run("without EDITOR", func(t *testing.T) {
 		t.Setenv("EDITOR", "")
 		if got := Defaults().Editor; got != "vi" {
 			t.Errorf("editor = %q, want vi", got)
@@ -221,12 +209,10 @@ func TestEditorDefaultDesdeEntorno(t *testing.T) {
 	})
 }
 
-// expandAll solo toca un `~` seguido de separador, y solo cuando hay algo detrás
-// o nada: `~/x` y `~/` se expanden; `~`, `~user` y las rutas absolutas no.
 func TestExpandAll(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skipf("sin home: %v", err)
+		t.Skipf("without home: %v", err)
 	}
 	cases := []struct {
 		in   string
@@ -248,15 +234,12 @@ func TestExpandAll(t *testing.T) {
 	}
 }
 
-// roots con `~` se expanden al cargarlos; la lista vacía no inventa entradas.
-func TestExpandAllListaVacia(t *testing.T) {
+func TestExpandAllListEmpty(t *testing.T) {
 	if got := expandAll(nil); len(got) != 0 {
-		t.Errorf("expandAll(nil) = %v, want vacío", got)
+		t.Errorf("expandAll(nil) = %v, want empty", got)
 	}
 }
 
-// El plegado tiene default `enter` (cubre worktrees y grupos) y es configurable
-// como el resto de keybindings. Su hint lleva la tecla configurada y solo una vez.
 func TestFoldKeybinding(t *testing.T) {
 	cfg := Defaults()
 	if cfg.KeyFor("fold") != "enter" {
@@ -266,7 +249,6 @@ func TestFoldKeybinding(t *testing.T) {
 		t.Errorf("hint de plegado ausente: %v", cfg.HintBarLines())
 	}
 
-	// Rebind via config.toml.
 	path := write(t, `
 [keybindings]
 fold = "w"
@@ -283,11 +265,10 @@ fold = "w"
 		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
 	}
 	if strings.Contains(hints, "enter fold") {
-		t.Errorf("el hint sigue con la tecla anterior: %v", cfg.HintBarLines())
+		t.Errorf("the hint still has the old key: %v", cfg.HintBarLines())
 	}
 }
 
-// El borrado de worktree tiene default `D` y es reconfigurable.
 func TestDefaultKeybindingsWorktreeRemove(t *testing.T) {
 	cfg := Defaults()
 	if cfg.KeyFor("worktree_remove") != "D" {
@@ -297,7 +278,6 @@ func TestDefaultKeybindingsWorktreeRemove(t *testing.T) {
 		t.Errorf("hint de borrado ausente: %v", cfg.HintBarLines())
 	}
 
-	// Rebind via config.toml.
 	path := write(t, `
 [keybindings]
 worktree_remove = "W"
@@ -314,8 +294,6 @@ worktree_remove = "W"
 	}
 }
 
-// El preview visual tiene default `v` y es reconfigurable; su hint lleva la
-// etiqueta sin la tecla.
 func TestDefaultKeybindingsVisual(t *testing.T) {
 	cfg := Defaults()
 	if cfg.KeyFor("visual") != "v" {
@@ -341,10 +319,7 @@ visual = "V"
 	}
 }
 
-// Una config vieja con acciones que ya no existen (detail, expand) avisa en vez
-// de dejar la tecla muerta: sin aviso, `detail = "enter"` hace que enter no haga
-// nada y parece un bug de la TUI.
-func TestKeybindingsObsoletosAvisan(t *testing.T) {
+func TestKeybindingsObsoleteWarn(t *testing.T) {
 	path := write(t, `
 [keybindings]
 detail = "enter"
@@ -353,28 +328,21 @@ fold   = "w"
 `)
 	cfg, warn := LoadFrom(path)
 	if !strings.Contains(warn, "detail") || !strings.Contains(warn, "expand") {
-		t.Errorf("aviso sin las acciones obsoletas: %q", warn)
+		t.Errorf("warning without the stale actions: %q", warn)
 	}
 	if strings.Contains(warn, "fold") {
-		t.Errorf("avisa de una acción válida: %q", warn)
+		t.Errorf("it warns about a valid action: %q", warn)
 	}
-	// Las obsoletas no se cuelan en el mapa (su tecla queda libre) y las
-	// válidas sí se aplican.
 	if _, ok := cfg.Keybindings["detail"]; ok {
-		t.Error("la acción obsoleta quedó en el mapa de teclas")
+		t.Error("the stale action stayed in the key map")
 	}
 	if cfg.KeyFor("fold") != "w" {
 		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
 	}
 }
 
-// --- la puerta de entrada real: Load() y Path() ---
-
-// Path es lo que la app llama al arrancar para saber dónde está su config. Todos
-// los tests del paquete pasaban un path a mano con LoadFrom, así que la función
-// que resuelve XDG_CONFIG_HOME no tenía ni un test: el mismo brazo que decide
-// dónde vive el fichero nunca se ejecutó.
-func TestPathRespetaXDGConfigHome(t *testing.T) {
+// Every test of the package passed a path by hand to LoadFrom, so the function resolving XDG_CONFIG_HOME had no test at all: the very branch that decides where the file lives never ran.
+func TestPathRespectsXDGConfigHome(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -387,53 +355,45 @@ func TestPathRespetaXDGConfigHome(t *testing.T) {
 	}
 }
 
-// Sin XDG_CONFIG_HOME ni HOME no hay directorio de usuario, y Path tiene que
-// decirlo en vez de devolver una ruta que no existe (un "/gitdash/config.toml"
-// silencioso escribiría donde nadie lee).
-func TestPathSinDirectorioDeUsuarioDaError(t *testing.T) {
+// Without XDG_CONFIG_HOME nor HOME there is no user directory, and Path has to say so instead of returning a path that does not exist (a silent "/gitdash/config.toml" would write where nobody reads).
+func TestPathWithoutDirectoryOfUserGivesError(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 	if got, err := Path(); err == nil {
-		t.Errorf("Path sin HOME ni XDG = %q, want error", got)
+		t.Errorf("Path without HOME nor XDG = %q, want error", got)
 	}
 }
 
-// Load es lo que arranca de verdad: lee Path y delega en LoadFrom. Sin fichero
-// de config devuelve los defaults SIN aviso (un usuario que aún no ha configurado
-// nada no tiene un error que ver), y con fichero, los valores de ahí.
-func TestLoadSinFicheroDaDefaultsSilenciosos(t *testing.T) {
+func TestLoadWithoutFileGivesDefaultsSilent(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cfg, warn := Load()
 	if warn != "" {
-		t.Errorf("sin config, Load avisa %q; un usuario sin configurar no tiene un error que ver", warn)
+		t.Errorf("with no config, Load warns %q; an unconfigured user has no error to see", warn)
 	}
 	if len(cfg.Roots) == 0 {
-		t.Error("sin config, Load no devolvió los roots por defecto")
+		t.Error("with no config, Load did not return the default roots")
 	}
 	if cfg.Marker == "" {
-		t.Error("sin config, Load no devolvió el marcador por defecto")
+		t.Error("with no config, Load did not return the default marker")
 	}
 }
 
-// Y que Load lee de verdad lo que hay en el path que resuelve: si leyera otro
-// fichero, los roots del usuario no se aplicarían y descubriría repos donde no
-// hay.
-func TestLoadLeeElFicheroDelPathResuelto(t *testing.T) {
+func TestLoadReadsTheFileOfThePathResolved(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	if err := os.MkdirAll(filepath.Join(dir, DirName), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	raiz := t.TempDir()
-	cuerpo := fmt.Sprintf("roots = [%q]\nsync_branch = \"develop\"\n", raiz)
-	if err := os.WriteFile(filepath.Join(dir, DirName, FileName), []byte(cuerpo), 0o644); err != nil {
+	body := fmt.Sprintf("roots = [%q]\nsync_branch = \"develop\"\n", raiz)
+	if err := os.WriteFile(filepath.Join(dir, DirName, FileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg, warn := Load()
 	if warn != "" {
-		t.Errorf("config válida, Load avisa %q", warn)
+		t.Errorf("valid config, Load warns %q", warn)
 	}
 	if len(cfg.Roots) != 1 || cfg.Roots[0] != raiz {
 		t.Errorf("Roots = %v, want [%q]", cfg.Roots, raiz)
@@ -443,42 +403,35 @@ func TestLoadLeeElFicheroDelPathResuelto(t *testing.T) {
 	}
 }
 
-// SyncBranchExplicit separa "el usuario puso sync_branch" de "es el default":
-// el default es una suposición que el repo puede desmentir (y ahí la
-// referencia cae a master), una rama escrita es una intención que no se toca.
 func TestSyncBranchExplicit(t *testing.T) {
-	t.Run("sin declarar", func(t *testing.T) {
+	t.Run("undeclared", func(t *testing.T) {
 		cfg, _ := LoadFrom(write(t, `roots = ["/tmp"]`))
 		if cfg.SyncBranchExplicit {
-			t.Error("SyncBranchExplicit con la clave ausente: el default no es una declaración")
+			t.Error("SyncBranchExplicit with the key absent: a default is not a declaration")
 		}
 		if cfg.SyncBranch != "main" {
-			t.Errorf("SyncBranch = %q, want main (el default)", cfg.SyncBranch)
+			t.Errorf("SyncBranch = %q, want main (the default)", cfg.SyncBranch)
 		}
 	})
 	t.Run("declarada", func(t *testing.T) {
 		cfg, _ := LoadFrom(write(t, `sync_branch = "develop"`))
 		if !cfg.SyncBranchExplicit {
-			t.Error("SyncBranchExplicit = false con sync_branch en el TOML")
+			t.Error("SyncBranchExplicit = false with sync_branch in the TOML")
 		}
 		if cfg.SyncBranch != "develop" {
 			t.Errorf("SyncBranch = %q, want develop", cfg.SyncBranch)
 		}
 	})
-	// `sync_branch = ""` no es una declaración: es una casilla vacía, y por
-	// la misma regla que no pisa el default tampoco puede cerrar el fallback.
-	t.Run("declarada pero vacía", func(t *testing.T) {
+	t.Run("declared but empty", func(t *testing.T) {
 		cfg, _ := LoadFrom(write(t, `sync_branch = ""`))
 		if cfg.SyncBranchExplicit {
-			t.Error("SyncBranchExplicit = true con sync_branch vacío")
+			t.Error("SyncBranchExplicit = true with an empty sync_branch")
 		}
 	})
 }
 
-// Un comando declarado vacío NO sustituye al default: es una casilla sin
-// rellenar, no una orden de "no hacer nada". Aceptarlo dejaba la acción con un
-// argv vacío, que es un panic alcanzable desde el panel del log.
-func TestComandoVacioNoPisaElDefault(t *testing.T) {
+// An empty declared command does NOT replace the default: it is an unfilled box and not an order to do nothing, and accepting it left the action with an empty argv, a panic reachable from the log panel.
+func TestCommandEmptyNotStepsTheDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path,
@@ -490,16 +443,13 @@ func TestComandoVacioNoPisaElDefault(t *testing.T) {
 	def := DefaultCommands()
 	for _, k := range []string{"pull", "push"} {
 		if cfg.Commands[k] != def[k] {
-			t.Errorf("commands[%q] = %q, want el default %q: un valor vacío es una casilla sin rellenar, no una orden",
+			t.Errorf("commands[%q] = %q, want the default %q: an empty value is a blank box, not an instruction",
 				k, cfg.Commands[k], def[k])
 		}
 	}
 }
 
-// Y la otra mitad del guard: un comando VACÍO de una acción que no existe ni
-// tiene default no se registra. Si se registrara, el mapa tendría una entrada
-// con argv vacío que el log presentaría como si algo se hubiera ejecutado.
-func TestComandoVacioDeUnaAccionDesconocidaNoSeRegistra(t *testing.T) {
+func TestCommandEmptyOfAActionUnknownNotIsRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path,
@@ -509,183 +459,141 @@ func TestComandoVacioDeUnaAccionDesconocidaNoSeRegistra(t *testing.T) {
 	cfg, _ := LoadFrom(path)
 
 	if v, ok := cfg.Commands["inventada"]; ok {
-		t.Errorf("commands[\"inventada\"] = %q registrada: un comando vacío no es un comando", v)
+		t.Errorf("commands[\"inventada\"] = %q recorded: an empty command is not a command", v)
 	}
-	// El namespace es abierto: una acción nueva con valor SÍ se acepta, que es
-	// lo que permite el `[ai.pull]` y cualquier comando propio.
 	if got := cfg.Commands["real"]; got != "log --oneline -5" {
-		t.Errorf("commands[\"real\"] = %q, want el valor declarado", got)
+		t.Errorf("commands[\"real\"] = %q, want the declared value", got)
 	}
 }
 
-// HintBarLines deriva sus lineas de los keybindings CONFIGURADOS, no de una
-// lista fija: una accion sin tecla no se anuncia, y por eso el bucle tiene una
-// rama de "no esta bindeada" que salta. Ese skip es lo que hace que una config
-// vieja (sin la tecla de `pr`, digamos) no invente un hint que no se puede
-// pulsar.
-//
-// El skip se comprueba con un hint COMPLETO ("f fetch"), no con la palabra suelta:
-// "fetch" es subcadena de "fetch all", asi que buscarla suelta daria un falso
-// positivo siempre que `fetch_all` estuviera bindeado.
-func TestHintBarOmiteAccionesSinTecla(t *testing.T) {
+// The skip is checked with a WHOLE hint ("f fetch") and not with the bare word, because "fetch" is a substring of "fetch all" and searching it alone would always be a false positive whenever `fetch_all` were bound.
+func TestHintBarSkipsActionsWithoutKey(t *testing.T) {
 	cfg := Defaults()
 	delete(cfg.Keybindings, "fetch")
 	delete(cfg.Keybindings, "pr")
 	rows := cfg.HintBarLines()
 	if len(rows) != 3 {
-		t.Fatalf("HintBarLines devolvio %d lineas, want 3", len(rows))
+		t.Fatalf("HintBarLines returned %d lines, want 3", len(rows))
 	}
 	antes := Defaults().HintBarLines()
 	for i, r := range rows {
 		for _, hint := range []string{"f fetch", "O open PR"} {
 			if strings.Contains(r, hint) {
-				t.Errorf("la linea %d (%q) anuncia %q, que ya no tiene tecla", i, r, hint)
+				t.Errorf("line %d (%q) advertises %q, which no longer has a key", i, r, hint)
 			}
 		}
 	}
-	// Y lo que sigue bindeado se sigue anunciando, en su fila.
 	if len(rows[2]) >= len(antes[2]) {
-		t.Errorf("la linea de tools no se acorto al quitar pr: %q", rows[2])
+		t.Errorf("the tools line did not shorten when removing pr: %q", rows[2])
 	}
 	if !strings.Contains(rows[2], "e edit") {
-		t.Errorf("la linea de tools (%q) perdio edit, que si esta bindeado", rows[2])
+		t.Errorf("the tools line (%q) lost edit, which is bound", rows[2])
 	}
 	if !strings.Contains(rows[1], "F fetch all") {
-		t.Errorf("la linea de git (%q) perdio fetch all, que no se toco", rows[1])
+		t.Errorf("the git line (%q) lost fetch all, which was untouched", rows[1])
 	}
 }
 
-// KeyByAction invierte el mapa tecla → accion, que es como la TUI despacha una
-// pulsacion sin recorrer todas las acciones. La inversion tiene que ser
-// bidireccional: la tecla que seConfigured es la accion que se dispara.
-func TestKeyByActionInvierteElMapa(t *testing.T) {
+func TestKeyByActionInvertsTheMap(t *testing.T) {
 	cfg := Defaults()
 	cfg.Keybindings["fold"] = "w"
 	inv := cfg.KeyByAction()
 	if len(inv) == 0 {
-		t.Fatal("KeyByAction = vacio")
+		t.Fatal("KeyByAction = empty")
 	}
 	if got := inv["w"]; got != "fold" {
 		t.Errorf("KeyByAction()[\"w\"] = %q, want fold", got)
 	}
 	if _, ok := inv["enter"]; ok {
-		t.Error("la tecla por defecto de fold (enter) sigue en el invertido tras redefinirla")
+		t.Error("the default fold key (enter) is still in the inverted map after redefining it")
 	}
-	// Con el mapa por defecto, cada tecla del default aparece invertida.
 	def := Defaults()
-	for accion, tecla := range def.Keybindings {
-		if got := def.KeyByAction()[tecla]; got != accion {
-			t.Errorf("KeyByAction()[%q] = %q, want %q", tecla, got, accion)
+	for action, key := range def.Keybindings {
+		if got := def.KeyByAction()[key]; got != action {
+			t.Errorf("KeyByAction()[%q] = %q, want %q", key, got, action)
 		}
 	}
 }
 
-// KeyFor y CmdArgs tienen las dos ramas: la entrada del mapa y el default. KeyFor
-// con una accion INVENTADA tiene que devolver "" (no hay default), mientras que
-// CmdArgs con una accion inventada devuelve lo que haya en DefaultCommands, que
-// es "" → un slice vacio. Que los dos difieran es lo que se comprueba.
-func TestKeyForYCmdArgsCaeAlDefault(t *testing.T) {
+func TestKeyForAndCmdArgsFallsOnTheDefault(t *testing.T) {
 	cfg := Defaults()
-	if got := cfg.KeyFor("accion_inventada"); got != "" {
-		t.Errorf("KeyFor(inventada) = %q, want vacio (no hay default para ella)", got)
+	if got := cfg.KeyFor("invented_action"); got != "" {
+		t.Errorf("KeyFor(inventada) = %q, want empty (there is no default for it)", got)
 	}
-	if got := cfg.CmdArgs("accion_inventada"); len(got) != 0 {
-		t.Errorf("CmdArgs(inventada) = %q, want slice vacio", got)
+	if got := cfg.CmdArgs("invented_action"); len(got) != 0 {
+		t.Errorf("CmdArgs(inventada) = %q, want an empty slice", got)
 	}
-	// Y el default de una accion REAL, quitada del mapa, sale de DefaultCommands.
 	delete(cfg.Commands, "pull")
 	argv := cfg.CmdArgs("pull")
 	if len(argv) == 0 || argv[0] != "pull" {
-		t.Errorf("CmdArgs(pull) sin override = %q, want el default que empieza por pull", argv)
+		t.Errorf("CmdArgs(pull) with no override = %q, want the default starting with pull", argv)
 	}
 }
 
-// LoadFrom nunca falla: ante un fichero ilegible devuelve los defaults y un
-// warning. El caso que se comprueba aqui es un DIRECTORIO en vez de un
-// fichero, que hace que os.ReadFile falle con EISDIR sin ser "no existe". Si esa
-// rama devolviera un warning vacio, un config.toml convertido en directorio
-// arrancaria el dashboard sin avisar de nada.
-func TestLoadFromDirectorioAvisa(t *testing.T) {
+// Triggered with a DIRECTORY instead of a file, which makes os.ReadFile fail with EISDIR instead of "does not exist": if that branch returned an empty warning, a config.toml turned into a directory would start the dashboard saying nothing.
+func TestLoadFromDirectoryWarns(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg, warn := LoadFrom(dir)
 	if warn == "" {
-		t.Error("LoadFrom de un directorio = sin warning, want aviso (un config ilegible se avisa)")
+		t.Error("LoadFrom of a directory with no warning, want a notice (an unreadable config is reported)")
 	}
 	if !strings.HasPrefix(warn, "config: ") {
-		t.Errorf("warning = %q, want el prefijo 'config: '", warn)
+		t.Errorf("warning = %q, want the 'config: ' prefix", warn)
 	}
 	if cfg.Marker != Defaults().Marker {
-		t.Errorf("Marker = %q, want el default (un config ilegible no cambia nada)", cfg.Marker)
+		t.Errorf("Marker = %q, want the default (an unreadable config changes nothing)", cfg.Marker)
 	}
 }
 
-// Load (no LoadFrom) es el camino de arranque, y su unica rama de error es que
-// UserConfigDir no pueda decidir el HOME/XDG. Se aísla con un HOME y un XDG que
-// no existen, que es lo que devuelve error en Linux.
-func TestLoadSinUserConfigDirDaDefaults(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "no-existe"))
-	// En Linux os.UserConfigDir usa XDG_CONFIG_HOME y solo falla si esta vacio.
+func TestLoadWithoutUserConfigDirGivesDefaults(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "nonexistent"))
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 	cfg, warn := Load()
 	if warn != "" {
-		t.Errorf("Load sin HOME = warning %q, want vacio (sin ruta no hay nada que avisar)", warn)
+		t.Errorf("Load without HOME = warning %q, want empty (with no path there is nothing to report)", warn)
 	}
 	if !reflect.DeepEqual(cfg.Roots, Defaults().Roots) {
-		t.Errorf("Roots = %v, want los defaults", cfg.Roots)
+		t.Errorf("Roots = %v, want the defaults", cfg.Roots)
 	}
 }
 
-// Marker y Editor son punteros en el TOML para poder distinguir "ausente" de
-// "puesto a cadena vacia". El contrato es que la cadena vacia conserva el
-// default: escribir `marker = ""` no deja a gitdash sin marcador (que seria
-// descubrir repos de otra manera), se queda con el de siempre.
-func TestMarkerYEditorVaciosConservanElDefault(t *testing.T) {
+func TestMarkerAndEditorEmptyKeepTheDefault(t *testing.T) {
 	path := write(t, `marker = ""
 editor = ""
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warning = %q, want vacio", warn)
+		t.Fatalf("warning = %q, want empty", warn)
 	}
 	if cfg.Marker != Defaults().Marker {
-		t.Errorf("Marker = %q, want el default %q (una cadena vacia no borra el marcador)",
+		t.Errorf("Marker = %q, want the default %q (an empty string does not clear the marker)",
 			cfg.Marker, Defaults().Marker)
 	}
 	if cfg.Editor != Defaults().Editor {
-		t.Errorf("Editor = %q, want el default %q (una cadena vacia no borra el editor)",
+		t.Errorf("Editor = %q, want the default %q (an empty string does not clear the editor)",
 			cfg.Editor, Defaults().Editor)
 	}
-	// Y puestos de verdad, se respetan.
 	path2 := write(t, "marker = \".mi-marcador\"\neditor = \"nano\"\n")
 	cfg2, _ := LoadFrom(path2)
 	if cfg2.Marker != ".mi-marcador" || cfg2.Editor != "nano" {
-		t.Errorf("Marker/Editor = %q/%q, want los del fichero", cfg2.Marker, cfg2.Editor)
+		t.Errorf("Marker/Editor = %q/%q, want the file's ones", cfg2.Marker, cfg2.Editor)
 	}
 }
 
-// Toda acción de la barra de hints tiene que tener etiqueta. La comprobación
-// es aquí, y no un `if !ok { label = key }` dentro de HintBarLines: ese
-// fallback era una rama que ningún test podía matar (las 17 acciones tienen
-// etiqueta), y en el improbable caso de que faltara pintaba un hint con la
-// tecla y nada más, que se lee como un bug de render.
-//
-// Las etiquetas que sobran (navegación, hardcodeada en la UI) no son un fallo:
-// es al revés, la barra escribe esas a mano.
-func TestHintActionsTodasTienenEtiqueta(t *testing.T) {
+// The check lives here and not as an `if !ok { label = key }` inside HintBarLines: that fallback was a branch no test could kill (all 17 actions have a label) and in the unlikely case of a missing one it painted a hint with the key and nothing else, which reads as a render bug.
+func TestHintActionsAllHaveLabel(t *testing.T) {
 	for _, action := range hintActions {
 		if _, ok := hintLabels[action]; !ok {
-			t.Errorf("la acción %q sale en la barra de hints pero no tiene etiqueta en hintLabels", action)
+			t.Errorf("the action %q shows in the hint bar but has no label in hintLabels", action)
 		}
 	}
-	// Y el contrato de la barra: sin etiqueta el hint sale como "p " (tecla y
-	// espacio), así que esto también falla si alguien mete una acción vacía.
 	for action, label := range hintLabels {
 		if label == "" {
-			t.Errorf("hintLabels[%q] = %q, want una etiqueta", action, label)
+			t.Errorf("hintLabels[%q] = %q, want a label", action, label)
 		}
 	}
 }

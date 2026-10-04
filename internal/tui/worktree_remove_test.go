@@ -1,5 +1,3 @@
-// Tests del borrado de worktree desde la TUI (modelo directo, sin teatest):
-// armado en dos pulsaciones, forzado de segundo nivel, cancelación y limpieza.
 package tui
 
 import (
@@ -16,7 +14,6 @@ import (
 	"gitdash/internal/testutil"
 )
 
-// gitOutT ejecuta git en dir y devuelve stdout (para comprobar la rama).
 func gitOutT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -28,22 +25,18 @@ func gitOutT(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// removeWtModel construye un modelo con un repo y sus worktrees, lo expande y
-// deja el cursor sobre la primera sub-fila de worktree.
 func removeWtModel(t *testing.T, parent string, wts ...gitstatus.Worktree) (Model, discovery.Project) {
 	t.Helper()
 	p, st := repoWithWorktrees(filepath.Base(parent), parent, wts...)
 	m := newTestModel(t, []discovery.Project{p}, st)
-	m, _ = press(m, "enter") // expandir worktrees
+	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
 	if e, ok := m.selectedEntry(); !ok || e.kind != kindWorktree {
-		t.Fatalf("el cursor no quedó sobre una sub-fila: %+v", e)
+		t.Fatalf("the cursor did not land on a subrow: %+v", e)
 	}
 	return m, p
 }
 
-// armedOver arma el estado de confirmación manualmente (para saltarse la
-// primera pulsación en los tests del segundo nivel).
 func armedOver(t *testing.T, m Model, e tableEntry, force bool) Model {
 	t.Helper()
 	m.armed = &armedRemoval{
@@ -53,8 +46,6 @@ func armedOver(t *testing.T, m Model, e tableEntry, force bool) Model {
 	return m
 }
 
-// waitEvent consume eventos del canal aplicándolos al modelo hasta que uno
-// cumpla match (o expire el plazo).
 func waitEvent(t *testing.T, m *Model, match func(event) bool) {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -67,13 +58,11 @@ func waitEvent(t *testing.T, m *Model, match func(event) bool) {
 				return
 			}
 		case <-deadline:
-			t.Fatal("timeout esperando el evento esperado")
+			t.Fatal("timeout waiting for the expected event")
 		}
 	}
 }
 
-// applyNotify ejecuta el Cmd de un toast y entrega el mensaje al modelo (los
-// toasts no llegan al estado hasta que el runtime ejecuta el Cmd).
 func applyNotify(m Model, cmd tea.Cmd) Model {
 	if cmd == nil {
 		return m
@@ -86,7 +75,6 @@ func applyNotify(m Model, cmd tea.Cmd) Model {
 	return updated.(Model)
 }
 
-// La primera D sobre una sub-fila arma la confirmación sin ejecutar nada.
 func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	before := m.cursor
@@ -94,41 +82,39 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	m, cmd := press(m, "D")
 
 	if m.armed == nil {
-		t.Fatal("D no armó la confirmación")
+		t.Fatal("D did not arm the confirmation")
 	}
 	if m.armed.wtPath != "/tmp/wt-a" || m.armed.name != "wt-a" {
 		t.Errorf("armed = %+v, want wt-a", m.armed)
 	}
 	if m.armed.force {
-		t.Error("el primer armado no debe forzar")
+		t.Error("the first arming must not force")
 	}
 	if m.armed.parent != p.Path {
 		t.Errorf("parent = %q, want %q", m.armed.parent, p.Path)
 	}
 	if len(m.running) != 0 {
-		t.Errorf("no debe haber acciones en curso: %v", m.running)
+		t.Errorf("there must be no running actions: %v", m.running)
 	}
 	if cmd != nil {
-		t.Error("armar no debe lanzar ningún Cmd")
+		t.Error("arming must not launch any Cmd")
 	}
 	if m.cursor != before {
-		t.Errorf("el cursor cambió: %d, want %d", m.cursor, before)
+		t.Errorf("the cursor changed: %d, want %d", m.cursor, before)
 	}
 }
 
-// La segunda D lanza el borrado con force=false.
 func TestRemoveWorktreeSecondPressExecutes(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 
-	m, _ = press(m, "D") // armar
-	m, _ = press(m, "D") // ejecutar
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
 
 	if got := m.running[p.Path]; got != "worktree_remove" {
 		t.Fatalf("running[parent] = %q, want worktree_remove", got)
 	}
 }
 
-// esc cancela la confirmación y no lanza nada.
 func TestRemoveWorktreeEscCancels(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m, _ = press(m, "D")
@@ -136,26 +122,25 @@ func TestRemoveWorktreeEscCancels(t *testing.T) {
 	m, _ = press(m, "esc")
 
 	if m.armed != nil {
-		t.Error("esc no desarmó la confirmación")
+		t.Error("esc did not disarm the confirmation")
 	}
 	if m.running["/tmp/parent-repo"] != "" {
-		t.Error("esc no debe lanzar ninguna acción")
+		t.Error("esc must not launch any action")
 	}
 }
 
-// D sobre una fila de repo es no-op con toast info.
 func TestRemoveWorktreeOnRepoRowInfo(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
-	m := newTestModel(t, []discovery.Project{p}, st) // sin expandir: cursor en el repo
+	m := newTestModel(t, []discovery.Project{p}, st)
 
 	m, cmd := press(m, "D")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
-		t.Error("D sobre una fila de repo no debe armar")
+		t.Error("D on a repo row must not arm")
 	}
 	if len(m.toasts.toasts) == 0 {
-		t.Fatal("sin toast")
+		t.Fatal("no toast")
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastInfo || last.text != "select a worktree" {
@@ -163,38 +148,35 @@ func TestRemoveWorktreeOnRepoRowInfo(t *testing.T) {
 	}
 }
 
-// D sobre un header de grupo o una tabla vacía: mismo toast, sin armado.
 func TestRemoveWorktreeOnHeaderOrEmptyInfo(t *testing.T) {
 	grouped := discovery.Project{Path: "/tmp/g1", Name: "g1", PrimaryGroup: "g", HasRepo: true}
 	m := newTestModel(t, []discovery.Project{grouped},
 		map[string]gitstatus.Snapshot{"/tmp/g1": snapClean()})
 	if e, _ := m.selectedEntry(); e.kind != kindPrimary {
-		t.Fatalf("precondición: entrada = %+v, want header", e)
+		t.Fatalf("precondition: entry = %+v, want a header", e)
 	}
 	m, cmd := press(m, "D")
 	m = applyNotify(m, cmd)
 	if m.armed != nil {
-		t.Error("D sobre un header no debe armar")
+		t.Error("D on a header must not arm")
 	}
 	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
 		last.text != "select a worktree" {
 		t.Errorf("toast header = %+v", last)
 	}
 
-	// Tabla vacía.
 	empty := newTestModel(t, nil, nil)
 	empty, cmd = press(empty, "D")
 	empty = applyNotify(empty, cmd)
 	if empty.armed != nil {
-		t.Error("D sobre tabla vacía no debe armar")
+		t.Error("D on an empty table must not arm")
 	}
 	if last := empty.toasts.toasts[len(empty.toasts.toasts)-1]; last.level != toastInfo ||
 		last.text != "select a worktree" {
-		t.Errorf("toast vacío = %+v", last)
+		t.Errorf("empty toast = %+v", last)
 	}
 }
 
-// Mover el cursor desarma y la navegación se aplica.
 func TestRemoveWorktreeCursorMoveDisarms(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m, _ = press(m, "D")
@@ -202,62 +184,55 @@ func TestRemoveWorktreeCursorMoveDisarms(t *testing.T) {
 
 	m, _ = press(m, "down")
 	if m.armed != nil {
-		t.Error("down no desarmó")
+		t.Error("down did not disarm")
 	}
 	if m.cursor != before+1 {
-		t.Errorf("down no navegó: cursor=%d, want %d", m.cursor, before+1)
+		t.Errorf("down did not navigate: cursor=%d, want %d", m.cursor, before+1)
 	}
 
 	m, _ = press(m, "D")
 	m, _ = press(m, "up")
 	if m.armed != nil {
-		t.Error("up no desarmó")
+		t.Error("up did not disarm")
 	}
 	if m.cursor != before {
-		t.Errorf("up no navegó: cursor=%d, want %d", m.cursor, before)
+		t.Errorf("up did not navigate: cursor=%d, want %d", m.cursor, before)
 	}
 }
 
-// Cualquier otra tecla desarma (filtro, búsqueda, plegado, expansión).
 func TestRemoveWorktreeOtherKeysDisarm(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m, _ = press(m, "D")
 
-	// d = filtro dirty
 	m2, _ := press(m, "d")
 	if m2.armed != nil {
-		t.Error("d no desarmó")
+		t.Error("d did not disarm")
 	}
 	if !m2.onlyDirty {
-		t.Error("d no aplicó el filtro dirty")
+		t.Error("d did not apply the dirty filter")
 	}
 
-	// / = búsqueda
 	m3, _ := press(m, "/")
 	if m3.armed != nil {
-		t.Error("/ no desarmó")
+		t.Error("/ did not disarm")
 	}
 	if !m3.searchActive {
-		t.Error("/ no abrió la búsqueda")
+		t.Error("/ did not open the search")
 	}
 
-	// tab sobre la sub-fila: no-op de plegado pero desarma
 	m4, _ := press(m, "enter")
 	if m4.armed != nil {
-		t.Error("tab no desarmó")
+		t.Error("tab did not disarm")
 	}
 
-	// space sobre la sub-fila: no-op de expansión pero desarma
 	m5, _ := press(m, "enter")
 	if m5.armed != nil {
-		t.Error("space no desarmó")
+		t.Error("space did not disarm")
 	}
 }
 
-// Un fallo del primer intento muestra el motivo de git y arma el forzado.
 func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	// Estado tras la 2ª D: banner limpio y token del intento en vuelo.
 	m.armed = nil
 	m.removeTokens[p.Path] = 7
 	m.running[p.Path] = "worktree_remove"
@@ -270,28 +245,26 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	m = updated.(Model)
 
 	if m.armed == nil || !m.armed.force {
-		t.Fatalf("no se armó el forzado: %+v", m.armed)
+		t.Fatalf("the force was not armed: %+v", m.armed)
 	}
 	if m.armed.wtPath != "/tmp/wt-a" {
-		t.Errorf("forzado sobre %q, want wt-a", m.armed.wtPath)
+		t.Errorf("forced over %q, want wt-a", m.armed.wtPath)
 	}
 	if m.running[p.Path] != "" {
-		t.Error("el fallo no liberó el running del padre")
+		t.Error("the failure did not release the parent's running")
 	}
 	if _, ok := m.removeTokens[p.Path]; ok {
-		t.Errorf("el token debe consumirse: %v", m.removeTokens)
+		t.Errorf("the token must be consumed: %v", m.removeTokens)
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
 	if last.level != toastError || !strings.Contains(last.text, "archivos modificados") {
-		t.Errorf("toast = %+v, want error con el motivo real", last)
+		t.Errorf("toast = %+v, want an error with the real reason", last)
 	}
-	// El detalle conserva la salida/motivo de git.
 	if act := m.lastAction[p.Path]; act.kind != "worktree_remove" || act.err == "" {
-		t.Errorf("lastAction = %+v, want kind worktree_remove con error", act)
+		t.Errorf("lastAction = %+v, want kind worktree_remove with an error", act)
 	}
 }
 
-// El forzado armado ejecuta con force=true.
 func TestRemoveWorktreeForceExecutes(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	e, _ := m.selectedEntry()
@@ -306,41 +279,37 @@ func TestRemoveWorktreeForceExecutes(t *testing.T) {
 	case ev := <-m.events:
 		msg, ok := ev.(worktreeRemovedMsg)
 		if !ok {
-			t.Fatalf("primer evento = %T, want worktreeRemovedMsg", ev)
+			t.Fatalf("first event = %T, want worktreeRemovedMsg", ev)
 		}
 		if !msg.force {
-			t.Error("la ejecución no fue con force")
+			t.Error("the run did not use force")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("no llegó worktreeRemovedMsg")
+		t.Fatal("worktreeRemovedMsg never arrived")
 	}
 }
 
-// Un fallo forzado desarma y muestra el error (sin re-armar, sin bucle).
 func TestRemoveWorktreeForceFailureDisarms(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	// Estado tras lanzar el forzado: banner limpio y token en vuelo.
 	m.armed = nil
 	m.removeTokens[p.Path] = 9
 	m.running[p.Path] = "worktree_remove"
 
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		err: "fatal: no se puede", force: true, gen: 9,
+		err: "fatal: cannot do it", force: true, gen: 9,
 	})
 	m = updated.(Model)
 
 	if m.armed != nil {
-		t.Errorf("el fallo forzado no debe re-armar: %+v", m.armed)
+		t.Errorf("the forced failure must not re-arm: %+v", m.armed)
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
-	if last.level != toastError || !strings.Contains(last.text, "no se puede") {
+	if last.level != toastError || !strings.Contains(last.text, "cannot do it") {
 		t.Errorf("toast = %+v, want error", last)
 	}
 }
 
-// El éxito desarma, libera el padre y re-colecciona (la sub-fila desaparece).
-// Integración con un repo git real.
 func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-real")
@@ -352,10 +321,10 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 
 	p := proj(filepath.Base(dir), dir, true)
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
-	m, _ = press(m, "enter") // expandir
-	m, _ = press(m, "down")  // sub-fila
-	m, _ = press(m, "D")     // armar
-	m, _ = press(m, "D")     // ejecutar
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
 
 	waitEvent(t, &m, func(ev event) bool {
 		sm, ok := ev.(statusMsg)
@@ -363,16 +332,16 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 	})
 
 	if m.armed != nil {
-		t.Errorf("el éxito debe desarmar: %+v", m.armed)
+		t.Errorf("the success must disarm: %+v", m.armed)
 	}
 	if m.running[dir] != "" {
-		t.Errorf("el padre sigue ocupado: %v", m.running[dir])
+		t.Errorf("the parent is still busy: %v", m.running[dir])
 	}
 	if len(m.states[dir].Worktrees) != 0 {
-		t.Errorf("el snapshot del padre conserva el worktree: %+v", m.states[dir].Worktrees)
+		t.Errorf("the parent's snapshot still holds the worktree: %+v", m.states[dir].Worktrees)
 	}
 	if got := worktreeNames(m.entries()); len(got) != 0 {
-		t.Errorf("la sub-fila sigue visible: %v", got)
+		t.Errorf("the subrow is still visible: %v", got)
 	}
 	found := false
 	for _, to := range m.toasts.toasts {
@@ -381,15 +350,13 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("sin toast de éxito: %+v", m.toasts.toasts)
+		t.Errorf("no success toast: %+v", m.toasts.toasts)
 	}
 }
 
-// Al llegar un snapshot del padre ya sin el worktree, la sub-fila desaparece y
-// el cursor queda en rango.
 func TestRemoveWorktreeSubrowDisappearsAfterSuccess(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m.cursor = 2 // segunda sub-fila
+	m.cursor = 2
 
 	sinWt := snapClean()
 	sinWt.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-a", "a")}
@@ -397,21 +364,20 @@ func TestRemoveWorktreeSubrowDisappearsAfterSuccess(t *testing.T) {
 	m = updated.(Model)
 
 	if got := worktreeNames(m.entries()); len(got) != 1 {
-		t.Errorf("sub-filas = %v, want [wt-a]", got)
+		t.Errorf("subrows = %v, want [wt-a]", got)
 	}
 	if n := len(m.entries()); m.cursor >= n {
-		t.Errorf("cursor fuera de rango: %d (entries=%d)", m.cursor, n)
+		t.Errorf("cursor out of range: %d (entries=%d)", m.cursor, n)
 	}
 }
 
-// Armado/borrado sobre una sub-fila detached (sin rama) es equivalente.
 func TestRemoveWorktreeDetachedRow(t *testing.T) {
 	det := gitstatus.Worktree{Path: "/tmp/wt-det", Head: "abc1234"}
 	m, p := removeWtModel(t, "/tmp/parent-repo", det)
 
 	m, _ = press(m, "D")
 	if m.armed == nil || m.armed.name != "wt-det" {
-		t.Fatalf("no se armó sobre el detached: %+v", m.armed)
+		t.Fatalf("it did not arm over the detached: %+v", m.armed)
 	}
 	m, _ = press(m, "D")
 	if got := m.running[p.Path]; got != "worktree_remove" {
@@ -419,11 +385,8 @@ func TestRemoveWorktreeDetachedRow(t *testing.T) {
 	}
 }
 
-// Una sub-fila con parent vacío no arma: toast info.
-func TestRemoveWorktreeNoArmedOnMissingParent(t *testing.T) {
-	// El parent de una sub-fila lo fija el path del repo padre; para forzar el
-	// caso se usa un proyecto con path vacío.
-	p := discovery.Project{Path: "", Name: "sin-path", HasRepo: true}
+func TestRemoveWorktreeNotArmedOnMissingParent(t *testing.T) {
+	p := discovery.Project{Path: "", Name: "no-path", HasRepo: true}
 	s := snapClean()
 	s.Worktrees = []gitstatus.Worktree{wt("/tmp/wt-a", "a")}
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"": s})
@@ -431,17 +394,17 @@ func TestRemoveWorktreeNoArmedOnMissingParent(t *testing.T) {
 	m, _ = press(m, "down")
 	e, ok := m.selectedEntry()
 	if !ok || e.kind != kindWorktree {
-		t.Fatalf("precondición: entrada = %+v", e)
+		t.Fatalf("precondition: entry = %+v", e)
 	}
 	if e.parent != "" {
-		t.Fatalf("precondición: parent = %q, want vacío", e.parent)
+		t.Fatalf("precondition: parent = %q, want empty", e.parent)
 	}
 
 	m, cmd := press(m, "D")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
-		t.Error("no debe armar con parent vacío")
+		t.Error("it must not arm with an empty parent")
 	}
 	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
 		last.text != "select a worktree" {
@@ -449,37 +412,30 @@ func TestRemoveWorktreeNoArmedOnMissingParent(t *testing.T) {
 	}
 }
 
-// El armado valida la selección al confirmar: si la sub-fila armada ya no es
-// la actual, se re-arma sobre la actual en vez de borrar otro worktree.
 func TestRemoveWorktreeArmedRevalidatesSelection(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m, _ = press(m, "D") // armado sobre wt-a
+	m, _ = press(m, "D")
 
-	// La selección cambia sin pasar por el desarmado de teclas (p. ej. la
-	// sub-fila armada desaparece y el cursor cae en otro worktree).
 	m.cursor = 2
 
 	m, _ = press(m, "D")
 	if m.running[p.Path] != "" {
-		t.Errorf("borró el worktree armado pese a cambiar la selección: %v", m.running)
+		t.Errorf("it deleted the armed worktree despite the selection changing: %v", m.running)
 	}
 	if m.armed == nil || m.armed.wtPath != "/tmp/wt-b" {
-		t.Errorf("no se re-armó sobre la sub-fila actual: %+v", m.armed)
+		t.Errorf("it did not re-arm on the current subrow: %+v", m.armed)
 	}
 }
 
-// El aviso persistente se pinta en la sección de keybinds, cambia en el forzado
-// y desaparece al cancelar.
 func TestRemoveWorktreePromptRender(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 
 	m, _ = press(m, "D")
 	out := stripANSI(m.View().Content)
 	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm, esc to cancel") {
-		t.Errorf("aviso de confirmación ausente de keybinds:\n%s", out)
+		t.Errorf("the confirmation warning is missing from keybinds:\n%s", out)
 	}
 
-	// Variante forzada.
 	e, _ := m.selectedEntry()
 	m = armedOver(t, m, e, true)
 	out = stripANSI(m.View().Content)
@@ -487,55 +443,52 @@ func TestRemoveWorktreePromptRender(t *testing.T) {
 		t.Errorf("aviso forzado ausente de keybinds:\n%s", out)
 	}
 
-	// Cancelar lo retira y devuelve las hints.
 	m, _ = press(m, "esc")
 	out = stripANSI(m.View().Content)
 	if strings.Contains(out, "remove worktree") {
-		t.Error("el aviso sigue visible tras cancelar")
+		t.Error("the warning is still visible after cancelling")
 	}
 	if !strings.Contains(sectionContent(t, out, "keybinds"), "j/k move") {
-		t.Errorf("las hints no volvieron tras cancelar:\n%s", out)
+		t.Errorf("the hints did not come back after cancelling:\n%s", out)
 	}
 }
 
-// El binding es configurable: la nueva tecla arma/ejecuta y D deja de hacerlo.
 func TestRemoveWorktreeBindingOverride(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.cfg.Keybindings["worktree_remove"] = "W"
 
 	m, _ = press(m, "D")
 	if m.armed != nil {
-		t.Fatal("D sigue armando tras el rebind")
+		t.Fatal("D still arms after the rebind")
 	}
 	m, _ = press(m, "W")
 	if m.armed == nil {
-		t.Fatal("W no armó tras el rebind")
+		t.Fatal("W did not arm after the rebind")
 	}
 	m, _ = press(m, "W")
 	if got := m.running[p.Path]; got != "worktree_remove" {
-		t.Errorf("W no ejecutó: running = %q", got)
+		t.Errorf("W did not run: running = %q", got)
 	}
 }
 
-// Con el padre ocupado, la ejecución no lanza y avisa (el armado no se pierde).
 func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.running[p.Path] = "pull"
 
-	m, _ = press(m, "D") // armar permitido aunque el padre esté ocupado
+	m, _ = press(m, "D")
 	if m.armed == nil {
-		t.Fatal("el armado no debe bloquearse por el padre ocupado")
+		t.Fatal("the arming must not be blocked by the busy parent")
 	}
 
-	m, cmd := press(m, "D") // ejecutar: bloqueado por el guard
+	m, cmd := press(m, "D")
 	if got := m.running[p.Path]; got != "pull" {
-		t.Errorf("running = %q, want pull (sin lanzar)", got)
+		t.Errorf("running = %q, want pull (without launching)", got)
 	}
 	if m.armed == nil {
-		t.Error("el armado no debe romperse silenciosamente")
+		t.Error("the arming must not break silently")
 	}
 	if cmd == nil {
-		t.Fatal("se esperaba el toast de aviso")
+		t.Fatal("the warning toast was expected")
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok || msg.level != toastWarning {
@@ -543,68 +496,61 @@ func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 	}
 }
 
-// esc durante un borrado en vuelo lo cancela de forma definitiva: el resultado
-// tardío de un fallo sucio no re-arma el forzado.
 func TestRemoveWorktreeEscDuringFlightIgnoresLateFailure(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D") // armar
-	m, _ = press(m, "D") // lanzar
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
 
 	if m.armed != nil {
-		t.Fatal("el banner debe limpiarse al lanzar el borrado")
+		t.Fatal("the banner must be cleared when the deletion is launched")
 	}
 	token, inflight := m.removeTokens[p.Path]
 	if !inflight || token == 0 {
-		t.Fatalf("sin token de intento en vuelo: %v", m.removeTokens)
+		t.Fatalf("no in-flight attempt token: %v", m.removeTokens)
 	}
 
-	m, _ = press(m, "esc") // cancelación definitiva
+	m, _ = press(m, "esc")
 	if len(m.removeTokens) != 0 {
-		t.Fatalf("esc no invalidó el intento en vuelo: %v", m.removeTokens)
+		t.Fatalf("esc did not invalidate the in-flight attempt: %v", m.removeTokens)
 	}
 
-	// Llega tarde el fallo sucio del intento cancelado.
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		err: "fatal: sucio", gen: token,
+		err: "fatal: dirty", gen: token,
 	})
 	m = updated.(Model)
 
 	if m.armed != nil {
-		t.Errorf("un fallo tardío tras esc no debe re-armar: %+v", m.armed)
+		t.Errorf("a late failure after esc must not re-arm: %+v", m.armed)
 	}
 	if m.running[p.Path] != "" {
-		t.Error("el running del padre debe liberarse al llegar el resultado")
+		t.Error("the parent's running must be released when the result arrives")
 	}
 }
 
-// El resultado tardío de un borrado sobre A no pisa el armado sobre B.
 func TestRemoveWorktreeLateResultDoesNotClobberOtherArmed(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m, _ = press(m, "D") // armar A
-	m, _ = press(m, "D") // lanzar A
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
 	token := m.removeTokens[p.Path]
 
-	// El usuario se mueve a B y lo arma mientras A está en vuelo.
 	m, _ = press(m, "down")
 	m, _ = press(m, "D")
 	if m.armed == nil || m.armed.name != "wt-b" {
-		t.Fatalf("no se armó B: %+v", m.armed)
+		t.Fatalf("B did not arm: %+v", m.armed)
 	}
 
-	// Llega tarde el fallo sucio de A.
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		err: "fatal: sucio A", gen: token,
+		err: "fatal: dirty A", gen: token,
 	})
 	m = updated.(Model)
 
 	if m.armed == nil || m.armed.name != "wt-b" || m.armed.force {
-		t.Errorf("el resultado tardío de A pisó el armado de B: %+v", m.armed)
+		t.Errorf("A's late result overwrote B's arming: %+v", m.armed)
 	}
 }
 
-// D sobre un header secundario es no-op con toast info.
 func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 	p := discovery.Project{
 		Path: "/s", Name: "s", HasRepo: true,
@@ -613,14 +559,14 @@ func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/s": snapClean()})
 	m.cursor = 1
 	if e, _ := m.selectedEntry(); e.kind != kindSecondary {
-		t.Fatalf("precondición: entrada = %+v, want header secundario", e)
+		t.Fatalf("precondition: entry = %+v, want a header secundario", e)
 	}
 
 	m, cmd := press(m, "D")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
-		t.Error("D sobre un header secundario no debe armar")
+		t.Error("D on a secondary header must not arm")
 	}
 	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
 		last.text != "select a worktree" {
@@ -628,23 +574,20 @@ func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 	}
 }
 
-// `!` (modo comando) desarma la confirmación y abre el input.
 func TestRemoveWorktreeCommandKeyDisarms(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D") // armar
+	m, _ = press(m, "D")
 
 	m, _ = press(m, "!")
 
 	if m.armed != nil {
-		t.Error("! no desarmó la confirmación")
+		t.Error("! did not disarm the confirmation")
 	}
 	if !m.cmdOpen {
-		t.Error("! no abrió el modo comando")
+		t.Error("! did not open the command mode")
 	}
 }
 
-// End-to-end con un repo real: worktree sucio → fallo sin force → forzado →
-// éxito, con la rama intacta.
 func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
@@ -659,39 +602,37 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
 	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
-	m, _ = press(m, "D") // armar
-	m, _ = press(m, "D") // intento sin force → falla
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
 
 	waitEvent(t, &m, func(ev event) bool {
 		mm, ok := ev.(worktreeRemovedMsg)
 		return ok && mm.err != "" && !mm.force
 	})
 	if m.armed == nil || !m.armed.force {
-		t.Fatalf("no se armó el forzado tras el fallo sucio: %+v", m.armed)
+		t.Fatalf("the force was not armed after the dirty failure: %+v", m.armed)
 	}
 
-	m, _ = press(m, "D") // forzar → éxito
+	m, _ = press(m, "D")
 	waitEvent(t, &m, func(ev event) bool {
 		sm, ok := ev.(statusMsg)
 		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
 	})
 
 	if m.armed != nil {
-		t.Errorf("el éxito no desarmó: %+v", m.armed)
+		t.Errorf("the success did not disarm: %+v", m.armed)
 	}
 	if m.running[dir] != "" {
-		t.Errorf("el padre sigue ocupado: %v", m.running[dir])
+		t.Errorf("the parent is still busy: %v", m.running[dir])
 	}
 	if len(m.states[dir].Worktrees) != 0 {
-		t.Errorf("el snapshot conserva el worktree: %+v", m.states[dir].Worktrees)
+		t.Errorf("the snapshot still holds the worktree: %+v", m.states[dir].Worktrees)
 	}
 	if branches := gitOutT(t, dir, "branch", "--list", "wt-dirty"); !strings.Contains(branches, "wt-dirty") {
-		t.Errorf("la rama wt-dirty desapareció: %q", branches)
+		t.Errorf("the wt-dirty branch disappeared: %q", branches)
 	}
 }
 
-// twoParentModel construye un modelo con dos repos (a, b) y un worktree cada
-// uno, ambos expandidos. Las entradas navegables son [a, a-wt, b, b-wt].
 func twoParentModel(t *testing.T) Model {
 	t.Helper()
 	base := time.Now().Add(-2 * time.Hour).Unix()
@@ -710,34 +651,29 @@ func twoParentModel(t *testing.T) Model {
 	return m
 }
 
-// Con dos borrados solapados en padres distintos, el resultado tardío del
-// primero libera su running (sin fuga) y se resuelve, sin tocar el intento del
-// segundo. El token es por padre, no global.
-func TestRemoveWorktreeConcurrentParentsNoLeak(t *testing.T) {
+// The token is per parent, not global.
+func TestRemoveWorktreeConcurrentParentsNotLeak(t *testing.T) {
 	m := twoParentModel(t)
 
-	// Entradas: [a, a-wt, b, b-wt]; se lanza el borrado de A.
 	m.cursor = 1
 	m, _ = press(m, "D")
 	m, _ = press(m, "D")
 	tokA := m.removeTokens["/tmp/pa"]
 	if tokA == 0 {
-		t.Fatalf("A no quedó en vuelo: %v", m.removeTokens)
+		t.Fatalf("A did not stay in flight: %v", m.removeTokens)
 	}
 
-	// Se lanza el borrado de B (padre distinto, en paralelo).
 	m.cursor = 3
 	m, _ = press(m, "D")
 	m, _ = press(m, "D")
 	tokB := m.removeTokens["/tmp/pb"]
 	if tokB == 0 || tokB == tokA {
-		t.Fatalf("tokens no independientes: A=%d B=%d", tokA, tokB)
+		t.Fatalf("tokens not independent: A=%d B=%d", tokA, tokB)
 	}
 
-	// Llega tarde el fallo sucio de A.
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: "/tmp/pa", wtPath: "/tmp/pa-wt", name: "pa-wt",
-		err: "fatal: sucio A", gen: tokA,
+		err: "fatal: dirty A", gen: tokA,
 	})
 	m = updated.(Model)
 
@@ -745,35 +681,31 @@ func TestRemoveWorktreeConcurrentParentsNoLeak(t *testing.T) {
 		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
 	}
 	if m.running["/tmp/pb"] != "worktree_remove" {
-		t.Errorf("el intento de B se alteró: %q", m.running["/tmp/pb"])
+		t.Errorf("B's attempt was altered: %q", m.running["/tmp/pb"])
 	}
 	if _, ok := m.removeTokens["/tmp/pa"]; ok {
-		t.Errorf("token de A no consumido: %v", m.removeTokens)
+		t.Errorf("A's token not consumed: %v", m.removeTokens)
 	}
 	if m.removeTokens["/tmp/pb"] != tokB {
 		t.Errorf("token de B alterado: %v", m.removeTokens)
 	}
-	// El desenlace de A se maneja: fallo sucio → armado de forzado sobre A.
 	if m.armed == nil || !m.armed.force || m.armed.name != "pa-wt" {
-		t.Errorf("desenlace de A no aplicado: %+v", m.armed)
+		t.Errorf("A's outcome not applied: %+v", m.armed)
 	}
 
-	// El resultado de B sigue resolviéndose con normalidad.
 	updated, _ = m.Update(worktreeRemovedMsg{
 		parent: "/tmp/pb", wtPath: "/tmp/pb-wt", name: "pb-wt", gen: tokB,
 	})
 	m = updated.(Model)
 	if m.running["/tmp/pb"] != "" {
-		t.Errorf("fuga de running en B tras el éxito: %q", m.running["/tmp/pb"])
+		t.Errorf("running leak on B after the success: %q", m.running["/tmp/pb"])
 	}
 	if _, ok := m.removeTokens["/tmp/pb"]; ok {
-		t.Errorf("token de B no consumido: %v", m.removeTokens)
+		t.Errorf("B's token not consumed: %v", m.removeTokens)
 	}
 }
 
-// esc cancela A y después se lanza B en otro padre: el resultado tardío de A
-// no debe fugar el running de A ni tocar el intento de B.
-func TestRemoveWorktreeEscThenOtherParentNoLeak(t *testing.T) {
+func TestRemoveWorktreeEscThenOtherParentNotLeak(t *testing.T) {
 	m := twoParentModel(t)
 
 	m.cursor = 1
@@ -781,12 +713,12 @@ func TestRemoveWorktreeEscThenOtherParentNoLeak(t *testing.T) {
 	m, _ = press(m, "D")
 	tokA := m.removeTokens["/tmp/pa"]
 	if tokA == 0 {
-		t.Fatalf("A no quedó en vuelo: %v", m.removeTokens)
+		t.Fatalf("A did not stay in flight: %v", m.removeTokens)
 	}
 
-	m, _ = press(m, "esc") // cancelación definitiva de A
+	m, _ = press(m, "esc")
 	if len(m.removeTokens) != 0 {
-		t.Fatalf("esc no limpió los tokens: %v", m.removeTokens)
+		t.Fatalf("esc did not clear the tokens: %v", m.removeTokens)
 	}
 
 	m.cursor = 3
@@ -794,13 +726,12 @@ func TestRemoveWorktreeEscThenOtherParentNoLeak(t *testing.T) {
 	m, _ = press(m, "D")
 	tokB := m.removeTokens["/tmp/pb"]
 	if tokB == 0 {
-		t.Fatalf("B no quedó en vuelo: %v", m.removeTokens)
+		t.Fatalf("B did not stay in flight: %v", m.removeTokens)
 	}
 
-	// Llega tarde el resultado de A (cancelado): libera su running y no toca B.
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: "/tmp/pa", wtPath: "/tmp/pa-wt", name: "pa-wt",
-		err: "fatal: sucio A", gen: tokA,
+		err: "fatal: dirty A", gen: tokA,
 	})
 	m = updated.(Model)
 
@@ -808,18 +739,16 @@ func TestRemoveWorktreeEscThenOtherParentNoLeak(t *testing.T) {
 		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
 	}
 	if m.running["/tmp/pb"] != "worktree_remove" {
-		t.Errorf("el intento de B se alteró: %q", m.running["/tmp/pb"])
+		t.Errorf("B's attempt was altered: %q", m.running["/tmp/pb"])
 	}
 	if m.removeTokens["/tmp/pb"] != tokB {
 		t.Errorf("token de B alterado: %v", m.removeTokens)
 	}
 	if m.armed != nil {
-		t.Errorf("un resultado cancelado no debe armar: %+v", m.armed)
+		t.Errorf("a cancelled result must not arm: %+v", m.armed)
 	}
 }
 
-// matches normaliza los paths: barras finales, `./` y duplicadas no impiden
-// reconocer el mismo worktree.
 func TestRemoveWorktreeArmedMatchesNormalization(t *testing.T) {
 	a := armedRemoval{parent: "/tmp/p", wtPath: "/tmp/p/wt"}
 	cases := []struct {
@@ -838,30 +767,24 @@ func TestRemoveWorktreeArmedMatchesNormalization(t *testing.T) {
 			t.Errorf("matches(%q, %q) = %v, want %v", tc.parent, tc.wtPath, got, tc.want)
 		}
 	}
-	// Un worktree con el mismo basename bajo otro padre no matchea.
 	b := armedRemoval{parent: "/tmp/p2", wtPath: "/tmp/p2/wt"}
 	if b.matches("/tmp/p", "/tmp/p/wt") {
-		t.Error("matches cruzó padres distintos")
+		t.Error("matches crossed different parents")
 	}
 }
 
-// Un resultado con token sustituido (t1 obsoleto tras relanzar t2) se ignora
-// por completo: no libera el running del intento nuevo, no toca el banner y no
-// emite toast. Es la colisión de un statusMsg de fondo que libera
-// running[parent] con un borrado en vuelo y permite relanzar.
+// Ignoring it completely is what avoids the collision of a background statusMsg releasing running[parent] with a removal in flight and letting the user relaunch.
 func TestRemoveWorktreeSubstitutedTokenIgnored(t *testing.T) {
 	cases := []struct {
 		name string
 		err  string
 	}{
-		{"resultado de fallo obsoleto", "fatal: sucio t1"},
-		{"resultado de éxito obsoleto", ""},
+		{"stale failure result", "fatal: dirty t1"},
+		{"stale success result", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-			// Intento nuevo (t2) en vuelo; el banner está armado sobre otro
-			// worktree y no debe tocarse.
 			m.removeTokens[p.Path] = 2
 			m.running[p.Path] = "worktree_remove"
 			m.armed = &armedRemoval{wtPath: "/tmp/wt-b", parent: p.Path, name: "wt-b"}
@@ -869,34 +792,31 @@ func TestRemoveWorktreeSubstitutedTokenIgnored(t *testing.T) {
 			before := len(m.toasts.toasts)
 			updated, _ := m.Update(worktreeRemovedMsg{
 				parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-				output: "salida de t1", err: tc.err, gen: 1, // t1 < t2: obsoleto
+				output: "t1 output", err: tc.err, gen: 1,
 			})
 			m = updated.(Model)
 
 			if m.running[p.Path] != "worktree_remove" {
-				t.Errorf("se liberó el running del intento nuevo: %q", m.running[p.Path])
+				t.Errorf("the new attempt's running was released: %q", m.running[p.Path])
 			}
 			if m.removeTokens[p.Path] != 2 {
-				t.Errorf("se alteró el token vigente: %v", m.removeTokens)
+				t.Errorf("the live token was altered: %v", m.removeTokens)
 			}
 			if m.armed == nil || m.armed.name != "wt-b" {
-				t.Errorf("se tocó el banner: %+v", m.armed)
+				t.Errorf("the banner was touched: %+v", m.armed)
 			}
 			if len(m.toasts.toasts) != before {
-				t.Errorf("se emitió un toast para un resultado obsoleto: %+v", m.toasts.toasts)
+				t.Errorf("a toast was emitted for a stale result: %+v", m.toasts.toasts)
 			}
 			if _, ok := m.lastAction[p.Path]; ok {
-				t.Errorf("se guardó lastAction de un resultado obsoleto: %+v", m.lastAction[p.Path])
+				t.Errorf("lastAction was saved from a stale result: %+v", m.lastAction[p.Path])
 			}
 		})
 	}
 }
 
-// El segundo nivel del borrado con el mapa de tokens sin inicializar. El mapa
-// se crea aquí, no antes: un `nil` al indexar asignaría a una nil map y
-// reventaría, y el camino se llega nada más arrancar (el store puede no existir
-// sin HOME).
-func TestRemoveTokensSeInicializaEnElSegundoNivel(t *testing.T) {
+// The map is created here and not before: indexing a `nil` map would assign to it and blow up, and the path is reached as soon as the app starts (the store may not exist without HOME).
+func TestRemoveTokensIsInitializesInTheSecondLevel(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "repo")
 	wt := filepath.Join(filepath.Dir(parent), "wt")
 	p, st := repoWithWorktrees("repo", parent, gitstatus.Worktree{Path: wt, Branch: "feature"})
@@ -905,16 +825,16 @@ func TestRemoveTokensSeInicializaEnElSegundoNivel(t *testing.T) {
 	m, _ = press(m, "down")
 	e, ok := m.selectedEntry()
 	if !ok || e.kind != kindWorktree {
-		t.Fatalf("el cursor no quedó sobre una sub-fila: %+v", e)
+		t.Fatalf("the cursor did not land on a subrow: %+v", e)
 	}
 	m = armedOver(t, m, e, false)
 	m.removeTokens = nil
 
 	m, _ = press(m, "D")
 	if m.removeTokens == nil {
-		t.Fatal("removeTokens sigue nil tras confirmar el borrado")
+		t.Fatal("removeTokens is still nil after confirming the deletion")
 	}
 	if m.removeTokens[parent] == 0 {
-		t.Errorf("no se registró el intento de borrado: removeTokens = %v", m.removeTokens)
+		t.Errorf("the deletion attempt was not recorded: removeTokens = %v", m.removeTokens)
 	}
 }

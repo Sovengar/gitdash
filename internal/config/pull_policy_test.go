@@ -1,6 +1,3 @@
-// Tests del contrato de config para la familia de pull: la política por
-// defecto NO lleva flags (vive en el gitconfig) y las variantes del selector
-// sí los llevan.
 package config
 
 import (
@@ -8,24 +5,19 @@ import (
 	"testing"
 )
 
-// El default de pull va sin flags a propósito. Con `--ff-only` hardcodeado, el
-// `pull.rebase` del usuario quedaba pisado: los flags en la línea de comandos
-// ganan sobre la config, así que la tecla hacía ff-only siempre.
-func TestDefaultPullSinFlags(t *testing.T) {
+func TestDefaultPullWithoutFlags(t *testing.T) {
 	got := DefaultCommands()["pull"]
 	if got != "pull" {
-		t.Errorf("commands.pull = %q, want %q (la política la decide el gitconfig)", got, "pull")
+		t.Errorf("commands.pull = %q, want %q (the policy is the gitconfig's decision)", got, "pull")
 	}
 	for _, forbidden := range []string{"--ff-only", "--rebase", "--no-rebase", "--autostash"} {
 		if strings.Contains(got, forbidden) {
-			t.Errorf("commands.pull = %q, no debe llevar %s", got, forbidden)
+			t.Errorf("commands.pull = %q, it must not carry %s", got, forbidden)
 		}
 	}
 }
 
-// Cada variante del selector pisa la política con un flag explícito y
-// distinto: sin eso, "rebase" y "default" serían la misma tecla.
-func TestVariantesPullConFlagsPropios(t *testing.T) {
+func TestVariantsPullWithFlagsOwn(t *testing.T) {
 	want := map[string][]string{
 		"pull":        {},
 		"pull_rebase": {"--rebase", "--autostash"},
@@ -55,49 +47,41 @@ func TestVariantesPullConFlagsPropios(t *testing.T) {
 	}
 }
 
-// `sync` y `update` desaparecieron: sync era un pull --rebase sin motivo
-// propio, y update era un exec de binario sin argumentos que los scripts
-// git-update/git-sync necesitan.
-func TestAccionesRetiradas(t *testing.T) {
+func TestActionsRemoved(t *testing.T) {
 	kb := DefaultKeybindings()
 	for _, gone := range []string{"sync", "update"} {
 		if _, ok := kb[gone]; ok {
-			t.Errorf("keybindings[%s] sigue presente", gone)
+			t.Errorf("keybindings[%s] still present", gone)
 		}
 	}
 	if _, ok := DefaultCommands()["sync"]; ok {
-		t.Error("commands.sync sigue presente")
+		t.Error("commands.sync still present")
 	}
 }
 
-// La tecla de pull se mantiene: lo que cambia es que arma el selector.
-func TestPullTeclaPreservada(t *testing.T) {
+func TestPullKeyPreserved(t *testing.T) {
 	if got := DefaultKeybindings()["pull"]; got != "p" {
 		t.Errorf("keybindings.pull = %q, want %q", got, "p")
 	}
 }
 
-// El hint bar tiene que insinuar que la tecla abre un selector; si no, `p` es
-// una tecla muerta desde la Discoverability.
-func TestHintBarAnunciaElSelector(t *testing.T) {
+func TestHintBarAnnouncesTheSelector(t *testing.T) {
 	lines := strings.Join(Defaults().HintBarLines(), "\n")
 	if !strings.Contains(lines, "p pull") {
-		t.Errorf("el hint no menciona la tecla de pull:\n%s", lines)
+		t.Errorf("the hint does not mention the pull key:\n%s", lines)
 	}
 	if !strings.Contains(lines, "▸") {
-		t.Errorf("el hint no insinúa el selector de variante:\n%s", lines)
+		t.Errorf("the hint does not hint at the variant selector:\n%s", lines)
 	}
 }
 
-// CmdArgs resuelve el override del usuario por encima del default, y una
-// variante sin default explícito cae en lo que haya en config.
-func TestCmdArgsResuelveVariante(t *testing.T) {
+func TestCmdArgsResolvesVariant(t *testing.T) {
 	cfg := Defaults()
 	if got := cfg.CmdArgs("pull_ff"); strings.Join(got, " ") != "pull --ff-only" {
 		t.Errorf("CmdArgs(pull_ff) = %v", got)
 	}
 	cfg.Commands["pull_rebase"] = "pull --rebase"
 	if got := cfg.CmdArgs("pull_rebase"); strings.Join(got, " ") != "pull --rebase" {
-		t.Errorf("CmdArgs con override = %v, want el override", got)
+		t.Errorf("CmdArgs with an override = %v, want the override", got)
 	}
 }

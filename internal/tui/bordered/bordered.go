@@ -1,6 +1,4 @@
-// Package bordered dibuja cajas con borde redondeado y título embebido en la
-// línea superior. El contenido se recorta (ANSI-aware) al ancho interior en
-// vez de re-envolverse: el wrap rompería el alto calculado por el layout.
+// Package bordered draws rounded boxes with a title embedded in the top line. The content is clipped (ANSI-aware) to the inner width instead of being re-wrapped: wrapping would break the height the layout computed.
 package bordered
 
 import (
@@ -11,28 +9,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Alineación del título dentro de la línea de borde.
 const (
 	AlignLeft = iota
 	AlignCenter
 	AlignRight
 )
 
-// Rounded es el borde redondeado (╭ ╮ ╰ ╯) por defecto.
 func Rounded() lipgloss.Border { return lipgloss.RoundedBorder() }
 
-// RenderWithTitle dibuja un borde con título arriba alineado a la izquierda y
-// sin leyenda inferior.
 func RenderWithTitle(border lipgloss.Border, borderFg color.Color, title, content string, width int) string {
 	return RenderWithTitles(border, borderFg, title, AlignLeft, "", AlignLeft, content, width)
 }
 
-// RenderWithTitles dibuja un borde con título en la línea superior y una
-// leyenda opcional en la inferior, cada uno con su alineación. Un título vacío
-// deja la línea completa de relleno. El ancho exterior es width (mínimo 2) y el
-// interior width-2; cada línea de contenido se recorta al interior.
 func RenderWithTitles(border lipgloss.Border, borderFg color.Color, topTitle string, topAlign int, bottomTitle string, bottomAlign int, content string, width int) string {
-	width = max(width, 2) // el interior (width-2) nunca puede ser negativo
+	width = max(width, 2)
 
 	innerWidth := width - 2
 
@@ -53,15 +43,12 @@ func RenderWithTitles(border lipgloss.Border, borderFg color.Color, topTitle str
 	return b.String()
 }
 
-// borderLine compone una línea de borde con el título embebido y alineado.
 func borderLine(style *ansi.Style, left, fill, right string, innerWidth, align int, title string) string {
 	if fill == "" {
 		fill = " "
 	}
 	titleWidth := ansi.StringWidth(title)
-	// Recortar a un ancho igual o mayor que el actual es identidad, así que el
-	// clamp sustituye a la guarda: el título largo se recorta, el corto no se
-	// toca (ni se le añade cola).
+	// Clipping to a width equal to or larger than the current one is identity, so the clamp replaces the guard: a long title is cut, a short one is left alone (and gets no tail appended).
 	titleWidth = min(titleWidth, innerWidth)
 	title = ansi.Truncate(title, titleWidth, "")
 
@@ -84,8 +71,6 @@ func borderLine(style *ansi.Style, left, fill, right string, innerWidth, align i
 		styled(style, right)
 }
 
-// contentLines recorta cada línea de contenido al ancho interior y le añade
-// los bordes laterales. Contenido vacío produce una línea en blanco interior.
 func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerWidth int) []string {
 	if leftChar == "" {
 		leftChar = " "
@@ -94,13 +79,10 @@ func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerW
 		rightChar = " "
 	}
 
-	raw := strings.Split(content, "\n") // siempre >= 1 elemento
+	raw := strings.Split(content, "\n")
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
-		// Recortar a un ancho igual o mayor que el actual es identidad, y
-		// `cut` nunca supera el ancho de la línea tras el recorte, así que el
-		// relleno es siempre >= 0. Un solo par de operaciones en vez de dos
-		// guardas que solo difieren en el borde exacto.
+		// Clipping to a width equal to or larger than the current one is identity and `cut` never exceeds the line width after clipping, so the padding is always >= 0: one pair of operations instead of two guards differing only on the exact edge.
 		cut := min(ansi.StringWidth(line), innerWidth)
 		line = ansi.Truncate(line, cut, "") + strings.Repeat(" ", innerWidth-cut)
 		lines = append(lines, styled(style, leftChar)+line+styled(style, rightChar))
@@ -108,7 +90,6 @@ func contentLines(style *ansi.Style, leftChar, rightChar, content string, innerW
 	return lines
 }
 
-// styled envuelve el texto en el estilo ANSI del borde (si lo hay).
 func styled(style *ansi.Style, s string) string {
 	if style == nil {
 		return s
