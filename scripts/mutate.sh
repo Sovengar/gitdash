@@ -611,7 +611,7 @@ fi
 echo "mutate: supervising (stall $STALL, ceiling $CEILING, $TOTAL expected progress lines)" >&2
 "$WATCHDOG" "$STALL" "$CEILING" "$TOTAL" "$PROGRESS_RE" -- \
 	$ENGINE "${SCOPE_ARGS[@]}" "${ENGINE_FLAGS[@]}" \
-	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" --silent \
+	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" \
 	${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} |
 	tee "$RUN_LOG"
 
