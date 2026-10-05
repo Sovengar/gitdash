@@ -76,6 +76,11 @@ forever and blocks every PR that does not touch the filtered paths.
 
 ### `Mutation (diff)` (`.github/workflows/mutation.yml`) — PR only
 
+The marker below is what `swe how-to-mutate` reads; the rest of this section is its
+human version. The named command is the local loop — the diff gate is CI-only.
+
+Mutation policy: make mutate-all
+
 **The policy, short:** the required check goes **green only if the mutation was
 really measured** and **no new survivor was left untested**. *"Could not measure"*
 is a **red** verdict, never a green one. And since not every green is the same
