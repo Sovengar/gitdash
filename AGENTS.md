@@ -53,10 +53,16 @@ forever and blocks every PR that does not touch the filtered paths.
 
 ### `CI` (`.github/workflows/ci.yml`) — PR and push to `main`
 
-- **`Build`**: `go build ./...` and `go vet ./...`.
-- **`Lint`**: `make lint` → vet + fmt-check (gofmt) + golangci-lint
+- **`Build`**: `go build ./...`. **No `go vet`**, deliberately: `govet` runs inside
+  golangci-lint (below), and `make lint` also used to carry a `vet` prerequisite,
+  so the same check ran **three** times on every push. It runs once now. `go
+  build ./...` does not link either (`go build -x ./...` never invokes `link`), so
+  the job's claim is exactly "the packages compile".
+- **`Lint`**: `make lint` → fmt-check (gofmt) + golangci-lint
   **v2.13.2** (pinned in the `Makefile`; there is no `.golangci.yml`, so it runs
-  the default linter set).
+  the default linter set: errcheck, **govet**, ineffassign, staticcheck, unused).
+  The standalone `make vet` target still exists for a fast local run, it is just
+  no longer part of `lint`.
 - **`Test`**: three steps.
   1. `go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...`
      (the whole suite, no `-short`). The suite is **self-contained**: every git

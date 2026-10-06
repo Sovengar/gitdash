@@ -34,10 +34,15 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # `go vet ./...` is deliberately NOT here. golangci-lint's standard set includes
+      # `govet`, which runs the same analyzer passes, and `make lint` in the job below is
+      # what invokes it -- plus `make lint` used to carry a `vet` prerequisite of its own,
+      # so vet ran THREE times on every push. It runs once now, inside golangci-lint.
+      #
+      # `go build ./...` stays as the compile gate; `go build -x ./...` performs no link
+      # step, so the claim is exactly "the packages compile".
       - name: Build
         run: go build ./...
-      - name: Vet
-        run: go vet ./...
 
   Lint:
     name: Lint

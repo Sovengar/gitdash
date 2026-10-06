@@ -39,7 +39,11 @@ fmt-check: ## Checks gofmt formatting without writing (fails if anything is pend
 vet: ## go vet
 	go vet ./...
 
-lint: vet fmt-check ## go vet + gofmt + golangci-lint (version pinned, always via go run)
+# `vet` is deliberately NOT a prerequisite: golangci-lint's `govet` runs the same analyzer
+# passes ("roughly the same as 'go vet' and uses its passes"). Keeping it, plus a
+# `go vet ./...` step in CI, ran the same check THREE times on every push. It now runs ONCE,
+# inside golangci-lint. The standalone `vet` target above stays for a fast local run.
+lint: fmt-check ## gofmt + golangci-lint (version pinned, always via go run)
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
 test: ## Runs the test suite with -race (same class as CI)
