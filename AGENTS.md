@@ -47,14 +47,14 @@ the marker's rename).
 ## CI and `main`'s protection
 
 There are **two workflows** and **three required checks**: `Lint`, `Test`
-and `Mutation (diff)`. (`Build` stopped being a required check when it was
+and `Mutation`. (`Build` stopped being a required check when it was
 folded into `Test`.) Both run without `paths` filters on purpose: a filtered
 workflow is skipped, and a skipped required check stays *pending* forever and
 blocks every PR that does not touch the filtered paths.
 
 ### `CI` (`.github/workflows/ci.yml`) — every PR, and pushes to `main`
 
-This is the gate. `Mutation (diff)` is a **job of this file**, not a second
+This is the gate. `Mutation` is a **job of this file**, not a second
 workflow: it was `mutation.yml`, and the header comments explaining its gate moved
 with it.
 
@@ -104,7 +104,7 @@ measure 82 s against `Lint`'s 112 s, so the wall clock is unchanged.
      name: on the runner `git diff main...HEAD` comes out empty and the gate
      would approve in silence. That is why the checkout uses `fetch-depth: 0`.
 
-### `Mutation (diff)` — a job of `ci.yml`, non-draft PRs only
+### `Mutation` — a job of `ci.yml`, non-draft PRs only
 
 It used to live in `.github/workflows/mutation.yml`; the job, its gate and its
 explanatory comments are now inside `ci.yml`. The `if:` on it is an **event** gate
@@ -132,7 +132,7 @@ single step), and that script is **not** decorative: the workflow only brings
 paths and refs. The workflow carries **no** `paths:`, no `needs:`/`if:` that could
 skip it, no `continue-on-error`, and the job stays at `timeout-minutes: 8` with the
 supervisor's ceiling (5m) well below it. The check's name is exactly
-`Mutation (diff)` because the `protect-main` ruleset demands that text.
+`Mutation` because the `protect-main` ruleset demands that text.
 
 **The budget is a chain, not four numbers**, and each link exists for a reason:
 

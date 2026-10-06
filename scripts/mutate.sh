@@ -2,7 +2,7 @@
 # mutate.sh — measure the mutation of a scope AND decide its verdict, in one process.
 # The rule that shapes the whole design: "no measurement" is a RED verdict, never a green one.
 # The old gate printed "no report.json -> no result, gate passes" and exited 0.
-# Usage and exit codes: --help. The design is in AGENTS.md, section "Mutation (diff)".
+# Usage and exit codes: --help. The design is in AGENTS.md, section "Mutation".
 
 set -uo pipefail
 

@@ -18,7 +18,7 @@
 # Requires: gh (authenticated, repo admin) and jq.
 #
 # Usage:
-#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Lint,Test,"Mutation (diff)"] [--sha <commit>]
+#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Lint,Test,"Mutation"] [--sha <commit>]
 #
 # Environment variables:
 #   RULESET_NAME=protect-<branch>   BRANCH=<repo default>   GH_ACTIONS_APP_ID=15368
@@ -27,12 +27,12 @@ set -euo pipefail
 
 # GitHub Actions is the integration that reports our CI check runs.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
-# Lint, Test and Mutation (diff) ONLY. `Build` is gone: it was merged into Test's steps
+# Lint, Test and Mutation ONLY. `Build` is gone: it was merged into Test's steps
 # (compile gate + suite on one runner = two acquisitions instead of three), so a required
 # `Build` context would now error here with "expected check 'Build' not found". If you
 # resurrect a separate Build job, put the context back here too -- this array and ci.yml
 # are the two halves of the same fact.
-REQUIRED_DEFAULT=(Lint Test "Mutation (diff)")
+REQUIRED_DEFAULT=(Lint Test "Mutation")
 
 # Labels referenced by .github/dependabot.yml, as "name|colour|description".
 LABELS=(
