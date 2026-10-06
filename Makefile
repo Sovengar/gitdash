@@ -1,5 +1,4 @@
-# Dev shortcuts; the binary the user runs lives in $(PREFIX)/bin (default
-# ~/.local/bin, see AGENTS.md), so after any change it must be reinstalled with `make install`.
+# Dev shortcuts. After any change: `make install` (the binary lives in $(PREFIX)/bin).
 
 SHELL := /bin/bash
 
@@ -39,10 +38,7 @@ fmt-check: ## Checks gofmt formatting without writing (fails if anything is pend
 vet: ## go vet
 	go vet ./...
 
-# `vet` is deliberately NOT a prerequisite: golangci-lint's `govet` runs the same analyzer
-# passes ("roughly the same as 'go vet' and uses its passes"). Keeping it, plus a
-# `go vet ./...` step in CI, ran the same check THREE times on every push. It now runs ONCE,
-# inside golangci-lint. The standalone `vet` target above stays for a fast local run.
+# lint: fmt-check + golangci-lint; govet runs inside it, the `vet` target above is manual.
 lint: fmt-check ## gofmt + golangci-lint (version pinned, always via go run)
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
@@ -51,14 +47,11 @@ test: ## Runs the test suite with -race (same class as CI)
 
 test-race: test ## Alias of test: the suite already runs with -race
 
-# Coverage is measured on the deduplicated `go test -coverprofile` output (one
-# block per test binary) plus the profile of the subprocess running func main(),
-# which that test cannot collect.
+# Coverage: the deduplicated `go test -coverprofile` output plus main()'s subprocess profile.
 COVER_PROFILE ?= coverage.out
 COVER_MAIN ?= .covmain/main.txt
 
-# .covmain is deleted, not reused: it holds the instrumented binary's counters and a previous build's refer to ranges today's code no longer has, so merging them drags the total down (measured: 80.24% with 7 stale files, 99.74% clean).
-# The `rm` sits in the recipe and this comment OUTSIDE: inside a recipe it is passed to the shell, which runs it as another command and breaks the target.
+# .covmain is deleted, not reused: a previous build's counters point at ranges today's code no longer has.
 coverage: ## Deduplicated coverage profile + the one of main()'s subprocess
 	@go test -count=1 -coverpkg ./... -coverprofile=$(COVER_PROFILE) ./... > /dev/null
 	@rm -rf .covmain
@@ -101,18 +94,10 @@ smoke: build ## Smoke tests the TUI in tmux with an isolated config and the fixt
 tidy: ## go mod tidy
 	go mod tidy
 
-# Mutation testing (gremlins). Everything there is to know lives in
-# scripts/mutate.sh: the warm-up, the denominator, the coefficient, the forbidden
-# flags, the supervisor call and the verdict. This target only exists for the
-# local loop; the required check calls the script directly, without make.
-#
-# The budget defaults live in the script's own scope table (120s / 4 workers / 2m /
-# 4m on the diff, 180s / 8 / 20m / 60m on the whole module). MUTATE_CAP,
-# MUTATE_WORKERS, MUTATE_STALL, MUTATE_CEILING and MUTATE_JOB_CEILING override
-# them, and under --ci they are mandatory: see the env-wins note in the script.
-#
-# MUTATE_BASE does NOT go away even though it no longer drives mutation:
-# coverage-check and scripts/diff-coverage.sh share it.
+# Mutation testing (gremlins). Everything lives in scripts/mutate.sh: warm-up, denominator,
+# coefficient, forbidden flags, supervisor and verdict. These targets are the local loop;
+# the required check calls the script directly. Budgets default from the script's scope table,
+# MUTATE_* overrides them (mandatory under --ci), and MUTATE_BASE is shared with coverage-check.
 mutate-all: ## Mutation testing locally, with the budget tuned to this machine (~10min)
 	@scripts/mutate.sh --run
 
