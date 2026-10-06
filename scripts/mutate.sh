@@ -124,6 +124,74 @@ _verdict_run_state() { # <run_log> <engine_rc>
 	return 0
 }
 
+# An expired mutant was NEVER measured: not a kill, not a survivor, and report.json leaves it out of
+# the total. So it can never become green by silence -- it is red unless $MUTATE_TIMEOUTS records the
+# hang, with a per-file CEILING. Same contract as the allowlist: the gate compares against something
+# committed, never against nothing, and the green still has to say what it did not measure.
+_verdict_timeouts() { # <run_log> <timed_out>
+	local run_log=$1 total=$2
+	local timeouts=${TIMEOUTS:-.mutation-timeouts}
+	local counts over='' file seen ceiling
+
+	_out "- $total mutants expired on the per-mutant timeout and were never tested."
+	_out "- The report does not count them, so its efficacy covers fewer mutants than the run generated."
+
+	# Missing baseline first: without it every expiry is a coin toss between a regression and a hang
+	# already known, and neither answer could be justified in the summary where a red is read.
+	if [[ ! -f $timeouts ]]; then
+		_out "- **no measurement**: $timeouts is missing, so these expiries have no recorded ceiling to be judged against."
+		_out "- An expiry is either contention (raise the per-mutant cap or lower the worker count, then rerun) or an infinite-loop mutant."
+		_out "- For the second: a test that fails fast kills it, or record \`<file> <ceiling>\` with the reason in $timeouts."
+		return 1
+	fi
+
+	# A CEILING PER FILE, not an exact set of lines: expiry is partly contention, so the same suite
+	# reported 9 hangs one run and 7 the next, and pinning lines would fail at random. The count per
+	# file is the stable half -- a new hang, or one more than recorded, is still a red. Both inputs
+	# are lines the log already had to agree on: the ceilings file, and the per-mutant records whose
+	# total the footer cross-check above has verified.
+	counts=$(awk -v ceilings="$timeouts" '
+		NR == FNR {
+			if ($0 ~ /^[[:space:]]*(#|$)/ || NF < 2) next
+			ceil[$1] = $2
+			next
+		}
+		{
+			if (!match($0, /^[[:space:]]*TIMED OUT [^ ]+ at [^[:space:]]+:[0-9]+:[0-9]+/)) next
+			s = substr($0, RSTART, RLENGTH)
+			sub(/^[[:space:]]*TIMED OUT [^ ]+ at /, "", s)
+			sub(/:[0-9]+:[0-9]+$/, "", s)
+			seen[s]++
+		}
+		END {
+			for (f in seen) printf "%s %d %d\n", f, seen[f], (f in ceil) ? ceil[f] + 0 : 0
+		}
+	' "$timeouts" "$run_log" | sort)
+
+	while read -r file seen ceiling; do
+		[[ -n ${file:-} ]] || continue
+		if ((seen > ceiling)); then over+="$file $seen $ceiling"$'\n'; fi
+	done <<<"$counts"
+
+	if [[ -n $over ]]; then
+		_out "- **no measurement**: more expired than $timeouts records:"
+		while read -r file seen ceiling; do
+			[[ -n ${file:-} ]] || continue
+			_out "  - $file: $seen expired, ceiling $ceiling"
+		done <<<"$over"
+		_out "- Above the recorded ceiling is either contention (raise the per-mutant cap or lower the worker count, then rerun) or a NEW infinite-loop mutant."
+		_out "- Kill it with a test that fails fast, or — only if it is the same known hang — raise the ceiling in $timeouts and say why."
+		return 1
+	fi
+
+	_out "- $total expired within the ceilings in $timeouts (recorded hangs, never tested):"
+	while read -r file seen ceiling; do
+		[[ -n ${file:-} ]] || continue
+		_out "  - $file: $seen/$ceiling"
+	done <<<"$counts"
+	return 0
+}
+
 _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [announced] [budget]
 	local report=$1 run_log=$2 allowlist=$3 expected=$4 engine_rc=$5
 	local announced=${6:-} budget=${7:-}
@@ -157,11 +225,10 @@ _verdict() { # <report> <run_log> <allowlist> <expected_total> <engine_rc> [anno
 		_out "- One of the two counts is truncated or partial, so neither can be trusted and the run cannot be judged."
 		return 1
 	fi
+	# Not green by silence, and not red by reflex either: _verdict_timeouts judges the expiries
+	# against the committed ceilings, and only a hang nobody recorded can be a red.
 	if [[ $timed_out -gt 0 ]]; then
-		_out "- **no measurement**: $timed_out mutants expired on the per-mutant timeout and were never tested."
-		_out "- The report does not count them, so its efficacy covers fewer mutants than the run generated."
-		_out "- Raise the per-mutant cap or lower the worker count: contention, not slowness, is what expires them."
-		return 1
+		_verdict_timeouts "$run_log" "$timed_out" || return 1
 	fi
 
 	if [[ ! -f $report ]]; then
@@ -302,6 +369,8 @@ RUN_LOG=${MUTATE_RUN_LOG:-.mutation-run.log}
 SCOPE_FILE=${MUTATE_SCOPE_FILE:-.mutation-scope.txt}
 BUDGET_FILE=${MUTATE_BUDGET_FILE:-.mutation-budget.txt}
 ALLOWLIST=${MUTATE_ALLOWLIST:-.mutation-allowlist}
+# The recorded hangs, read exactly like the allowlist: an env override, else the committed file.
+TIMEOUTS=${MUTATE_TIMEOUTS:-.mutation-timeouts}
 ENGINE=${MUTATE_ENGINE:-go tool gremlins unleash}
 WATCHDOG=${MUTATE_WATCHDOG:-scripts/watchdog.sh}
 EXCLUDE=${MUTATE_EXCLUDE:-'(\.worktrees/|internal/testutil/)'}
