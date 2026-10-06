@@ -6,6 +6,10 @@ name: CI
 # PR that does not touch the filtered paths. The gates run on every change.
 on:
   pull_request:
+    # ready_for_review is NOT in the default set (opened, synchronize, reopened), so a
+    # draft flipped to ready would report no Mutation (diff) check at all -- and it is
+    # a required status check, so the merge would block forever.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -62,18 +66,10 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      # The compile gate lives HERE rather than in a job of its own. It used to be the
-      # third job, i.e. a third independent runner acquisition, and in a degraded window
-      # that is the difference between a 112 s run and a 10+ minute one: the first job to
-      # get a runner starts immediately and the others wait on capacity nobody controls.
-      # Build+Test measure 82 s against Lint's 112 s, so the wall clock is unchanged while
-      # the run asks for two runners instead of three.
-      #
-      # `go build ./...` writes no binary and never invokes the linker (`go build -x ./...`
-      # shows no link step), so the claim is exactly "the packages compile". vet is not
-      # here: it runs once, as golangci-lint's govet, in the Lint job.
-      - name: Build
-        run: go build ./...
+      # `go build ./...` used to be a step here and is GONE: redundant three ways --
+      # `go test ./...` compiles every package (that is what "[no test files]" means),
+      # golangci-lint type-checks, and `go build -x ./...` never invokes the linker. It
+      # was also on the critical path, costing 14 s in the job whose point is the suite.
       # Same suite as `make test` (`go test -race`, no `-short`), plus an
       # atomic coverage profile. `-count=1` disables the Go test cache so every
       # CI run executes the tests for real instead of replaying cached results.
@@ -132,3 +128,161 @@ jobs:
           echo "diff against the merge-base $merge_base ($base)"
           scripts/diff-coverage.sh coverage.out "$merge_base" -a "$PWD/.covmain/main.txt" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+# -- de mutation.yml, trasladados aqui ------------------------------------
+# Este bloque era la cabecera del workflow `Mutation (diff)`, ahora job de ci.yml.
+# Mutation testing via gremlins over the PR's diff (not the whole module), with
+# a gate that blocks NEW survivors. Required status checks: Lint, Test and
+# Mutation block the merge (Build was folded into Test, so it is no longer a check).
+#
+# The check's rule, in one line: it goes GREEN only if the mutation really was
+# measured and no new survivor is left untested. "Could not measure" is a RED
+# verdict, never a green one.
+#
+# And not every green is the same green: one that measured NOTHING has to say so,
+# or the team reads it as a measurement.
+#
+# The gate lives in scripts/mutate.sh, not here: its red paths are pure functions
+# of files and are tested locally in under a second (scripts/mutate_test.sh).
+# Inline in the YAML they could only be exercised with a synthetic Actions run,
+# which is a hope and not a test. This file keeps the PATHS and the REFS:
+# checkout, fetch-depth, base resolution and the artefact upload.
+#
+# No `needs:` and no `continue-on-error` on this job, and the ONLY `if:` is the
+# draft gate above -- an event condition, never a measurement one. Those two were
+# the mechanisms that manufactured the "nothing was measured" green. With one
+# step that produces and verifies, the run's state travels in-band and
+# "continue-on-error" stops being a path to green.
+
+# -- Mutation ---------------------------------------------------------
+# Moved here from mutation.yml: mutation is a CI verdict, not a separate product.
+# Its own concurrency group went with the file; ci.yml's now covers it.
+  Mutation:
+    # Runs only once the PR is up for review: a draft pays for nothing.
+    # This `if:` is an EVENT gate, not a measurement gate -- it says nothing
+    # about whether the mutation was measured. The fail-vs-skip decision stays
+    # inside scripts/mutate.sh, which is why the rule below still holds.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    name: Mutation (diff)
+    # No `needs:` nor `if:` on purpose: the job must ALWAYS report. A skipped job
+    # in a required check stays pending forever and blocks every PR (the same
+    # class of failure as a paths filter). Calibration is checked in a step here,
+    # and if it is missing this job fails saying how to calibrate it.
+    runs-on: ubuntu-24.04
+    # The invariant is NOT "the supervisor's ceiling fits in the job": it is
+    # "everything that runs BEFORE the supervisor, plus its ceiling, fits in the
+    # job". Measured on the runner: 98s of checkout + setup-go + the suites, and
+    # ~28.5s of warm + dry-run; the worst case came to 366.5s against the 300s of a
+    # 5m timeout, i.e. the platform cancelled instead of the supervisor. 8m leaves
+    # plenty of margin, and the script checks it with TWO assertions because each
+    # one sees the other's blind spot: the declared one (config) and the measured
+    # one (clock).
+    timeout-minutes: 8
+    env:
+      # The scope's base is the merge-base, not the branch name: `git diff A...B`
+      # and the `git diff --merge-base` the engine runs internally describe the
+      # same set over the clean tree this checkout leaves.
+      MUTATE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+      # The budget is explicit and not optional because --ci demands it: if one of
+      # these were forgotten the script aborts naming it instead of falling back to
+      # the local default and loosening the budget with nobody noticing.
+      #
+      # The chain the script asserts is 2*cap < stall < ceiling, and here
+      # ceiling + setup_reserve < job_ceiling. The cap has to be under half the stall
+      # or a slow mutant is cut as a stall instead of being REPORTED as TIMED OUT,
+      # and the verdict's branch for expired mutants becomes unreachable. That is why
+      # the cap is 60s and not the roomier 120s: 120s needed a 4m+ stall, which does
+      # not fit under an 8m job with a 150s reserve.
+      MUTATE_CAP: 60s
+      MUTATE_WORKERS: 4
+      MUTATE_STALL: 3m
+      MUTATE_CEILING: 5m
+      MUTATE_JOB_CEILING: 8m
+      # Everything that can run before the supervisor, with margin over the ~127s
+      # measured: setup-go, the two suites, the base fetch and the warm + dry-run.
+      # This is the DECLARED half of the budget invariant.
+      MUTATE_SETUP_RESERVE: 150s
+    steps:
+      # The job clock starts FIRST, before the checkout, because the measured half
+      # of the budget invariant has to know how much job time is already gone — and
+      # the 98s of checkout + setup-go is most of what the reserve is for. Marked
+      # later it would have measured only the warm + dry-run and reported the
+      # invariant as satisfied while it was not.
+      - name: Mark the job clock
+        run: echo "MUTATE_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the PR base ref exists for `git diff <base>...HEAD`
+          # and for `gremlins --diff <base>`.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          # go.sum and the mutation script are in the cache key: the script owns
+          # the engine wiring, so changing it busts stale module caches.
+          cache-dependency-path: |
+            go.sum
+            scripts/mutate.sh
+
+      # The supervisor and the gate are bash, and nothing in this repo lints bash
+      # (`make lint` is Go only), so these two suites are the only check there is
+      # over that code. mutate_test.sh rides along here: it takes ~1s and it is the
+      # only proof that the gate's red paths still work, which on a runner is the
+      # difference between a gate that measures and one that stopped noticing.
+      - name: Shell suites
+        run: |
+          set -euo pipefail
+          bash scripts/watchdog_test.sh
+          bash scripts/mutate_test.sh
+
+      # Without this step the gate cannot do anything: with no allowlist, any
+      # survivor would look new and the gate would have nothing to compare against.
+      # It fails here instead of skipping the job, because a skipped job in a
+      # required check blocks every PR forever.
+      - name: Calibration
+        run: |
+          set -euo pipefail
+          if [ ! -f .mutation-allowlist ]; then
+            echo "::error title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate-all, then commit .mutation-allowlist"
+            exit 1
+          fi
+          echo "calibrated: $(grep -cvE '^[[:space:]]*(#|$)' .mutation-allowlist) allowlisted mutants"
+
+      # Belt and braces: guarantee the base ref is fetched even on shallow setups.
+      # Twice over, in fact: mutate.sh refuses to measure without it, so an empty
+      # diff from an unresolved base can no longer read as a PR with no changes.
+      - name: Resolve mutation scope
+        run: |
+          set -euo pipefail
+          echo "base=$MUTATE_BASE"
+          git fetch --no-tags --depth=1 origin "+refs/heads/${{ github.base_ref || github.event.repository.default_branch }}:refs/remotes/origin/${{ github.base_ref || github.event.repository.default_branch }}" || \
+            echo "could not fetch base ref; continuing with what is present"
+
+      # One step: measure AND decide. The exit code is the verdict, and it is
+      # passed explicitly rather than through a step output, so no intermediate
+      # state can be mistaken for a result. The reason lines go to stdout and the
+      # script also writes them to $GITHUB_STEP_SUMMARY, which is where the reason
+      # of a red is read.
+      - name: Mutate and gate
+        id: mutate
+        run: |
+          scripts/mutate.sh --diff --ci --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report-${{ github.event.pull_request.number || github.run_id }}
+          # The path comes from the step that produced it, so the uploader and the
+          # script cannot disagree about where the report is. The run log goes
+          # with it: a red that has no log attached is the red nobody can act on.
+          path: |
+            ${{ steps.mutate.outputs.report }}
+            ${{ steps.mutate.outputs.run_log }}
+          if-no-files-found: ignore
+          retention-days: 14

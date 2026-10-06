@@ -48,11 +48,28 @@ the marker's rename).
 
 There are **two workflows** and **three required checks**: `Lint`, `Test`
 and `Mutation (diff)`. (`Build` stopped being a required check when it was
-folded into `Test`.) All of them run without `paths` filters on purpose: a
-filtered workflow is skipped, and a skipped required check stays *pending*
-forever and blocks every PR that does not touch the filtered paths.
+folded into `Test`.) Both run without `paths` filters on purpose: a filtered
+workflow is skipped, and a skipped required check stays *pending* forever and
+blocks every PR that does not touch the filtered paths.
 
-### `CI` (`.github/workflows/ci.yml`) — PR and push to `main`
+### `CI` (`.github/workflows/ci.yml`) — every PR, and pushes to `main`
+
+This is the gate. `Mutation (diff)` is a **job of this file**, not a second
+workflow: it was `mutation.yml`, and the header comments explaining its gate moved
+with it.
+
+### `CI fast` (`.github/workflows/ci-fast.yml`) — every commit on a branch
+
+Push to any branch other than `main`: build + unit tests, no lint, no mutation.
+Not a required check — a red `CI fast` never blocks a merge and a green one never
+authorises one.
+
+The two-workflow split is deliberate even though this suite is entirely unit today
+(no testcontainers, every fixture under `t.TempDir()`, ~46 s end to end): putting it
+in place before integration tests arrive is free, and retrofitting "which of these
+are the fast ones" after they exist is the part that never happens. When that day
+comes, the gate for them belongs in `ci-fast.yml`'s test step and the full suite
+stays in `ci.yml` — dbx already works that way, behind `DBX_SKIP_DOCKER=1`.
 
 Two jobs, not three. The split is `Lint` ∥ `Build`+`Test`, chosen so the run asks for
 **two** runners instead of three: each job is an independent runner acquisition, and in a
@@ -87,7 +104,15 @@ measure 82 s against `Lint`'s 112 s, so the wall clock is unchanged.
      name: on the runner `git diff main...HEAD` comes out empty and the gate
      would approve in silence. That is why the checkout uses `fetch-depth: 0`.
 
-### `Mutation (diff)` (`.github/workflows/mutation.yml`) — PR only
+### `Mutation (diff)` — a job of `ci.yml`, non-draft PRs only
+
+It used to live in `.github/workflows/mutation.yml`; the job, its gate and its
+explanatory comments are now inside `ci.yml`. The `if:` on it is an **event** gate
+(a draft pays for nothing) and never a measurement one: the fail-vs-skip decision is
+still `scripts/mutate.sh`, which is why the rule below still holds. `ready_for_review`
+is in the workflow's `pull_request` types because it is not in the default set —
+without it, flipping a draft to ready would report no check at all, and being
+required that would block the merge.
 
 The marker below is what `swe how-to-mutate` reads; the rest of this section is its
 human version. The named command is the local loop — the diff gate is CI-only.

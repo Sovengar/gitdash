@@ -19,7 +19,8 @@
 # It lives in the repo because the mutation gate used to invoke the chezmoi
 # path, which does not exist on a GitHub runner: the step died instantly,
 # continue-on-error swallowed it, and the gate then passed on "no report.json".
-# See .github/workflows/mutation.yml.
+# See the `Mutation (diff)` job in .github/workflows/ci.yml (it used to be
+# .github/workflows/mutation.yml, which no longer exists).
 #
 # Two contract notes, both load-bearing:
 #
