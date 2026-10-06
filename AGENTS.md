@@ -46,24 +46,31 @@ the marker's rename).
 
 ## CI and `main`'s protection
 
-There are **two workflows** and **four required checks**: `Build`, `Lint`, `Test`
-and `Mutation (diff)`. All of them run without `paths` filters on purpose: a
+There are **two workflows** and **three required checks**: `Lint`, `Test`
+and `Mutation (diff)`. (`Build` stopped being a required check when it was
+folded into `Test`.) All of them run without `paths` filters on purpose: a
 filtered workflow is skipped, and a skipped required check stays *pending*
 forever and blocks every PR that does not touch the filtered paths.
 
 ### `CI` (`.github/workflows/ci.yml`) — PR and push to `main`
 
-- **`Build`**: `go build ./...`. **No `go vet`**, deliberately: `govet` runs inside
-  golangci-lint (below), and `make lint` also used to carry a `vet` prerequisite,
-  so the same check ran **three** times on every push. It runs once now. `go
-  build ./...` does not link either (`go build -x ./...` never invokes `link`), so
-  the job's claim is exactly "the packages compile".
+Two jobs, not three. The split is `Lint` ∥ `Build`+`Test`, chosen so the run asks for
+**two** runners instead of three: each job is an independent runner acquisition, and in a
+degraded window that is what makes a 112 s run take 10+ minutes (the first job to get a
+runner starts immediately, the others wait on capacity nobody controls). `Build`+`Test`
+measure 82 s against `Lint`'s 112 s, so the wall clock is unchanged.
+
 - **`Lint`**: `make lint` → fmt-check (gofmt) + golangci-lint
   **v2.13.2** (pinned in the `Makefile`; there is no `.golangci.yml`, so it runs
   the default linter set: errcheck, **govet**, ineffassign, staticcheck, unused).
   The standalone `make vet` target still exists for a fast local run, it is just
-  no longer part of `lint`.
-- **`Test`**: three steps.
+  no longer part of `lint`. This is the LONGEST job (112 s) and therefore the one
+  that sets the wall clock.
+- **`Test`**: four steps.
+  0. `go build ./...` — the compile gate, kept from the old `Build` job. It writes
+     no binary and never links (`go build -x ./...` never invokes `link`), so its
+     claim is exactly "the packages compile". `go vet` is **not** here: it runs
+     once, as golangci-lint's `govet`, in `Lint`.
   1. `go test -race -count=1 -coverpkg ./... -coverprofile=coverage.out ./...`
      (the whole suite, no `-short`). The suite is **self-contained**: every git
      fixture is created under `t.TempDir()` with `internal/testutil`, so CI does

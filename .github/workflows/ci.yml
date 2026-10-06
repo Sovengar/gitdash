@@ -21,29 +21,6 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  Build:
-    name: Build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-      # `go vet ./...` is deliberately NOT here. golangci-lint's standard set includes
-      # `govet`, which runs the same analyzer passes, and `make lint` in the job below is
-      # what invokes it -- plus `make lint` used to carry a `vet` prerequisite of its own,
-      # so vet ran THREE times on every push. It runs once now, inside golangci-lint.
-      #
-      # `go build ./...` stays as the compile gate; `go build -x ./...` performs no link
-      # step, so the claim is exactly "the packages compile".
-      - name: Build
-        run: go build ./...
-
   Lint:
     name: Lint
     runs-on: ubuntu-24.04
@@ -85,6 +62,18 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # The compile gate lives HERE rather than in a job of its own. It used to be the
+      # third job, i.e. a third independent runner acquisition, and in a degraded window
+      # that is the difference between a 112 s run and a 10+ minute one: the first job to
+      # get a runner starts immediately and the others wait on capacity nobody controls.
+      # Build+Test measure 82 s against Lint's 112 s, so the wall clock is unchanged while
+      # the run asks for two runners instead of three.
+      #
+      # `go build ./...` writes no binary and never invokes the linker (`go build -x ./...`
+      # shows no link step), so the claim is exactly "the packages compile". vet is not
+      # here: it runs once, as golangci-lint's govet, in the Lint job.
+      - name: Build
+        run: go build ./...
       # Same suite as `make test` (`go test -race`, no `-short`), plus an
       # atomic coverage profile. `-count=1` disables the Go test cache so every
       # CI run executes the tests for real instead of replaying cached results.
