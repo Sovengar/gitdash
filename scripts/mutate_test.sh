@@ -11,7 +11,7 @@ set -uo pipefail
 unset MUTATE_BASE MUTATE_CAP MUTATE_WORKERS MUTATE_STALL MUTATE_CEILING \
 	MUTATE_JOB_CEILING MUTATE_SETUP_RESERVE MUTATE_JOB_START MUTATE_SUMMARY \
 	MUTATE_RUN_LOG MUTATE_SCOPE_FILE MUTATE_BUDGET_FILE MUTATE_REPORT MUTATE_ENGINE \
-	MUTATE_FORBIDDEN MUTATE_EXCLUDE MUTATE_COVERPKG
+	MUTATE_FORBIDDEN MUTATE_EXCLUDE MUTATE_COVERPKG MUTATE_TIMEOUTS
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 MUTATE="$HERE/mutate.sh"
@@ -193,11 +193,14 @@ run_with_stub() { # run_with_stub <in_scope> <skipped> [--ci] [env assignments..
 }
 
 # The verdict as the workflow invokes it: three paths plus the two numbers only the run phase knows.
+# The ceilings file is per case: the suite must not inherit the repo's, or every expiry assertion
+# below would be judging its fixture against nine real hangs it knows nothing about.
 verdict() { # verdict <case_dir> <expected_total> <engine_rc> [extra flags...]
 	local d=$1 total=$2 rc=$3
 	shift 3
 	local out rc_out
-	out=$("$MUTATE" --verdict-only "$d/report.json" "$d/run.log" "$d/allowlist" \
+	out=$(MUTATE_TIMEOUTS="${TIMEOUTS_FIXTURE:-$d/timeouts}" "$MUTATE" --verdict-only \
+		"$d/report.json" "$d/run.log" "$d/allowlist" \
 		--expected-total "$total" --engine-rc "$rc" "$@" 2>&1)
 	rc_out=$?
 	printf '%s' "$out" >"$d/verdict.out"
@@ -528,6 +531,64 @@ check "expired count mismatch: red" 1 $?
 out=$(cat "$d/verdict.out")
 contains "expired count mismatch: reports both counts" "claims 0 timed-out" "$out"
 contains "expired count mismatch: reports the other count" "carries 3 timed-out lines" "$out"
+
+# ============================================================================
+echo
+echo "=== 7b. an expiry is judged against the recorded ceilings, not against silence ==="
+# ============================================================================
+
+# Within the ceiling: the run hangs on a hang already known and recorded, so the verdict is green
+# AND says out loud what it did not measure. A green that hides this is the one this gate forbids.
+d=$(new_case timeouts-recorded)
+make_report "$d/report.json" 46 'CONDITIONALS_BOUNDARY internal/tui/table.go:292'
+printf 'CONDITIONALS_BOUNDARY internal/tui/table.go:292\n' >>"$d/allowlist"
+make_log "$d/run.log" 45 2
+printf 'internal/tui/toast.go 2\n' >"$d/timeouts"
+verdict "$d" 46 0
+check "recorded ceilings: green" 0 $?
+out=$(cat "$d/verdict.out")
+contains "recorded ceilings: says the expiries were within them" "2 expired within the ceilings" "$out"
+contains "recorded ceilings: publishes file and count against the ceiling" "internal/tui/toast.go: 2/2" "$out"
+contains "recorded ceilings: admits they were never tested" "never tested" "$out"
+lacks "recorded ceilings: never claims nothing was measured" "**no measurement**" "$out"
+
+# One MORE than recorded: a new hang in a file whose ceiling is already spent.
+d=$(new_case timeouts-above-ceiling)
+make_report "$d/report.json" 46 'CONDITIONALS_BOUNDARY internal/tui/table.go:292'
+printf 'CONDITIONALS_BOUNDARY internal/tui/table.go:292\n' >>"$d/allowlist"
+make_log "$d/run.log" 45 2
+printf 'internal/tui/toast.go 1\n' >"$d/timeouts"
+verdict "$d" 46 0
+check "expiry above ceiling: red" 1 $?
+out=$(cat "$d/verdict.out")
+contains "expiry above ceiling: names the file" "internal/tui/toast.go: 2 expired, ceiling 1" "$out"
+contains "expiry above ceiling: says it is above the recording" "more expired than" "$out"
+contains "expiry above ceiling: still counts them as unmeasured" "2 mutants expired" "$out"
+
+# A hang in a file the ceilings file does not mention: ceiling 0, so red on the first one.
+d=$(new_case timeouts-unlisted-file)
+make_report "$d/report.json" 46 'CONDITIONALS_BOUNDARY internal/tui/table.go:292'
+printf 'CONDITIONALS_BOUNDARY internal/tui/table.go:292\n' >>"$d/allowlist"
+make_log "$d/run.log" 45 2
+printf 'internal/tui/app.go 5\n' >"$d/timeouts"
+verdict "$d" 46 0
+check "expiry in unlisted file: red" 1 $?
+contains "expiry in unlisted file: ceiling is zero" "internal/tui/toast.go: 2 expired, ceiling 0" "$(cat "$d/verdict.out")"
+
+# No ceilings file at all: there is nothing to judge against, so there is no verdict to give.
+d=$(new_case timeouts-missing-file)
+make_report "$d/report.json" 46 'CONDITIONALS_BOUNDARY internal/tui/table.go:292'
+printf 'CONDITIONALS_BOUNDARY internal/tui/table.go:292\n' >>"$d/allowlist"
+make_log "$d/run.log" 45 2
+TIMEOUTS_FIXTURE="$d/never-exists"
+verdict "$d" 46 0
+rc=$?
+unset TIMEOUTS_FIXTURE
+check "missing ceilings file: red" 1 $rc
+out=$(cat "$d/verdict.out")
+contains "missing ceilings file: names what is missing" "is missing" "$out"
+contains "missing ceilings file: says why it matters" "no recorded ceiling" "$out"
+contains "missing ceilings file: says how to clear a hang" "test that fails fast" "$out"
 
 # ============================================================================
 echo

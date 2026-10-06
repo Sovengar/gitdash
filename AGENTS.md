@@ -121,7 +121,9 @@ Mutation policy: make mutate-all
 
 **The policy, short:** the required check goes **green only if the mutation was
 really measured** and **no new survivor was left untested**. *"Could not measure"*
-is a **red** verdict, never a green one. And since not every green is the same
+is a **red** verdict, never a green one. A mutant the engine let expire was not
+measured either, so it is red too — unless `.mutation-timeouts` records that hang
+with a ceiling, and then the summary says `count/ceiling` instead of hiding it. And since not every green is the same
 green, **a green that measured nothing has to say so**, or the team reads it as a
 measurement. The step summary is where the reason of a red is read.
 
@@ -216,6 +218,15 @@ Who owns what, because these are responsibilities that overlap:
 - **`.mutation-allowlist`**: the gate's reference. The gate is **not** the owner of
   the allowlist nor of the `comm -23`; it only compares **by line**, so an entry
   naming the file at another line does **not** cover the mutant that appeared.
+- **`.mutation-timeouts`**: the same contract for what was NEVER measured. An
+  expired mutant is not a kill, not a survivor, and `report.json` leaves it out of
+  the total, so it cannot become green by silence: it is red unless this file
+  records the hang as a **ceiling per file** (`<file> <ceiling>`), and a green that
+  ran over one says so in the summary with `count/ceiling` per file. The ceiling
+  and not an exact set of lines because expiry is partly contention — the same
+  suite reported 9 hangs one run and 7 the next. Clearing an entry honestly means
+  a test that fails fast and kills the mutant; raising the ceiling alone only moves
+  the number.
 
 Decisions that are not readable in the code:
 
@@ -262,7 +273,9 @@ Decisions that are not readable in the code:
   is the only place `TIMED OUT` lives, and `report.json` excludes it from the total
   and from the efficacy. The log is cross-checked against itself (aggregate total
   against lines), because a count derived from truncated text gives a number that
-  looks fine and is not.
+  looks fine and is not. The expiries that survive that check are then judged
+  against `.mutation-timeouts`, so "we did not measure these" is either recorded
+  with a ceiling or a red.
 - **The run log carries the supervisor's stderr too**, folded in with `2>&1` rather
   than kept in a second file. The supervisor's reasons (the stall, the ceiling, the
   `alive` heartbeats) go to its stderr, and a stdout-only `tee` dropped the one line
