@@ -7,7 +7,7 @@ name: CI
 on:
   pull_request:
     # ready_for_review is NOT in the default set (opened, synchronize, reopened), so a
-    # draft flipped to ready would report no Mutation (diff) check at all -- and it is
+    # draft flipped to ready would report no Mutation check at all -- and it is
     # a required status check, so the merge would block forever.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
@@ -130,7 +130,7 @@ jobs:
             | tee -a "$GITHUB_STEP_SUMMARY"
 
 # -- de mutation.yml, trasladados aqui ------------------------------------
-# Este bloque era la cabecera del workflow `Mutation (diff)`, ahora job de ci.yml.
+# Este bloque era la cabecera del workflow `Mutation`, ahora job de ci.yml.
 # Mutation testing via gremlins over the PR's diff (not the whole module), with
 # a gate that blocks NEW survivors. Required status checks: Lint, Test and
 # Mutation block the merge (Build was folded into Test, so it is no longer a check).
@@ -163,7 +163,7 @@ jobs:
     # about whether the mutation was measured. The fail-vs-skip decision stays
     # inside scripts/mutate.sh, which is why the rule below still holds.
     if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-    name: Mutation (diff)
+    name: Mutation
     # No `needs:` nor `if:` on purpose: the job must ALWAYS report. A skipped job
     # in a required check stays pending forever and blocks every PR (the same
     # class of failure as a paths filter). Calibration is checked in a step here,

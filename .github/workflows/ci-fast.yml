@@ -10,7 +10,7 @@ name: CI fast
 # behind `DBX_SKIP_DOCKER=1`. When gitdash grows integration tests, the gate belongs
 # here and the full suite stays in ci.yml -- the wiring point is this job's test step.
 #
-# NOT a required check: `protect-main` requires Lint, Test and Mutation (diff). A red
+# NOT a required check: `protect-main` requires Lint, Test and Mutation. A red
 # `CI fast` never blocks a merge and a green one never authorises one.
 
 on:
