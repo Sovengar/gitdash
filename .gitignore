@@ -28,6 +28,10 @@ report.json
 .gremlins*
 # The run's log, the announced scope and the budget it ran with: scripts/mutate.sh
 # produces all three and the verdict reads them. The log is NEVER deleted, because
-# that is exactly when it is wanted.
+# that is exactly when it is wanted. Never committed either: a stale log left in the
+# tree is one a crashed engine can be judged against.
+.mutation-run.log
+.mutation-scope.txt
+.mutation-budget.txt
 # Local Pi runtime state
 .atl/
