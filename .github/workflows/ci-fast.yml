@@ -1,0 +1,52 @@
+name: CI fast
+
+# The PER-COMMIT signal; `ci.yml` is the gate. Two workflows on purpose, even though
+# they are nearly identical TODAY: this suite is entirely unit (no testcontainers,
+# every fixture under `t.TempDir()`), so the only things dropped are lint and mutation.
+#
+# The split is being established now, on purpose, while it is still free: retrofitting
+# "which of these tests are the fast ones" after integration tests exist is the part that
+# never happens. dbx already has them, and its ci-fast gates the real-PostgreSQL tests
+# behind `DBX_SKIP_DOCKER=1`. When gitdash grows integration tests, the gate belongs
+# here and the full suite stays in ci.yml -- the wiring point is this job's test step.
+#
+# NOT a required check: `protect-main` requires Lint, Test and Mutation (diff). A red
+# `CI fast` never blocks a merge and a green one never authorises one.
+
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+# Least privilege by default; every job inherits this.
+permissions:
+  contents: read
+
+# Its own group, deliberately not `ci`'s: an advisory run must never cancel a required
+# one, and a required run must never leave this pending.
+concurrency:
+  group: cifast-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Fast:
+    name: CI fast
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      # The explicit compile gate. `ci.yml`'s Test job does not carry it (the suite
+      # compiles every package anyway and golangci-lint type-checks, so there it was
+      # 14 s on the critical path for nothing) -- but here it is the whole point of the
+      # job: "does this commit compile" answered before the suite starts.
+      - name: Build
+        run: go build ./...
+      - name: Unit tests
+        run: go test -race -count=1 ./...
