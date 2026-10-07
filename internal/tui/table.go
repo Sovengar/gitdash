@@ -251,25 +251,19 @@ func (m *Model) summary() (total, dirty, ahead, behind int) {
 
 // Cells return plain text plus a style and the render pads BEFORE styling, so the alignment cannot be broken by ANSI codes.
 
-func (m *Model) renderEntry(e tableEntry, selected bool) string {
+func (m *Model) renderEntry(e tableEntry, selected bool, width int) string {
 	switch e.kind {
 	case kindPrimary:
 		line := m.primaryHeaderLine(e.group)
-		if selected {
-			return styleCursor.Render("▸ ") + line
-		}
-		return "  " + line
+		return m.rowCursor(selected) + "  " + line
 	case kindSecondary:
 		line := m.secondaryHeaderLine(e.group)
-		if selected {
-			return styleCursor.Render("▸ ") + indentHeader + line
-		}
-		return "  " + indentHeader + line
+		return m.rowCursor(selected) + "  " + indentHeader + line
 	case kindWorktree:
 		// Dedicated render, NOT renderRow: an empty Snapshot would read as no-up/clean, that is, as false state information.
-		return m.renderWorktreeRow(e.wt, selected)
+		return m.renderWorktreeRow(e.wt, selected, width)
 	default:
-		return m.renderRow(e.r, selected)
+		return m.renderRow(e.r, selected, width)
 	}
 }
 
@@ -286,8 +280,6 @@ var tableColumns = []tableColumn{
 	{"Work Tree", colWT},
 	{"↑↓up", colUpDown},
 	{"SYNC", colSync},
-	{"ACTIVITY", colActivity},
-	{"FETCH", colFetch},
 }
 
 func fitColumns(innerWidth int) int {
@@ -301,16 +293,34 @@ func fitColumns(innerWidth int) int {
 	return len(tableColumns)
 }
 
+// width includes the two borders and the 4-cell row prefix (cursor + fetch slot): -6 is what keeps
+// the header on the exact same columns as the rows, with no overflow past the right border.
 func headerColumns(width int) string {
 	var b strings.Builder
-	for _, c := range tableColumns[:fitColumns(width-4)] {
+	for _, c := range tableColumns[:fitColumns(width-rowPrefixWidth-2)] {
 		b.WriteString(pad(c.title, c.width))
 	}
 	return b.String()
 }
 
-// State-dependent cells (Work Tree, ↑↓up, SYNC, ACTIVITY, FETCH) stay empty/dim because the UI does not promise dirty/ahead/behind/sync per worktree.
-func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
+// The prefix is cursor (2) + fetch slot (2) on every row kind, so names never shift while a fetch
+// runs and the worktree/header left edge matches the repo rows.
+const headerSlot = "    "
+
+func (m *Model) rowCursor(selected bool) string {
+	if selected {
+		return styleCursor.Render("▸ ")
+	}
+	return "  "
+}
+
+func (m *Model) fetchSlot(path string) string {
+	text, style := m.fetchCell(path)
+	return style.Render(pad(truncate(text, fetchSlotWidth), fetchSlotWidth))
+}
+
+// State-dependent cells (Work Tree, ↑↓up, SYNC) stay empty/dim because the UI does not promise dirty/ahead/behind/sync per worktree.
+func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool, width int) string {
 	branch := worktreeBranchLabel(wt)
 	cells := []struct {
 		text  string
@@ -322,18 +332,13 @@ func (m *Model) renderWorktreeRow(wt gitstatus.Worktree, selected bool) string {
 		{"", styleDim, colWT},
 		{"", styleDim, colUpDown},
 		{"—", styleDim, colSync},
-		{"", styleDim, colActivity},
-		{"", styleDim, colFetch},
 	}
-	cells = cells[:fitColumns(m.width-4)]
+	cells = cells[:fitColumns(width-rowPrefixWidth-2)]
 	line := ""
 	for _, c := range cells {
 		line += c.style.Render(pad(truncate(c.text, c.width), c.width))
 	}
-	if selected {
-		return styleCursor.Render("▸ ") + line
-	}
-	return "  " + line
+	return m.rowCursor(selected) + "  " + line
 }
 
 func worktreeBranchLabel(wt gitstatus.Worktree) string {
@@ -433,14 +438,12 @@ func entryAt(entries []tableEntry, i int) (tableEntry, bool) {
 	return entries[i], true
 }
 
-func (m *Model) renderRow(r row, selected bool) string {
+func (m *Model) renderRow(r row, selected bool, width int) string {
 	name, nameStyle := m.nameCell(r)
 	branch, branchStyle := m.branchCell(r)
 	wt, wtStyle := m.wtCell(r)
 	upDown, upDownStyle := m.upDownCell(r)
 	sync, syncStyle := m.syncCell(r)
-	activity, activityStyle := activityCell(r)
-	fetch, fetchStyle := m.fetchCell(r.project.Path)
 
 	cells := []struct {
 		text  string
@@ -452,19 +455,14 @@ func (m *Model) renderRow(r row, selected bool) string {
 		{wt, wtStyle, colWT},
 		{upDown, upDownStyle, colUpDown},
 		{sync, syncStyle, colSync},
-		{activity, activityStyle, colActivity},
-		{fetch, fetchStyle, colFetch},
 	}
-	cells = cells[:fitColumns(m.width-4)]
+	cells = cells[:fitColumns(width-rowPrefixWidth-2)]
 
 	line := ""
 	for _, c := range cells {
 		line += c.style.Render(pad(truncate(c.text, c.width), c.width))
 	}
-	if selected {
-		return styleCursor.Render("▸ ") + line
-	}
-	return "  " + line
+	return m.rowCursor(selected) + m.fetchSlot(r.project.Path) + line
 }
 
 func (m *Model) nameCell(r row) (string, lipglossStyle) {
@@ -512,9 +510,9 @@ func (m *Model) branchCell(r row) (string, lipglossStyle) {
 func (m *Model) fetchCell(path string) (string, lipglossStyle) {
 	switch m.fetchStates[path] {
 	case "fetching":
-		return "⟳ fetch", styleFetchRun
+		return "⟳ ", styleFetchRun
 	case "failed":
-		return "✗ fetch", styleFetchBad
+		return "✗ ", styleFetchBad
 	default:
 		return "", styleClean
 	}
@@ -563,10 +561,6 @@ func (m *Model) syncCell(r row) (string, lipglossStyle) {
 		return r.snap.SyncBranch, styleDim
 	}
 	return fmt.Sprintf("%s ↓%d", r.snap.SyncBranch, r.snap.SyncBehind), styleWarn
-}
-
-func activityCell(r row) (string, lipglossStyle) {
-	return relativeTime(r.snap.LastCommit), styleDim
 }
 
 func (m *Model) styleFor(r row) lipglossStyle {

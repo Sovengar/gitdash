@@ -63,9 +63,9 @@ func TestDetailWorktrees(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{"/tmp/multi-wt": s})
 	m.cursor = 0
 	r, _ := m.selected()
-	out := stripANSI(m.renderDetail(r, m.height))
+	out := stripANSI(m.renderDetail(r, m.height, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "worktrees (1)") || !strings.Contains(out, "feat") ||
-		!strings.Contains(out, "abc1234") {
+		!strings.Contains(out, "wt-feat") {
 		t.Errorf("detail without worktrees:\n%s", out)
 	}
 }
@@ -525,7 +525,7 @@ func TestWorktreeDetail(t *testing.T) {
 	if !ok {
 		t.Fatal("no selected entry")
 	}
-	panel := stripANSI(m.renderWorktreeDetail(e, m.height))
+	panel := stripANSI(m.renderWorktreeDetail(e, m.height, m.width, m.layout().cardSplit))
 	for _, bad := range []string{"no-up", "clean", "ahead", "behind"} {
 		if strings.Contains(panel, bad) {
 			t.Errorf("the detail invents state %q:\n%s", bad, panel)
@@ -545,7 +545,7 @@ func TestWorktreeDetailDiscovered(t *testing.T) {
 	m, _ = press(m, "down")
 
 	e, _ := m.selectedEntry()
-	out := stripANSI(m.renderWorktreeDetail(e, m.height))
+	out := stripANSI(m.renderWorktreeDetail(e, m.height, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "wt-marked") || !strings.Contains(out, "state") {
 		t.Errorf("detail of worktree with incomplete discovery:\n%s", out)
 	}
@@ -576,11 +576,11 @@ func TestWorktreeRowRenderS34124(t *testing.T) {
 	for _, e := range m.entries() {
 		switch e.kind {
 		case kindPrimary:
-			headerLine = stripANSI(m.renderEntry(e, false))
+			headerLine = stripANSI(m.renderEntry(e, false, m.width))
 		case kindRepo:
-			repoLine = stripANSI(m.renderEntry(e, false))
+			repoLine = stripANSI(m.renderEntry(e, false, m.width))
 		case kindWorktree:
-			wtLine = stripANSI(m.renderEntry(e, false))
+			wtLine = stripANSI(m.renderEntry(e, false, m.width))
 		}
 	}
 	if wtLine == "" {
@@ -614,7 +614,7 @@ func TestWorktreeRowRenderS34124(t *testing.T) {
 func TestWorktreeRowDetached(t *testing.T) {
 	w := gitstatus.Worktree{Path: "/tmp/wt-det", Branch: "", Head: "abc1234"}
 	m := newTestModel(t, nil, nil)
-	line := stripANSI(m.renderWorktreeRow(w, false))
+	line := stripANSI(m.renderWorktreeRow(w, false, m.width))
 	if !strings.Contains(line, "(detached)") || !strings.Contains(line, "abc1234") {
 		t.Errorf("detached subrow = %q", line)
 	}
@@ -873,7 +873,7 @@ func TestWorktreeExpandRealFixture(t *testing.T) {
 	var featLine string
 	for _, e := range entries {
 		if e.kind == kindWorktree && filepath.Base(e.wt.Path) == "wt-feat" {
-			featLine = stripANSI(m.renderWorktreeRow(e.wt, false))
+			featLine = stripANSI(m.renderWorktreeRow(e.wt, false, m.width))
 		}
 	}
 	if !strings.Contains(featLine, "feat/x") {
@@ -882,7 +882,7 @@ func TestWorktreeExpandRealFixture(t *testing.T) {
 	var detLine string
 	for _, e := range entries {
 		if e.kind == kindWorktree && filepath.Base(e.wt.Path) == "wt-detached" {
-			detLine = stripANSI(m.renderWorktreeRow(e.wt, false))
+			detLine = stripANSI(m.renderWorktreeRow(e.wt, false, m.width))
 		}
 	}
 	if !strings.Contains(detLine, "(detached)") {

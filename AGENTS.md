@@ -296,18 +296,21 @@ evident:
   `minPanelHeight` (test) derives it instead of begging for the number.
 - **The share is measured over the FREE height**, not over the terminal: against
   the total, a 30-line window kept 12 for the card and 3 for the table.
-- **The card's budget is its own lines**, not the terminal's: `renderDetail(r,
-  rows, width)` reserves `detailHeadLines` for the state header and splits the rest
-  with `listBudget`, which reserves the `… N more` warning line when the list does
-  not fit whole. `rows` is `lay.previewLines`. Without that, the lists are counted
-  as if they fit and then the box crops them without warning.
-- **The card is two columns above 62 inner cells.** The left 36 cells are the
-  fields (`path`/`branch`/`upstream`/`state`/`sync`/`activity`); the right 24 are
-  the worktrees and files lists, each with its own budget so an oversized
-  worktrees list does not starve the files list of its `… N more`. `renderDetail`
-  pads both columns to the same height and joins them with a dim separator before
-  the box styles anything, or ANSI breaks the width. `activity` (the last-commit
-  age) is what raised the head from 5 to `detailHeadLines` = 6 lines.
+- **The card's height budget is its own lines**, not the terminal's: `renderDetail(r,
+  rows, width, split)` reserves `detailHeadLines` for the state header; the collapsed
+  branch then shares the remaining height between the lists with `listBudget`, which
+  reserves the `… N more` warning line when a list does not fit whole. `rows` is
+  `lay.previewLines`. Without that, the lists are counted as if they fit and then the
+  box crops them without warning.
+- **The card is two columns when the inner width is at least 61** (terminal width
+  >= 63): `m.layout()` sets `cardSplit` and `renderDetail` consumes it, so the
+  decision has a single source. The left 36 cells are the fields
+  (`path`/`branch`/`upstream`/`state`/`sync`/`activity`); the right 24 are the
+  worktrees and files lists, each with its own budget so an oversized worktrees
+  list does not starve the files list of its `… N more`. `renderDetail` pads both
+  columns to the same height and joins them with a dim separator before the box
+  styles anything, or ANSI breaks the width. `activity` (the last-commit age) is
+  what raised the head from 5 to `detailHeadLines` = 6 lines.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
 - **The diagnostics and the action/command tails span the full card width**,

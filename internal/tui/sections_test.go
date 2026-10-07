@@ -338,8 +338,10 @@ func TestHeaderSkipsColumnsNarrow(t *testing.T) {
 	m.width = 60
 	content := m.renderDashboard()
 	out := stripANSI(content)
-	if strings.Contains(out, "FETCH") {
-		t.Errorf("FETCH should not fit at width=60:\n%s", out)
+	for _, gone := range []string{"FETCH", "ACTIVITY"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("%q is a removed column and must not fit at width=60:\n%s", gone, out)
+		}
 	}
 	if !strings.Contains(out, "NAME") || !strings.Contains(out, "BRANCH") {
 		t.Errorf("basic columns are missing:\n%s", out)
@@ -724,6 +726,7 @@ func TestPreviewWithoutHeightNotDrawsBox(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	m.height = 14 // below the panel's minimum height
+	m.width = 80  // and below the commits panel's width, so the count isolates the card
 	lay := layoutTest(m.height, false, defaultHintLines, false)
 	if lay.previewLines != 0 {
 		t.Fatalf("h=%d: the layout gave a panel of %d; the test needs a height with no panel", m.height, lay.previewLines)
@@ -760,7 +763,7 @@ func TestCursorMarksAOnlyRow(t *testing.T) {
 		t.Fatalf("the test needs 3 entries, there are %d", len(entries))
 	}
 	m.cursor = 1
-	out := stripANSI(m.tableSection(len(entries), entries))
+	out := stripANSI(m.tableSection(len(entries), entries, m.width))
 	lines := strings.Split(out, "\n")
 	var marked []string
 	for i, l := range lines {
@@ -772,7 +775,7 @@ func TestCursorMarksAOnlyRow(t *testing.T) {
 	if len(marked) != 1 {
 		t.Fatalf("marked rows = %d, want 1:\n%s", len(marked), out)
 	}
-	if want := stripANSI(m.renderEntry(entries[1], true)); !strings.Contains(marked[0], strings.TrimSpace(want)) {
+	if want := stripANSI(m.renderEntry(entries[1], true, m.width)); !strings.Contains(marked[0], strings.TrimSpace(want)) {
 		t.Errorf("the marked row = %q, want the cursor's %q", marked[0], strings.TrimSpace(want))
 	}
 }
@@ -944,10 +947,10 @@ func TestFetchStateForItsValue(t *testing.T) {
 		if got := strings.Contains(flat, "fetching"); got != c.wantSpin {
 			t.Errorf("%s: 'fetching' presente = %v, want %v", c.state, got, c.wantSpin)
 		}
-		if got := strings.Contains(flat, "✗ fetch"); got != c.wantFail {
+		if got := strings.Contains(flat, "✗ "); got != c.wantFail {
 			t.Errorf("%s: failure present = %v, want %v", c.state, got, c.wantFail)
 		}
-		if got := strings.Contains(flat, "⟳ fetch"); got != c.wantSpin {
+		if got := strings.Contains(flat, "⟳ "); got != c.wantSpin {
 			t.Errorf("%s: spin present = %v, want %v", c.state, got, c.wantSpin)
 		}
 		_ = c.quiereQuieto
