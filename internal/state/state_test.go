@@ -259,7 +259,7 @@ func TestSaveCollapsedNotBreaksThePrevious(t *testing.T) {
 	if err := store.SaveCollapsed(map[string]bool{"old": true}); err != nil {
 		t.Fatal(err)
 	}
-	antes, err := os.ReadFile(store.CollapsedFile())
+	before, err := os.ReadFile(store.CollapsedFile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestSaveCollapsedNotBreaksThePrevious(t *testing.T) {
 	if _, err := os.Stat(store.CollapsedFile() + ".tmp"); err == nil {
 		t.Error("the .tmp stayed on disk: the Rename did not happen")
 	}
-	_ = antes
+	_ = before
 }
 
 // The third atomic-save failure point (the WriteFile of the .tmp, provoked with a DIRECTORY named collapsed.json.tmp) exists because permissions are unusable: root reads a 0o000 and the test would differ locally and in CI.

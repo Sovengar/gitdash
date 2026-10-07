@@ -30,7 +30,7 @@ func TestEnvIsHomogeneous(t *testing.T) {
 	for _, banned := range []string{"LANG=", "LANGUAGE=", "LC_MESSAGES="} {
 		for _, kv := range env {
 			if strings.HasPrefix(kv, banned) {
-				t.Errorf("Env conserva %q: %q", banned, kv)
+				t.Errorf("Env keeps %q: %q", banned, kv)
 			}
 		}
 	}
@@ -77,13 +77,13 @@ func TestRunCapturesStderrAndCodeOfOutput(t *testing.T) {
 	_, err := (&Runner{Bin: bin}).Run(context.Background(), "-t", "x")
 	var cerr *Error
 	if !errors.As(err, &cerr) {
-		t.Fatalf("error = %T, quiero *tool.Error", err)
+		t.Fatalf("error = %T, want *tool.Error", err)
 	}
 	if cerr.Msg != "the real reason" {
 		t.Errorf("Msg = %q, want the stderr", cerr.Msg)
 	}
 	if cerr.ExitCode != 3 {
-		t.Errorf("ExitCode = %d, quiero 3", cerr.ExitCode)
+		t.Errorf("ExitCode = %d, want 3", cerr.ExitCode)
 	}
 	if cerr.Bin != bin || !slicesHas(cerr.Args, "-t") {
 		t.Errorf("Error does not remember the argv: %+v", cerr)
@@ -94,13 +94,13 @@ func TestRunCapturesStderrAndCodeOfOutput(t *testing.T) {
 
 	_, err = (&Runner{Bin: stub(t, "#!/bin/sh\nexit 7\n")}).Run(context.Background())
 	if !errors.As(err, &cerr) {
-		t.Fatalf("error = %T, quiero *tool.Error", err)
+		t.Fatalf("error = %T, want *tool.Error", err)
 	}
 	if cerr.Msg == "" {
 		t.Error("without stderr the reason cannot be empty")
 	}
 	if cerr.ExitCode != 7 {
-		t.Errorf("ExitCode = %d, quiero 7", cerr.ExitCode)
+		t.Errorf("ExitCode = %d, want 7", cerr.ExitCode)
 	}
 	if cerr.Unwrap() == nil {
 		t.Error("Unwrap returns nil: exec's cause is lost")
@@ -120,7 +120,7 @@ func TestRunReturnsStdoutAlthoughFails(t *testing.T) {
 
 // Each argv element arrives as one element, which is what makes it safe to pass a title written by a person: with no quotes in between, a ";" or a "$(...)" is text, not syntax.
 func TestRunPassesTheArgvElementForElement(t *testing.T) {
-	nasty := `doble "quote" & $(id) ; echo inyectado | cat`
+	nasty := `double "quote" & $(id) ; echo injected | cat`
 	bin := stub(t, "#!/bin/sh\nprintf 'argc=%s\\n' \"$#\"\nprintf '%s\\0' \"$@\"\n")
 	out, err := (&Runner{Bin: bin}).Run(context.Background(),
 		"pr", "create", "-t", nasty, "-b", "body with\ttab and\nnew line", "-B", "main")
@@ -128,11 +128,11 @@ func TestRunPassesTheArgvElementForElement(t *testing.T) {
 		t.Fatalf("Run failed: %v", err)
 	}
 	if !strings.HasPrefix(out, "argc=8\n") {
-		t.Errorf("argc = %q, quiero 8 elementos", strings.SplitN(out, "\n", 2)[0])
+		t.Errorf("argc = %q, want 8 elements", strings.SplitN(out, "\n", 2)[0])
 	}
 	_, payload, _ := strings.Cut(out, "\n")
 	if got := strings.Split(strings.TrimSuffix(payload, "\x00"), "\x00"); len(got) != 8 {
-		t.Fatalf("llegaron %d elementos: %q", len(got), got)
+		t.Fatalf("got %d elements: %q", len(got), got)
 	} else if got[3] != nasty {
 		t.Errorf("the value did not arrive whole: %q", got[3])
 	} else if got[5] != "body with\ttab and\nnew line" {
@@ -169,7 +169,7 @@ func TestRunWithBinaryNonexistent(t *testing.T) {
 	}
 	var cerr *Error
 	if !errors.As(err, &cerr) {
-		t.Fatalf("error = %T, quiero *tool.Error", err)
+		t.Fatalf("error = %T, want *tool.Error", err)
 	}
 	if cerr.Err == nil {
 		t.Error("exec's cause was not preserved")
@@ -193,24 +193,24 @@ func TestExitCode(t *testing.T) {
 		t.Errorf("ExitCode(*Error) = %d, want 42", got)
 	}
 	if got := ExitCode(errWrap{&Error{ExitCode: 9}}); got != 9 {
-		t.Errorf("ExitCode(envuelto) = %d, quiero 9", got)
+		t.Errorf("ExitCode(wrapped) = %d, want 9", got)
 	}
 	_, err := (&Runner{Bin: stub(t, "#!/bin/sh\nexit 6\n")}).Run(context.Background())
 	var cerr *Error
 	if !errors.As(err, &cerr) {
-		t.Fatalf("error = %T, quiero *tool.Error", err)
+		t.Fatalf("error = %T, want *tool.Error", err)
 	}
 	if got := ExitCode(cerr.Err); got != 6 {
-		t.Errorf("ExitCode(exec.ExitError) = %d, quiero 6", got)
+		t.Errorf("ExitCode(exec.ExitError) = %d, want 6", got)
 	}
 }
 
 func TestFirstLine(t *testing.T) {
 	cases := map[string]string{
-		"uno":          "uno",
-		"uno\ndos":     "uno",
-		"uno\n\ndos":   "uno",
-		"uno\n":        "uno",
+		"one":          "one",
+		"one\ntwo":     "one",
+		"one\n\ntwo":   "one",
+		"one\n":        "one",
 		"":             "",
 		"\n":           "",
 		"with 3 lines": "with 3 lines",
@@ -218,7 +218,7 @@ func TestFirstLine(t *testing.T) {
 	}
 	for in, want := range cases {
 		if got := FirstLine(in); got != want {
-			t.Errorf("FirstLine(%q) = %q, quiero %q", in, got, want)
+			t.Errorf("FirstLine(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -229,7 +229,7 @@ func TestNew(t *testing.T) {
 		t.Errorf("Bin = %q", r.Bin)
 	}
 	if r.Timeout != DefaultTimeout() {
-		t.Errorf("Timeout = %v, quiero %v", r.Timeout, DefaultTimeout())
+		t.Errorf("Timeout = %v, want %v", r.Timeout, DefaultTimeout())
 	}
 	if !slicesHas(r.Extra, "GH_PROMPT_DISABLED=1") {
 		t.Errorf("Extra = %q", r.Extra)
@@ -250,7 +250,7 @@ func TestDefaultTimeoutAreThirtySeconds(t *testing.T) {
 
 type errWrap struct{ err error }
 
-func (e errWrap) Error() string { return "envuelto: " + e.err.Error() }
+func (e errWrap) Error() string { return "wrapped: " + e.err.Error() }
 func (e errWrap) Unwrap() error { return e.err }
 
 func slicesHas(has []string, needle string) bool {
@@ -263,9 +263,9 @@ func slicesHas(has []string, needle string) bool {
 }
 
 func TestErrorWithoutCodeNotSaysExit(t *testing.T) {
-	e := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "contexto cancelado"}
+	e := &Error{Bin: "gh", Args: []string{"pr", "list"}, Msg: "context canceled"}
 	got := e.Error()
-	want := "gh pr list: contexto cancelado"
+	want := "gh pr list: context canceled"
 	if got != want {
 		t.Errorf("Error() = %q, want %q (no exit suffix)", got, want)
 	}

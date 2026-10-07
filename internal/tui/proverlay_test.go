@@ -20,7 +20,7 @@ func renameBranchInitial(t *testing.T, dir, branch string) {
 	cmd := exec.Command("git", "branch", "-m", branch)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git branch -m %s en %s: %v\n%s", branch, dir, err, out)
+		t.Fatalf("git branch -m %s in %s: %v\n%s", branch, dir, err, out)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestPROverlayCapturesTheRowOnTheArm(t *testing.T) {
 		t.Errorf("head = %q, want main (the snapshot's branch)", m.pr.head)
 	}
 	if got := m.prParams().Base; got != "main" {
-		t.Errorf("base = %q, want main (sync branch o default de config)", got)
+		t.Errorf("base = %q, want main (sync branch or config default)", got)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestPROverlayWithoutRowNotOpens(t *testing.T) {
 		t.Fatal("with no row there was no notice")
 	}
 	if _, ok := cmd().(notifyMsg); !ok {
-		t.Errorf("aviso = %v, want notifyMsg", cmd())
+		t.Errorf("notice = %v, want notifyMsg", cmd())
 	}
 	if m.pr != nil {
 		t.Error("with no row the overlay opened")
@@ -296,7 +296,7 @@ func TestPROverlayBaseEmptyNotCloses(t *testing.T) {
 		t.Error("a submit with no base was published")
 	}
 	if !strings.Contains(m.pr.err, "base") {
-		t.Errorf("aviso = %q, want menciona la base", m.pr.err)
+		t.Errorf("notice = %q, want mentions the base", m.pr.err)
 	}
 }
 
@@ -606,7 +606,7 @@ func TestPROverlayCloseDropsTheFocusOfTheFields(t *testing.T) {
 		foco prField
 	}{
 		{"the title", prFieldTitle},
-		{"la base", prFieldBase},
+		{"the base", prFieldBase},
 		{"the body", prFieldBody},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -776,20 +776,20 @@ func TestPROverlayOpensFairInTheHeightMinimum(t *testing.T) {
 		t.Fatal("the form opens at no height")
 	}
 
-	enBorde := m
-	enBorde.height = opens
-	enBorde, _ = press(enBorde, "O")
-	if enBorde.pr == nil {
+	atEdge := m
+	atEdge.height = opens
+	atEdge, _ = press(atEdge, "O")
+	if atEdge.pr == nil {
 		t.Fatalf("it did not open at %d lines", opens)
 	}
-	if got := enBorde.layout().bodyLines; got != prMinBodyLines() {
+	if got := atEdge.layout().bodyLines; got != prMinBodyLines() {
 		t.Errorf("it opens at %d lines with a body of %d, want the exact minimum %d", opens, got, prMinBodyLines())
 	}
 
-	menor := m
-	menor.height = opens - 1
-	menor, _ = press(menor, "O")
-	if menor.pr != nil {
+	smaller := m
+	smaller.height = opens - 1
+	smaller, _ = press(smaller, "O")
+	if smaller.pr != nil {
 		t.Errorf("it opened at %d lines, one below the minimum (%d)", opens-1, prMinBodyLines())
 	}
 }
@@ -894,7 +894,7 @@ func TestPRHeadOfWorktreeWithoutMarkerComesOfTheInventory(t *testing.T) {
 		t.Errorf("head = %q, want %q (it comes from the inventory, not the empty snapshot)", got, "feat/wt")
 	}
 	if got := m.prParams().Head; got != "feat/wt" {
-		t.Errorf("Params.Head = %q, quiero %q", got, "feat/wt")
+		t.Errorf("Params.Head = %q, want %q", got, "feat/wt")
 	}
 }
 

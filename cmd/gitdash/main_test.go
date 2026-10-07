@@ -147,7 +147,7 @@ func TestTheConfigArrivesSameAModeConsumer(t *testing.T) {
 }
 
 func TestPrintRowOfEachShapeOfRepo(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		proj discovery.Project
 		snap gitstatus.Snapshot
@@ -201,7 +201,7 @@ func TestPrintRowOfEachShapeOfRepo(t *testing.T) {
 		},
 	}
 
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			row := printRowOf(c.proj, c.snap)
 			got := map[string]string{
@@ -237,11 +237,11 @@ func TestDepsProdIsCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	conf := filepath.Join(dir, "gitdash", "config.toml")
-	if err := os.WriteFile(conf, []byte("roots = [\"/tmp/raiz-mia\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte("roots = [\"/tmp/my-root\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, warn := d.load()
-	if len(cfg.Roots) != 1 || cfg.Roots[0] != "/tmp/raiz-mia" {
+	if len(cfg.Roots) != 1 || cfg.Roots[0] != "/tmp/my-root" {
 		t.Errorf("depsProd().load() read %v, want the file's config", cfg.Roots)
 	}
 	if warn != "" {
@@ -350,7 +350,7 @@ func mainFuncLine(t *testing.T) int {
 	t.Helper()
 	src, err := os.ReadFile("main.go")
 	if err != nil {
-		t.Fatalf("leer main.go: %v", err)
+		t.Fatalf("read main.go: %v", err)
 	}
 	for i, l := range strings.Split(string(src), "\n") {
 		if strings.HasPrefix(l, "func main(") {

@@ -78,13 +78,13 @@ func TestArrangeMixedSecondary(t *testing.T) {
 }
 
 func TestArrangeSingleMember(t *testing.T) {
-	in := []Entry{entry("/a", "backend", ""), entry("/b", "solo", "")}
+	in := []Entry{entry("/a", "backend", ""), entry("/b", "only", "")}
 	got := Arrange(in)
-	if len(got) != 2 || got[1].Primary != "solo" {
+	if len(got) != 2 || got[1].Primary != "only" {
 		t.Errorf("only member: %+v", got)
 	}
 	if !IsPrimaryHeader(got, 1) {
-		t.Errorf("'solo' must have a header")
+		t.Errorf("'only' must have a header")
 	}
 }
 

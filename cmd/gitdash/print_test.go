@@ -15,7 +15,7 @@ import (
 )
 
 func TestPrintSync(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		snap gitstatus.Snapshot
 		want string
@@ -26,7 +26,7 @@ func TestPrintSync(t *testing.T) {
 		{"behind", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true, SyncBehind: 3}, "main ↓3"},
 		{"only syncKnown false behind (unknown rules)", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: false, SyncBehind: 3}, "main —"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := printSync(c.snap); got != c.want {
 			t.Errorf("%s: printSync = %q, want %q", c.name, got, c.want)
 		}
@@ -34,7 +34,7 @@ func TestPrintSync(t *testing.T) {
 }
 
 func TestPrintState(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name            string
 		st              gitstatus.State
 		tracked, untked int
@@ -43,12 +43,12 @@ func TestPrintState(t *testing.T) {
 		{"error", gitstatus.StateError, 5, 5, "error"},
 		{"no repo", gitstatus.StateNoRepo, 0, 0, "no repo"},
 		{"clean", gitstatus.StateClean, 0, 0, ""},
-		{"solo tracked", gitstatus.StateDirty, 2, 0, "2"},
-		{"solo untracked", gitstatus.StateDirty, 0, 1, "?1"},
-		{"ambos", gitstatus.StateDirty, 2, 1, "2 ?1"},
+		{"only tracked", gitstatus.StateDirty, 2, 0, "2"},
+		{"only untracked", gitstatus.StateDirty, 0, 1, "?1"},
+		{"both", gitstatus.StateDirty, 2, 1, "2 ?1"},
 		{"diverged counts as dirty", gitstatus.StateDiverged, 1, 0, "1"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		snap := gitstatus.Snapshot{Status: gitstatus.Status{TrackedChanges: c.tracked, Untracked: c.untked}}
 		if got := printState(c.st, snap); got != c.want {
 			t.Errorf("%s: printState = %q, want %q", c.name, got, c.want)
@@ -57,7 +57,7 @@ func TestPrintState(t *testing.T) {
 }
 
 func TestPrintUpDown(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name          string
 		st            gitstatus.State
 		hasUp         bool
@@ -69,12 +69,12 @@ func TestPrintUpDown(t *testing.T) {
 		{"with an error", gitstatus.StateError, true, 3, 3, "fatal", ""},
 		{"no upstream", gitstatus.StateClean, false, 0, 0, "", "no-up"},
 		{"in sync", gitstatus.StateClean, true, 0, 0, "", ""},
-		{"solo ahead", gitstatus.StateAhead, true, 2, 0, "", "↑2"},
-		{"solo behind", gitstatus.StateBehind, true, 0, 3, "", "↓3"},
-		{"divergido", gitstatus.StateDiverged, true, 1, 2, "", "↑1↓2"},
+		{"only ahead", gitstatus.StateAhead, true, 2, 0, "", "↑2"},
+		{"only behind", gitstatus.StateBehind, true, 0, 3, "", "↓3"},
+		{"diverged", gitstatus.StateDiverged, true, 1, 2, "", "↑1↓2"},
 		{"detached with no upstream", gitstatus.StateDetached, false, 0, 0, "", "no-up"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		snap := gitstatus.Snapshot{
 			Status: gitstatus.Status{HasUpstream: c.hasUp, Ahead: c.ahead, Behind: c.behind},
 			Err:    c.err,
@@ -87,23 +87,23 @@ func TestPrintUpDown(t *testing.T) {
 
 func TestRelativeTimePrint(t *testing.T) {
 	now := time.Now()
-	casos := []struct {
+	cases := []struct {
 		name  string
-		edad  time.Duration
+		age   time.Duration
 		epoch int64
 		want  string
 	}{
 		{"no epoch", 0, 0, "-"},
 		{"epoch negativo", 0, -5, "-"},
 		{"now", 0, now.Unix(), "now"},
-		{"minutos", 7 * time.Minute, 0, "7m ago"},
-		{"horas", 5 * time.Hour, 0, "5h ago"},
+		{"minutes", 7 * time.Minute, 0, "7m ago"},
+		{"hours", 5 * time.Hour, 0, "5h ago"},
 		{"days", 3 * 24 * time.Hour, 0, "3d ago"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		epoch := c.epoch
 		if c.epoch == 0 && c.want != "-" {
-			epoch = now.Add(-c.edad).Unix()
+			epoch = now.Add(-c.age).Unix()
 		}
 		if got := relativeTimePrint(epoch); got != c.want {
 			t.Errorf("%s: relativeTimePrint = %q, want %q", c.name, got, c.want)
@@ -121,17 +121,17 @@ func TestOrDashPrint(t *testing.T) {
 }
 
 func TestGroupLabelPrint(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		p    discovery.Project
 		want string
 	}{
 		{"both levels", discovery.Project{PrimaryGroup: "vsocial", SecondaryGroup: "backend"}, "vsocial/backend"},
-		{"solo primario", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
+		{"only primary", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
 		{"none", discovery.Project{}, ""},
 		{"secondary only (it is not shown alone)", discovery.Project{SecondaryGroup: "backend"}, ""},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := groupLabelPrint(c.p); got != c.want {
 			t.Errorf("%s: groupLabelPrint = %q, want %q", c.name, got, c.want)
 		}

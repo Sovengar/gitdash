@@ -34,9 +34,9 @@ func diffArgv(got, want []string) string {
 		case i >= len(got):
 			return fmt.Sprintf("argv[%d] missing: I want %q (len %d < %d)", i, want[i], len(got), len(want))
 		case i >= len(want):
-			return fmt.Sprintf("argv[%d] = %q sobra (len %d > %d)", i, got[i], len(got), len(want))
+			return fmt.Sprintf("argv[%d] = %q extra (len %d > %d)", i, got[i], len(got), len(want))
 		case got[i] != want[i]:
-			return fmt.Sprintf("argv[%d] = %q, quiero %q", i, got[i], want[i])
+			return fmt.Sprintf("argv[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 	return ""
@@ -64,7 +64,7 @@ func TestBuildCreateArgv(t *testing.T) {
 			want: []string{"gh", "pr", "create", "-t", "T", "-b", "C", "-B", "main", "-R", "acme/widget"},
 		},
 		{
-			name: "github completo: draft y labels repetibles",
+			name: "github complete: draft and repeatable labels",
 			ref:  refGH("acme/widget"),
 			p:    full,
 			want: []string{
@@ -98,13 +98,13 @@ func TestBuildCreateArgv(t *testing.T) {
 		},
 		{
 			name: "gitlab minimal: -d is the body and -b the base",
-			ref:  refGL("grupo/sub/proy"),
+			ref:  refGL("group/sub/proj"),
 			p:    Params{Title: "T", Body: "C", Base: "main"},
-			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-b", "main", "-y", "-R", "grupo/sub/proy"},
+			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-b", "main", "-y", "-R", "group/sub/proj"},
 		},
 		{
 			name: "gitlab full: long draft and repeatable labels",
-			ref:  refGL("grupo/sub/proy"),
+			ref:  refGL("group/sub/proj"),
 			p:    full,
 			want: []string{
 				"glab", "mr", "create",
@@ -115,23 +115,23 @@ func TestBuildCreateArgv(t *testing.T) {
 				"--draft",
 				"-l", "bug", "-l", "tui",
 				"-y",
-				"-R", "grupo/sub/proy",
+				"-R", "group/sub/proj",
 			},
 		},
 		{
 			name: "gitlab without base nor head: they do not appear",
-			ref:  refGL("grupo/sub/proy"),
+			ref:  refGL("group/sub/proj"),
 			p:    Params{Title: "T", Body: "C"},
-			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-y", "-R", "grupo/sub/proy"},
+			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-y", "-R", "group/sub/proj"},
 		},
 		{
 			name: "gitlab in a subfolder: -R carries no prefix",
-			ref:  RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "grupo/proy"},
+			ref:  RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "group/proj"},
 			p:    Params{Title: "T", Body: "C", Base: "main"},
-			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-b", "main", "-y", "-R", "grupo/proy"},
+			want: []string{"glab", "mr", "create", "-t", "T", "-d", "C", "-b", "main", "-y", "-R", "group/proj"},
 		},
 		{
-			name: "forge desconocido",
+			name: "unknown forge",
 			ref:  RepoRef{Forge: "bitbucket", Host: "bitbucket.org", Project: "acme/widget"},
 			p:    Params{Title: "T", Body: "C", Base: "main"},
 			want: nil,
@@ -189,7 +189,7 @@ func TestBuildCreateArgvEmitsTheBodyEmpty(t *testing.T) {
 		want []string
 	}{
 		{"github", refGH("acme/widget"), []string{"gh", "pr", "create", "-t", "", "-b", "", "-R", "acme/widget"}},
-		{"gitlab", refGL("grupo/proy"), []string{"glab", "mr", "create", "-t", "", "-d", "", "-y", "-R", "grupo/proy"}},
+		{"gitlab", refGL("group/proj"), []string{"glab", "mr", "create", "-t", "", "-d", "", "-y", "-R", "group/proj"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if d := diffArgv(BuildCreateArgv(tc.ref, Params{}), tc.want); d != "" {
@@ -209,7 +209,7 @@ func TestBuildCreateArgvNotCrossesBodyAndBase(t *testing.T) {
 		wantHead string
 	}{
 		{"gh", refGH("acme/widget"), "-b", "-B", "-H"},
-		{"glab", refGL("grupo/proy"), "-d", "-b", "-s"},
+		{"glab", refGL("group/proj"), "-d", "-b", "-s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestBuildCreateArgvNotPassesHostnameATheCli(t *testing.T) {
 		ref  RepoRef
 	}{
 		{"github", refGH("acme/widget")},
-		{"gitlab", RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "grupo/proy"}},
+		{"gitlab", RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "group/proj"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argv := BuildCreateArgv(tc.ref, Params{Title: "T", Body: "C", Base: "main", Head: "h"})
@@ -257,7 +257,7 @@ func TestBuildCreateArgvNotPassesHostnameATheCli(t *testing.T) {
 }
 
 func TestBuildCreateArgvGlabJumpsTheConfirmation(t *testing.T) {
-	argv := BuildCreateArgv(refGL("grupo/proy"), Params{Title: "T", Body: "C", Base: "main"})
+	argv := BuildCreateArgv(refGL("group/proj"), Params{Title: "T", Body: "C", Base: "main"})
 	if !slices.Contains(argv, "-y") {
 		t.Errorf("glab argv %q carries no -y: glab would ask for send confirmation", argv)
 	}
@@ -275,7 +275,7 @@ func TestBuildCreateArgvAValueIsAOnlyElement(t *testing.T) {
 		head string
 	}{
 		{"gh", refGH("acme/widget"), "-B", "-H"},
-		{"glab", refGL("grupo/proy"), "-b", "-s"},
+		{"glab", refGL("group/proj"), "-b", "-s"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argv := BuildCreateArgv(tc.ref, Params{
@@ -335,14 +335,14 @@ func TestCreateBin(t *testing.T) {
 		want string
 	}{
 		{refGH("acme/widget"), "gh"},
-		{refGL("grupo/proy"), "glab"},
+		{refGL("group/proj"), "glab"},
 		{RepoRef{Forge: " GitLab "}, "glab"},
 		{RepoRef{Forge: "bitbucket"}, ""},
 		{RepoRef{}, ""},
 	}
 	for _, tc := range cases {
 		if got := CreateBin(tc.ref); got != tc.want {
-			t.Errorf("CreateBin(%q) = %q, quiero %q", tc.ref.Forge, got, tc.want)
+			t.Errorf("CreateBin(%q) = %q, want %q", tc.ref.Forge, got, tc.want)
 		}
 	}
 }
@@ -356,17 +356,17 @@ func TestPromptEnv(t *testing.T) {
 		{"github", refGH("acme/widget"), []string{"GH_PROMPT_DISABLED=1"}},
 		{
 			name: "gitlab self-managed",
-			ref:  RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "grupo/proy"},
+			ref:  RepoRef{Forge: ForgeGitLab, Host: "umane.emeal.nttdata.com", Project: "group/proj"},
 			want: []string{"GITLAB_HOST=umane.emeal.nttdata.com"},
 		},
-		{"gitlab without host: without a host there is nothing to point at", RepoRef{Forge: ForgeGitLab, Project: "grupo/proy"}, nil},
+		{"gitlab without host: without a host there is nothing to point at", RepoRef{Forge: ForgeGitLab, Project: "group/proj"}, nil},
 		{"unsupported forge", RepoRef{Forge: "bitbucket"}, nil},
 		{"empty ref", RepoRef{}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := PromptEnv(tc.ref); !slices.Equal(got, tc.want) {
-				t.Errorf("PromptEnv = %q, quiero %q", got, tc.want)
+				t.Errorf("PromptEnv = %q, want %q", got, tc.want)
 			}
 		})
 	}

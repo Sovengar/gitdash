@@ -101,7 +101,7 @@ func TestIntentNotHasVerdict(t *testing.T) {
 		t.Error("Intent = false, want true")
 	}
 	if e.Exit != -1 {
-		t.Errorf("Exit = %d, want -1 (nada ejecutado)", e.Exit)
+		t.Errorf("Exit = %d, want -1 (nothing executed)", e.Exit)
 	}
 	if e.At.IsZero() {
 		t.Error("At left empty: the recorder must timestamp the entry")
@@ -149,10 +149,10 @@ func TestClassString(t *testing.T) {
 // The entry's At is set by the recorder and not by the caller: the timestamp must be the moment of recording, not of building the struct.
 func TestAddIgnoresAtZero(t *testing.T) {
 	rec := New(2)
-	antes := time.Now()
+	before := time.Now()
 	rec.addExec(Entry{Action: "pull"})
 	got := rec.Entries()[0].At
-	if got.Before(antes) {
+	if got.Before(before) {
 		t.Errorf("At = %v, earlier than the moment it was recorded", got)
 	}
 }

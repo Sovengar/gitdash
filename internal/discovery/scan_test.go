@@ -174,7 +174,7 @@ func TestWorktree(t *testing.T) {
 		if p.Path == wt {
 			found = true
 			if !p.IsWorktree || !p.HasRepo {
-				t.Errorf("worktree mal clasificado: %+v", p)
+				t.Errorf("misclassified worktree: %+v", p)
 			}
 		}
 	}
@@ -246,7 +246,7 @@ func TestMarkerGroups(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(oldKey, ".gitdash.toml"), []byte("group = \"backend\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	testutil.Marker(t, secOnly, "solo", "", "infra", false)
+	testutil.Marker(t, secOnly, "only", "", "infra", false)
 
 	projects, err := Scan(cfgRoots(root))
 	if err != nil {
@@ -262,7 +262,7 @@ func TestMarkerGroups(t *testing.T) {
 	if p := byPath["oldkey"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
 		t.Errorf("old group grouped: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
-	if p := byPath["solo"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
+	if p := byPath["only"]; p.PrimaryGroup != "" || p.SecondaryGroup != "" {
 		t.Errorf("secondary without primary: %q/%q", p.PrimaryGroup, p.SecondaryGroup)
 	}
 }
@@ -282,7 +282,7 @@ func TestUnreadableRootNotAborts(t *testing.T) {
 // Scan tolerates bad roots: it reports them as one aggregated error and carries on. A missing root and a root that is a FILE (not a directory) have to end up in the same sack and with the same warning text, because for the user they are the same thing: "this config path cannot be walked".
 func TestScanToleratesRootsUseless(t *testing.T) {
 	root := t.TempDir()
-	good := filepath.Join(root, "proyecto")
+	good := filepath.Join(root, "project")
 	testutil.Init(t, good)
 	testutil.Marker(t, good, "", "", "", false)
 
@@ -324,11 +324,11 @@ func TestClassifyGitWithoutGit(t *testing.T) {
 		t.Errorf("classifyGit(dir) = %v/%q, want gitDir/%q", k, main, "")
 	}
 
-	raro := filepath.Join(dir, "raro")
-	if err := os.WriteFile(raro, []byte("I am not a gitdir"), 0o644); err != nil {
+	weird := filepath.Join(dir, "weird")
+	if err := os.WriteFile(weird, []byte("I am not a gitdir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if k, main := classifyGit(raro); k != gitNone || main != "" {
+	if k, main := classifyGit(weird); k != gitNone || main != "" {
 		t.Errorf("classifyGit(file without gitdir:) = %v/%q, want gitNone/%q", k, main, "")
 	}
 }
@@ -374,7 +374,7 @@ func TestScanJumpsDirectoryUnreadable(t *testing.T) {
 		t.Skip("as root directory permissions do not prevent reading")
 	}
 	root := t.TempDir()
-	good := filepath.Join(root, "proyecto")
+	good := filepath.Join(root, "project")
 	testutil.Init(t, good)
 	testutil.Marker(t, good, "", "", "", false)
 

@@ -71,8 +71,8 @@ func TestUpDown(t *testing.T) {
 		{"diverged", snapDiverged(2, 3), "↑2↓3"},
 		{"no-up", snapNoUpstream(), "no-up"},
 		{"in sync", snapClean(), ""},
-		{"solo ahead", snapAhead(1), "↑1"},
-		{"solo behind", snapBehind(4), "↓4"},
+		{"only ahead", snapAhead(1), "↑1"},
+		{"only behind", snapBehind(4), "↓4"},
 	}
 	for _, tc := range cases {
 		m := newTestModel(t, []discovery.Project{base},

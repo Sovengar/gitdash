@@ -23,7 +23,7 @@ func TestWorktreeHidden(t *testing.T) {
 	}
 	orphan := discovery.Project{
 		Path: "/tmp/orphan", Name: "orphan", HasRepo: true,
-		IsWorktree: true, MainRepo: "/no-descubierto",
+		IsWorktree: true, MainRepo: "/not-discovered",
 	}
 	mainSnap := snapClean()
 	mainSnap.Worktrees = []gitstatus.Worktree{
@@ -41,7 +41,7 @@ func TestWorktreeHidden(t *testing.T) {
 	rows := m.rows()
 	names := strings.Join(rowNames(rows), ",")
 	if strings.Contains(names, "wt-feat") {
-		t.Errorf("worktree descubierto visible: %v", rowNames(rows))
+		t.Errorf("discovered worktree visible: %v", rowNames(rows))
 	}
 	if len(rows) != 2 {
 		t.Fatalf("rows = %v, want [multi-wt orphan]", rowNames(rows))
@@ -86,7 +86,7 @@ func TestSyncCell(t *testing.T) {
 		want string
 	}{
 		{"behind", behind, "main ↓3"},
-		{"en sync", inSync, "main"},
+		{"in sync", inSync, "main"},
 		{"ref missing", missingRef, "main —"},
 		{"no branch", noBranch, "—"},
 	}
@@ -139,7 +139,7 @@ func TestWorktreeCollapsedByDefault(t *testing.T) {
 	}
 	text, _ := m.nameCell(m.rows()[0])
 	if !strings.Contains(text, "▸") || !strings.Contains(text, "(2 wt)") {
-		t.Errorf("NAME = %q, want ▸ y (2 wt)", text)
+		t.Errorf("NAME = %q, want ▸ and (2 wt)", text)
 	}
 	if strings.Contains(stripANSI(m.View().Content), "↳") {
 		t.Error("there must be no subrows in the view")
@@ -297,12 +297,12 @@ func TestWorktreeDedupeNormalizedPathMEDIUM2(t *testing.T) {
 func TestWorktreeOrphan(t *testing.T) {
 	orphan := discovery.Project{
 		Path: "/tmp/orphan", Name: "orphan", HasRepo: true,
-		IsWorktree: true, MainRepo: "/no-descubierto",
+		IsWorktree: true, MainRepo: "/not-discovered",
 	}
 	s := snapClean()
 	s.Worktrees = []gitstatus.Worktree{
 		wt("/tmp/orphan", "topic"),
-		wt("/no-descubierto", "main"),
+		wt("/not-discovered", "main"),
 	}
 	m := newTestModel(t, []discovery.Project{orphan},
 		map[string]gitstatus.Snapshot{"/tmp/orphan": s})
@@ -624,11 +624,11 @@ func TestWorktreeGlyphCounter(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	m := newTestModel(t, []discovery.Project{p}, st)
 	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▸ (2 wt)") {
-		t.Errorf("plegado = %q, want ▸ (2 wt)", text)
+		t.Errorf("collapsed = %q, want ▸ (2 wt)", text)
 	}
 	m.expanded[p.Path] = true
 	if text, _ := m.nameCell(m.rows()[0]); !strings.Contains(text, "▾ (2 wt)") {
-		t.Errorf("expandido = %q, want ▾ (2 wt)", text)
+		t.Errorf("expanded = %q, want ▾ (2 wt)", text)
 	}
 }
 

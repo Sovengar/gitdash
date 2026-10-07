@@ -272,7 +272,7 @@ func TestExecWithoutCodeOfOutputIsRecordsAsLessOne(t *testing.T) {
 }
 
 func TestFirstLine(t *testing.T) {
-	casos := []struct{ in, want string }{
+	cases := []struct{ in, want string }{
 		{"no break", "no break"},
 		{"", ""},
 		{"one\ntwo", "one"},
@@ -281,7 +281,7 @@ func TestFirstLine(t *testing.T) {
 		{"with\r\n", "with\r"},
 		{"three\nlines\nand more", "three"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := firstLine(c.in); got != c.want {
 			t.Errorf("firstLine(%q) = %q, want %q", c.in, got, c.want)
 		}
