@@ -571,6 +571,40 @@ second key is the decision). Decisions that are not evident:
   (`Dur=0`, argv with the whole prompt) and re-collects the state. With no
   prompt, no command or no binary (`exec.LookPath`) there is only a toast.
 
+## Design gotcha: the sync action (`s`)
+
+`s` updates the current branch with the repo's sync branch: an explicit
+`git fetch origin`, then the configured `[commands] sync` base with `origin
+<resolved sync>` appended. It reports through a toast, never the card's action
+block. Decisions that are not evident:
+
+- **The fetch is explicit and first.** `s` reconciles against a fresh
+  remote-tracking ref, so it runs `git fetch origin` (class action, deliberately
+  not `commands.fetch`) before the pull; a failed fetch short-circuits, which is
+  why the same action can leave one exec or two in the log.
+- **The base is configurable, the ref is not.** `gitstatus.SyncArgv` copies
+  `[commands] sync` and appends `origin <sync>`: the base is the user's pull
+  policy, the ref comes from the repo (`SyncFor`, marker `sync_branch` over the
+  global default). A static command string could not carry the per-repo ref.
+- **The refusal reads the snapshot, not a live ref.** On the sync branch there is
+  nothing to catch up to, so `s` refuses before any process leaves — but only
+  when the last snapshot's `Branch` equals the resolved sync; an uncollected,
+  stale or detached branch does not refuse and git's own result governs. The
+  intent is still recorded, so a refusal leaves an exec-less log that still
+  explains the keypress.
+- **Toast-only, verdict classified.** `toastOnlyActions` is the single source of
+  the sync policy: it drops the card block, drops the argv from the note and
+  appends the classified outcome on success only. The outcome comes from
+  `Classify` on git's own output, never from probing `git config`.
+- **`isRebaseKind` splits selector membership from rebase semantics.** `IsPullKind`
+  is the `p` selector; `isRebaseKind` = pull kinds plus `sync`, so the sync gets
+  the spinner and the mid-rebase warning after a conflicted rebase without
+  joining the selector.
+- **A worktree sub-row resolves against the global default.** Its synthetic
+  project is not in `m.projects`, so `syncOf` falls back to `cfg.SyncBranch` (the
+  parent's marker is not consulted) and, having no snapshot of its own, the
+  refusal cannot fire.
+
 ## Wiring gotchas
 
 - **Every git exec goes through `runGit`/`runGitCombined`** (`gitstatus`), which
