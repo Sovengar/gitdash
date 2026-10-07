@@ -147,6 +147,12 @@ CI's diff profile.
   the PR path.
 - `delete_branch_on_merge=true`: GitHub deletes the remote branch on merge.
 
+### Waiting for CI
+
+To follow a PR's checks, wait with `gh run watch <run-id> --exit-status` (or
+`gh pr checks <n> --watch`). Never `sleep` + `gh pr checks`: runs go stale after
+a force-push and the id has to be asked for again.
+
 ## Architecture (data flow)
 
 ```
