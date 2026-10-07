@@ -168,7 +168,7 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 | `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
 | `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
 | `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
-| `internal/tui` | `app.go` (model + background pipelines), `update.go` (Update/View/keys), `table.go` (rows/order/cells/grouping), `detail.go`, `proverlay.go` (PR form) + `prcreate.go` (its execution), `cmdlogpanel.go` (the log panel), `styles.go` |
+| `internal/tui` | `app.go` (model + background pipelines), `update.go` (Update/View/keys), `table.go` (rows/order/cells/grouping), `layout.go` + `sections.go` (the single height+width budget and the pane composition), `detail.go` (split card, no commits), `proverlay.go` (PR form) + `prcreate.go` (its execution), `cmdlogpanel.go` (the log panel), `styles.go` |
 | `internal/group` | Arrangement of the 2-level grouped view (vroom style): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
 | `internal/testutil` | helpers to create real git fixture repos in `t.TempDir()` (bare origin, upstream push, worktrees, branches) |
 | `cmd/gitdash` | `main.go` (TUI) + `print.go` (`--print` mode, tabwriter, same ordering) |
@@ -291,27 +291,39 @@ evident:
 - **The panel is additive.** `computeLayout` looks for the largest panel height
   that (a) leaves `minBodyLines` table rows and (b) does not force cropping the
   hints nor hiding stats/keybinds (`mismaChromeQue`). If there is none, the panel
-  is not drawn. Below ~21 lines (default config) the dashboard is exactly what it
+  is not drawn. Below 22 lines (default config) the dashboard is exactly what it
   was before the feature. That floor comes out of `detailHeadLines`, so
   `minPanelHeight` (test) derives it instead of begging for the number.
 - **The share is measured over the FREE height**, not over the terminal: against
   the total, a 30-line window kept 12 for the card and 3 for the table.
 - **The card's budget is its own lines**, not the terminal's: `renderDetail(r,
-  rows)` reserves `detailHeadLines` for the state header and splits the rest with
-  `listBudget`, which reserves the `… N more` warning line when the list does not
-  fit whole. `rows` is `lay.previewLines`. Without that, the lists are counted as
-  if they fit and then the box crops them without warning.
+  rows, width)` reserves `detailHeadLines` for the state header and splits the rest
+  with `listBudget`, which reserves the `… N more` warning line when the list does
+  not fit whole. `rows` is `lay.previewLines`. Without that, the lists are counted
+  as if they fit and then the box crops them without warning.
+- **The card is two columns above 62 inner cells.** The left 36 cells are the
+  fields (`path`/`branch`/`upstream`/`state`/`sync`/`activity`); the right 24 are
+  the worktrees and files lists, each with its own budget so an oversized
+  worktrees list does not starve the files list of its `… N more`. `renderDetail`
+  pads both columns to the same height and joins them with a dim separator before
+  the box styles anything, or ANSI breaks the width. `activity` (the last-commit
+  age) is what raised the head from 5 to `detailHeadLines` = 6 lines.
+- **The commits block left the card** for the top-right panel (see below). The
+  card never paints a commits list, at any width.
+- **The diagnostics and the action/command tails span the full card width**,
+  appended below the two columns: the argv and the command output need more than
+  36 cells to be readable.
 - **The path is a field, not a loose line**: `path` goes in the same key/value
-  column as `branch`/`upstream`/`state`/`sync`, and its value is dimmed (it is
-  context, not state). On its own line, with the gap that separated it, it took a
-  height the lists need; as a field the header is `detailHeadLines` = 5 lines.
+  column as `branch`/`upstream`/`state`/`sync`/`activity`, and its value is dimmed
+  (it is context, not state).
 - **The card does not repeat the row's keys**: `g lazygit · ! cmd` are already in
   the keybinds section, so the card has no footer (`fichaTail` only adds the `!`
   input). Duplicating them cost a line of useful height and two sources that
   could diverge on a rebind.
 - **The `!` input goes at the END of the card and is always visible**
   (`fichaTail`): if the card filled the box, the card is cropped from the top.
-  Typing a command without seeing the prompt is typing blind.
+  Typing a command without seeing the prompt is typing blind. It is joined after
+  the columns so it spans the full card width.
 - **The box is filled** (`fitLines`): the height comes from the layout, not from
   the card. Without the fill, a short card would push the keybinds up and the
   view would not fill the terminal.
@@ -319,6 +331,40 @@ evident:
 With the cursor on a **group header** the panel has no card to show: it shows the
 group's aggregate (`groupStats`, over `rows()` and before folding, which is what
 its header counts). States at zero are not painted.
+
+## Design gotcha: the COMMITS panel (top right)
+
+To the right of the table there is a panel with the commits of the row under the
+cursor. Decisions that are not evident:
+
+- **It is additive on WIDTH, not height.** A fixed 30 cells plus a 1-cell gap:
+  `m.layout()` draws it only if the table still shows its 5 columns at the split
+  width (`119` with the current constants). It shares the table's box height and
+  gives back nothing, so terminal lines stay conserved at every height.
+- **It is dropped, never fallback.** Below the width boundary there is no commits
+  panel and the card does not recover the commits block: the behavior says the
+  commits "are not shown anywhere", so a fallback would be a second source of
+  truth.
+- **The title carries the "commits · " prefix** because the card is already
+  titled with the repo/group/worktree name; without the prefix two boxes shared
+  the same title.
+- **Dispatch by row kind**: repo → `Snap.Commits`; worktree subrow → its own
+  snapshot's commits when the path is discovered and live, a dim placeholder
+  otherwise (never the parent's); group header → the aggregate text shared with
+  the card (`groupSummaryText`, without `cardTail`); no row → the same empty hint
+  as the table and card.
+- **Rendered with the same `sha / age / subject` line as the old card block**,
+  newest first, subject truncated to the panel's inner width (never wrapped).
+
+## Design gotcha: the table's fetch slot
+
+`ACTIVITY` left the table (it is now the card's `activity` field) and `FETCH` is
+not a column: the transient glyph lives in a fixed 2-cell slot right after the
+2-cell cursor prefix, reserved on every row kind (repo, worktree, header). Names
+never shift while a fetch runs, and the worktree/header left edge matches the
+repo rows. `headerColumns` and the row render slice the columns with
+`fitColumns(width - 6)`: the 6 is the 2 borders plus the 4-cell prefix, and it is
+what makes the panel's 119 boundary exact.
 
 ## Design gotcha: `enter` is the only folding key
 
