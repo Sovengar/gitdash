@@ -20,9 +20,10 @@ func snapOnBranch(branch string) gitstatus.Snapshot {
 }
 
 // collectActionMsg waits for the action result alone; a failing sync never sends a status, so waiting for one would hang.
+// The deadline is short on purpose: a mutant that suppresses the action must fail fast and be killed, not cut as a per-mutant timeout.
 func collectActionMsg(t *testing.T, m Model) *actionMsg {
 	t.Helper()
-	deadline := time.After(60 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case ev := <-m.events:
@@ -40,7 +41,7 @@ func collectActionMsg(t *testing.T, m Model) *actionMsg {
 func collectAction(t *testing.T, m Model) (*actionMsg, bool) {
 	t.Helper()
 	acc := collectActionMsg(t, m)
-	deadline := time.After(60 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case ev := <-m.events:
@@ -62,6 +63,18 @@ func execArgvs() [][]string {
 		}
 	}
 	return out
+}
+
+// syncIntent returns the last "sync" intent the command log recorded, or nil: the intent is left by the generic routing even when a guard refuses, so the log explains a keypress with no exec after it.
+func syncIntent() *cmdlog.Entry {
+	var found *cmdlog.Entry
+	for _, e := range cmdlog.Entries() {
+		if e.Intent && e.Action == "sync" {
+			cp := e
+			found = &cp
+		}
+	}
+	return found
 }
 
 func TestSyncRunsFetchThenPullOnTheResolvedBranch(t *testing.T) {
@@ -158,6 +171,9 @@ func TestSyncWithoutRepoWarns(t *testing.T) {
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "no git repo") {
 		t.Errorf("notification = %v", cmd())
 	}
+	if syncIntent() == nil {
+		t.Error("the no-repo refusal left no intent, so the log cannot explain the keypress")
+	}
 }
 
 func TestSyncWithoutSyncBranchWarns(t *testing.T) {
@@ -199,6 +215,33 @@ func TestSyncRefusesOnTheSyncBranch(t *testing.T) {
 	// Like the other pre-exec guards, the refused key still leaves its intent: the log explains why no exec follows.
 	if len(execArgvs()) != 0 {
 		t.Errorf("a refused sync executed something: %v", execArgvs())
+	}
+	if syncIntent() == nil {
+		t.Error("the refusal left no intent, so the log cannot explain the keypress")
+	}
+}
+
+// The resolved ref becomes the pull's tail argv and the marker can declare it, so a leading dash (a git option) must be refused before any process leaves.
+func TestSyncRefusesAnOptionLikeSyncBranch(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	m := newTestModel(t,
+		[]discovery.Project{{Path: dir, Name: "demo", HasRepo: true, SyncBranch: "--upload-pack=/bin/echo"}},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
+	m = cursorOn(t, m, dir)
+
+	_, cmd := press(m, "s")
+	if len(m.running) != 0 {
+		t.Errorf("sync launched with an option-like ref: %v", m.running)
+	}
+	if cmd == nil {
+		t.Fatal("an option-like ref should warn")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || nm.level != toastWarning {
+		t.Errorf("notification = %v, want a warning", cmd())
+	}
+	if got := execArgvs(); len(got) != 0 {
+		t.Errorf("an option-like ref executed something: %v", got)
 	}
 }
 
@@ -250,7 +293,7 @@ func TestSyncFetchFailureStopsBeforeThePull(t *testing.T) {
 	m, _ = press(m, "s")
 	acc := collectActionMsg(t, m)
 	if acc.err == "" {
-		t.Fatal("a fetch with no origin did not fail (the fixture has a remote)")
+		t.Fatal("a fetch with no origin did not fail (the fixture has no remote)")
 	}
 
 	argvs := execArgvs()
@@ -272,13 +315,7 @@ func TestSyncLeavesAnIntent(t *testing.T) {
 	m = cursorOn(t, m, dir)
 
 	m, _ = press(m, "s")
-	var intent *cmdlog.Entry
-	for _, e := range cmdlog.Entries() {
-		if e.Intent && e.Action == "sync" {
-			cp := e
-			intent = &cp
-		}
-	}
+	intent := syncIntent()
 	if intent == nil {
 		t.Fatal("s did not leave a sync intent in the command log")
 	}
@@ -459,13 +496,7 @@ func TestSyncKeyIsRebindable(t *testing.T) {
 	if m.running[dir] != "sync" {
 		t.Fatalf("the rebound key did not launch the sync: running = %v", m.running)
 	}
-	var intent *cmdlog.Entry
-	for _, e := range cmdlog.Entries() {
-		if e.Intent && e.Action == "sync" {
-			cp := e
-			intent = &cp
-		}
-	}
+	intent := syncIntent()
 	if intent == nil || intent.Key != "y" {
 		t.Errorf("intent = %+v, want the rebound key recorded", intent)
 	}

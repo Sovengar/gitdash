@@ -46,7 +46,7 @@ Bring back a `sync` action on key `s`: **update the current branch with the repo
 
 ## Post-brief iterations (user-approved during the prototype; supersede the section above)
 
-- `7f7c0cf` — sync's result no longer renders in the card's generic `last <kind>` block; it reports as a toast (`l` keeps the full argv+output audit).
+- `7f7c0cf` — sync's result no longer renders in the card's generic `last <kind>` block; it reports as a toast (`l` keeps the argv and classified result).
 - `2f519db` — the success toast is verdict-only (`sync ok <repo>`), and a finished sync clears any pre-existing action block in the card for that repo (also on failure).
 - `aa2fb2c` — the success toast appends the classified outcome of the reconciling pull (`sync ok <repo> — rebase|fast-forward|up-to-date|rebase+autostash|merge`), never the argv.
 - Verified live on a real repo (dbx): `s` ran `git fetch origin` + `git pull --rebase --autostash origin main`, integrated a pushed probe commit (fast-forward), toast + log as expected.

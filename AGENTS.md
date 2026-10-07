@@ -600,10 +600,11 @@ block. Decisions that are not evident:
   is the `p` selector; `isRebaseKind` = pull kinds plus `sync`, so the sync gets
   the spinner and the mid-rebase warning after a conflicted rebase without
   joining the selector.
-- **A worktree sub-row resolves against the global default.** Its synthetic
-  project is not in `m.projects`, so `syncOf` falls back to `cfg.SyncBranch` (the
-  parent's marker is not consulted) and, having no snapshot of its own, the
-  refusal cannot fire.
+- **A worktree sub-row uses the global default unless it is itself discovered.**
+  An undiscovered worktree path is not in `m.projects`, so `syncOf` falls back to
+  `cfg.SyncBranch` (the parent's marker is not consulted) and, having no snapshot
+  of its own, the refusal cannot fire; a worktree path with its own marker
+  resolves to that project and its snapshot, so the refusal can.
 
 ## Wiring gotchas
 
