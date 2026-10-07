@@ -145,7 +145,7 @@ func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 	}{
 		{"without prefix", "https://gitlab.example.com/group/sub/proj.git"},
 		{"with prefix", "https://gitlab.example.com/git/group/sub/proj.git"},
-		{"with prefix y trailing slash", "https://gitlab.example.com/git/group/sub/proj/"},
+		{"with prefix and trailing slash", "https://gitlab.example.com/git/group/sub/proj/"},
 		{"scp with prefix", "git@gitlab.example.com:git/group/sub/proj.git"},
 		{"scp with prefix and no .git", "git@gitlab.example.com:git/group/sub/proj"},
 	}
@@ -192,7 +192,7 @@ func TestPrefixFromAPIBase(t *testing.T) {
 		{"unexpected api_base: v3", "/git/api/v3/", ""},
 		{"unexpected api_base: subpath", "/api/v4/projects", ""},
 		{"unexpected api_base: only the api prefix", "/git/api/", ""},
-		{"api_base absoluto", "https://gitlab.example.com/api/v4/", ""},
+		{"api_base absolute", "https://gitlab.example.com/api/v4/", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,8 +233,8 @@ func TestParseRemoteWithSegmentEmptyNotIsRepo(t *testing.T) {
 // `colon < 0` and `colon <= 0` are only told apart by a remote starting with ":" (index 0); without this case a boundary mutant survives, since an empty host is not in the map anyway and the result is the same by another path.
 func TestParseRemoteWithColonInThePositionZero(t *testing.T) {
 	hosts := testHosts()
-	conVacio := map[string]string{"": ForgeGitHub, "github.com": ForgeGitHub}
-	if ref, ok := ParseRemoteURL("git@:owner/repo", conVacio, nil); ok {
+	withEmpty := map[string]string{"": ForgeGitHub, "github.com": ForgeGitHub}
+	if ref, ok := ParseRemoteURL("git@:owner/repo", withEmpty, nil); ok {
 		t.Errorf("ParseRemoteURL(empty host) = %+v, want unparseable: a remote with no host is not a repo", ref)
 	}
 	if ref, ok := ParseRemoteURL("git@:owner/repo", hosts, nil); ok {

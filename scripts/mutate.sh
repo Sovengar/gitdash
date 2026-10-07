@@ -621,6 +621,11 @@ command -v jq >/dev/null 2>&1 ||
 # The working tree survives between local runs, so a stale report must never be read as this one's.
 rm -f "$REPORT" "$RUN_LOG"
 
+# gremlins sets each mutant's timeout from ITS OWN coverage run, so that run has to measure the
+# same thing the coefficient was computed from: a warm test cache reports ~0.2s, the ceiling
+# collapses to a couple of seconds and every mutant of a slow package expires untested.
+export GOFLAGS="-count=1${GOFLAGS:+ $GOFLAGS}"
+
 # --- warm: a cache primer only, never the source of the denominator
 # -run '^$' builds the instrumented packages and runs zero suites, so its duration is build time.
 echo "mutate: warming the build cache…" >&2

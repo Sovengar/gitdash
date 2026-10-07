@@ -128,7 +128,7 @@ func TestPreviewSummaryOfGroup(t *testing.T) {
 
 func TestPreviewWithoutRows(t *testing.T) {
 	m := previewModel(t)
-	m.search = "nada-casa"
+	m.search = "zzz-no-match"
 	m.clampCursor()
 
 	out := stripANSI(m.View().Content)

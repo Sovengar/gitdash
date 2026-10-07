@@ -170,7 +170,7 @@ func TestDetailShowsTheCommandResolved(t *testing.T) {
 	updated, _ := m.Update(actionMsg{
 		path: "/tmp/old-clean", kind: "pull_rebase",
 		cmd:    "git pull --rebase --autostash",
-		output: "Rebase aplicado",
+		output: "Rebase applied",
 	})
 	m = updated.(Model)
 	out := stripANSI(m.View().Content)

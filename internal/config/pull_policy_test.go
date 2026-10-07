@@ -28,12 +28,12 @@ func TestVariantsPullWithFlagsOwn(t *testing.T) {
 	for action, flags := range want {
 		raw, ok := cmds[action]
 		if !ok {
-			t.Errorf("commands[%s] ausente", action)
+			t.Errorf("commands[%s] missing", action)
 			continue
 		}
 		fields := strings.Fields(raw)
 		if fields[0] != "pull" {
-			t.Errorf("commands[%s] = %q, want subcomando pull", action, raw)
+			t.Errorf("commands[%s] = %q, want subcommand pull", action, raw)
 		}
 		if len(fields)-1 != len(flags) {
 			t.Errorf("commands[%s] = %q, want flags %v", action, raw, flags)
@@ -41,7 +41,7 @@ func TestVariantsPullWithFlagsOwn(t *testing.T) {
 		}
 		for i, f := range flags {
 			if fields[1+i] != f {
-				t.Errorf("commands[%s] = %q, want flag %q en %d", action, raw, f, i)
+				t.Errorf("commands[%s] = %q, want flag %q at %d", action, raw, f, i)
 			}
 		}
 	}

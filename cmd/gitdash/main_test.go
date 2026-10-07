@@ -20,7 +20,7 @@ import (
 	"gitdash/internal/tui"
 )
 
-type dobles struct {
+type doubles struct {
 	d          deps
 	cfgWarn    string
 	cfg        config.Config
@@ -31,9 +31,9 @@ type dobles struct {
 	toastVisto string
 }
 
-func nuevasDobles(t *testing.T) *dobles {
+func newDoubles(t *testing.T) *doubles {
 	t.Helper()
-	x := &dobles{}
+	x := &doubles{}
 	x.d = deps{
 		load:  func() (config.Config, string) { return x.cfg, x.cfgWarn },
 		print: func(config.Config) { x.printed++ },
@@ -49,7 +49,7 @@ func nuevasDobles(t *testing.T) *dobles {
 
 // A config with a warning is still a usable config, and aborting would throw the session away over a file with one line that bothers it; inverting this guard turned a warning into a startup failure and no test noticed.
 func TestTheWarningOfConfigNotAborts(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 	x.cfgWarn = "config: unknown key 'foo'"
 
 	var eout strings.Builder
@@ -65,7 +65,7 @@ func TestTheWarningOfConfigNotAborts(t *testing.T) {
 }
 
 func TestWithoutWarningNotIsWritesNothing(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 
 	var eout strings.Builder
 	if code := runWith(x.d, false, &eout); code != 0 {
@@ -77,7 +77,7 @@ func TestWithoutWarningNotIsWritesNothing(t *testing.T) {
 }
 
 func TestTheWarningGoesAlsoOnTheModel(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 	x.cfgWarn = "config: unreadable roots"
 
 	var eout strings.Builder
@@ -88,7 +88,7 @@ func TestTheWarningGoesAlsoOnTheModel(t *testing.T) {
 }
 
 func TestPrintModeNotStartsTheTUI(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 
 	var eout strings.Builder
 	if code := runWith(x.d, true, &eout); code != 0 {
@@ -104,7 +104,7 @@ func TestPrintModeNotStartsTheTUI(t *testing.T) {
 
 // The complementary half of the previous one: without it, inverting the guard would look like "print works sometimes".
 func TestTUIModeNotPrintsTheTable(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 
 	var eout strings.Builder
 	runWith(x.d, false, &eout)
@@ -117,7 +117,7 @@ func TestTUIModeNotPrintsTheTable(t *testing.T) {
 }
 
 func TestErrorOfTheProgramExitsWithOne(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 	x.tuiErr = errors.New("terminal too narrow")
 
 	var eout strings.Builder
@@ -130,7 +130,7 @@ func TestErrorOfTheProgramExitsWithOne(t *testing.T) {
 }
 
 func TestTheConfigArrivesSameAModeConsumer(t *testing.T) {
-	x := nuevasDobles(t)
+	x := newDoubles(t)
 	x.cfg = config.Defaults()
 
 	runWith(x.d, true, io.Discard)
@@ -138,7 +138,7 @@ func TestTheConfigArrivesSameAModeConsumer(t *testing.T) {
 		t.Log("print mode: the config did not reach the model because it is not built, correct")
 	}
 
-	x2 := nuevasDobles(t)
+	x2 := newDoubles(t)
 	x2.cfg = config.Defaults()
 	runWith(x2.d, false, io.Discard)
 	if x2.modelCfg.Roots == nil {

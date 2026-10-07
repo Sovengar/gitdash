@@ -52,7 +52,7 @@ func Marker(t TB, dir, name, primary, secondary string, malformed bool) {
 	t.Helper()
 	var content string
 	if malformed {
-		content = "name = [roto\n"
+		content = "name = [broken\n"
 	} else {
 		if name != "" {
 			content += "name = \"" + name + "\"\n"

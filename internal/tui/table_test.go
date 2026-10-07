@@ -19,7 +19,7 @@ func rowDe(name string, state gitstatus.State, lastCommit int64) row {
 	}
 }
 
-func nombresDe(rows []row) []string {
+func namesOf(rows []row) []string {
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, r.project.Name)
@@ -30,7 +30,7 @@ func nombresDe(rows []row) []string {
 // The comparator has to be a STRICT ORDER: if two rows tied on all three keys and it said "less" in both directions, the insertion sort would swap them and the order would stop being stable across scans.
 func TestSortRowsAttentionFirst(t *testing.T) {
 	now := time.Now().Unix()
-	casos := []struct {
+	cases := []struct {
 		name string
 		rows []row
 		want []string
@@ -38,10 +38,10 @@ func TestSortRowsAttentionFirst(t *testing.T) {
 		{
 			name: "the score wins over the date",
 			rows: []row{
-				rowDe("clean-reciente", gitstatus.StateClean, now),
+				rowDe("clean-recent", gitstatus.StateClean, now),
 				rowDe("dirty-old", gitstatus.StateDirty, now-100000),
 			},
-			want: []string{"dirty-old", "clean-reciente"},
+			want: []string{"dirty-old", "clean-recent"},
 		},
 		{
 			name: "with the same score, the more recent commit",
@@ -55,17 +55,17 @@ func TestSortRowsAttentionFirst(t *testing.T) {
 			name: "with the same score and date, the name",
 			rows: []row{
 				rowDe("zeta", gitstatus.StateClean, now),
-				rowDe("alfa", gitstatus.StateClean, now),
+				rowDe("alpha", gitstatus.StateClean, now),
 			},
-			want: []string{"alfa", "zeta"},
+			want: []string{"alpha", "zeta"},
 		},
 		{
 			name: "the name ignores case",
 			rows: []row{
 				rowDe("Zeta", gitstatus.StateClean, now),
-				rowDe("alfa", gitstatus.StateClean, now),
+				rowDe("alpha", gitstatus.StateClean, now),
 			},
-			want: []string{"alfa", "Zeta"},
+			want: []string{"alpha", "Zeta"},
 		},
 		{
 			name: "a total tie keeps the input order",
@@ -76,11 +76,11 @@ func TestSortRowsAttentionFirst(t *testing.T) {
 			want: []string{"same", "same"},
 		},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		rows := append([]row(nil), c.rows...)
 		sortRows(rows)
-		if got := nombresDe(rows); !equalStrings(got, c.want) {
-			t.Errorf("%s: orden = %v, want %v", c.name, got, c.want)
+		if got := namesOf(rows); !equalStrings(got, c.want) {
+			t.Errorf("%s: order = %v, want %v", c.name, got, c.want)
 		}
 	}
 
@@ -91,8 +91,8 @@ func TestSortRowsAttentionFirst(t *testing.T) {
 				rows = append(rows, rowDe(fmt.Sprintf("r%02d", i), gitstatus.StateDirty, now-int64(i)))
 			}
 			sortRows(rows)
-			want := nombresDe(append([]row(nil), rows...))
-			for i, got := range nombresDe(rows) {
+			want := namesOf(append([]row(nil), rows...))
+			for i, got := range namesOf(rows) {
 				if got != want[i] {
 					t.Fatalf("n=%d: row %d ended up as %q, want %q (the list is not sorted)", n, i, got, want[i])
 				}
@@ -104,7 +104,7 @@ func TestSortRowsAttentionFirst(t *testing.T) {
 				rows = append(rows, rowDe(fmt.Sprintf("r%02d", i), gitstatus.StateDirty, now-int64(n-i)))
 			}
 			sortRows(rows)
-			for i, got := range nombresDe(rows) {
+			for i, got := range namesOf(rows) {
 				if want := fmt.Sprintf("r%02d", n-1-i); got != want {
 					t.Fatalf("n=%d: row %d ended up as %q, want %q", n, i, got, want)
 				}
@@ -135,14 +135,14 @@ func TestFitColumnsFitExact(t *testing.T) {
 	if got := fitColumns(-10); got != 1 {
 		t.Errorf("inner=-10: %d columns, want 1", got)
 	}
-	acum := 0
+	sum := 0
 	for i, c := range tableColumns {
-		acum += c.width
-		if got := fitColumns(acum); got != i+1 {
-			t.Errorf("inner=%d (width de %s exact): %d columns, want %d", acum, c.title, got, i+1)
+		sum += c.width
+		if got := fitColumns(sum); got != i+1 {
+			t.Errorf("inner=%d (width of %s exact): %d columns, want %d", sum, c.title, got, i+1)
 		}
-		if want := max(1, i); fitColumns(acum-1) != want {
-			t.Errorf("inner=%d (one cell less than %s): %d columns, want %d", acum-1, c.title, fitColumns(acum-1), want)
+		if want := max(1, i); fitColumns(sum-1) != want {
+			t.Errorf("inner=%d (one cell less than %s): %d columns, want %d", sum-1, c.title, fitColumns(sum-1), want)
 		}
 	}
 	if got := fitColumns(total); got != len(tableColumns) {
@@ -157,29 +157,29 @@ func TestFitColumnsFitExact(t *testing.T) {
 func TestHeaderUsesTheWidthInterior(t *testing.T) {
 	for _, width := range []int{24, 30, 40, 55, 60, 80, 120, 200} {
 		want := fitColumns(width - 4)
-		var esperado strings.Builder
+		var expected strings.Builder
 		for _, c := range tableColumns[:want] {
-			esperado.WriteString(pad(c.title, c.width))
+			expected.WriteString(pad(c.title, c.width))
 		}
-		if got := headerColumns(width); got != esperado.String() {
-			t.Errorf("width=%d: header = %q, want %q", width, got, esperado.String())
+		if got := headerColumns(width); got != expected.String() {
+			t.Errorf("width=%d: header = %q, want %q", width, got, expected.String())
 		}
 	}
 }
 
 // A "0" on the left of the separator looks like data and is not.
 func TestDirtyTailOnlySetsWhatIsThere(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name            string
 		tracked, untked int
 		want            string
 	}{
 		{"clean", 0, 0, ""},
-		{"solo tracked", 2, 0, "2"},
-		{"solo untracked", 0, 3, "?3"},
-		{"ambos", 2, 3, "2 ?3"},
+		{"only tracked", 2, 0, "2"},
+		{"only untracked", 0, 3, "?3"},
+		{"both", 2, 3, "2 ?3"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		s := gitstatus.Status{TrackedChanges: c.tracked, Untracked: c.untked}
 		if got := dirtyTail(row{snap: gitstatus.Snapshot{Status: s}}); got != c.want {
 			t.Errorf("%s: dirtyTail = %q, want %q", c.name, got, c.want)
@@ -190,7 +190,7 @@ func TestDirtyTailOnlySetsWhatIsThere(t *testing.T) {
 // An empty cell must not wear the state colour: that is the difference between a quiet table and one hinting at something.
 func TestWtCellEmptyNotInheritsTheColorOfTheState(t *testing.T) {
 	m := newTestModel(t, nil, nil)
-	casos := []struct {
+	cases := []struct {
 		name  string
 		state gitstatus.State
 		want  string
@@ -200,7 +200,7 @@ func TestWtCellEmptyNotInheritsTheColorOfTheState(t *testing.T) {
 		{"clean", gitstatus.StateClean, ""},
 		{"no-upstream unchanged", gitstatus.StateNoUpstream, ""},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		s := gitstatus.Snapshot{Status: gitstatus.Status{Branch: "main", Ahead: 2}}
 		if c.state == gitstatus.StateBehind {
 			s.Status = gitstatus.Status{Branch: "main", Behind: 2}
@@ -225,16 +225,16 @@ func TestWtCellEmptyNotInheritsTheColorOfTheState(t *testing.T) {
 func TestNameCellWarnsOfTheMarkerBroken(t *testing.T) {
 	m := newTestModel(t, nil, nil)
 	good := discovery.Project{Path: "/tmp/ok", Name: "ok", HasRepo: true}
-	roto := discovery.Project{Path: "/tmp/roto", Name: "roto", HasRepo: true, MarkerErr: "line 3: invalid value"}
+	broken := discovery.Project{Path: "/tmp/broken", Name: "broken", HasRepo: true, MarkerErr: "line 3: invalid value"}
 
 	if _, style := m.nameCell(row{project: good, state: gitstatus.StateClean}); style.Render("x") != styleSel.Render("x") {
 		t.Error("a healthy marker must not carry the warning style")
 	}
-	name, style := m.nameCell(row{project: roto, state: gitstatus.StateClean})
+	name, style := m.nameCell(row{project: broken, state: gitstatus.StateClean})
 	if style.Render(name) != styleWarn.Render(name) {
 		t.Errorf("broken marker: style = %q, want the warning one", style.Render(name))
 	}
-	if !strings.Contains(name, "roto") {
+	if !strings.Contains(name, "broken") {
 		t.Errorf("broken marker: name = %q", name)
 	}
 }
@@ -269,18 +269,18 @@ func TestGroupStatsCountsTheWorktrees(t *testing.T) {
 
 func TestRelativeTimeBuckets(t *testing.T) {
 	now := time.Now()
-	casos := []struct {
+	cases := []struct {
 		name string
-		edad time.Duration
+		age  time.Duration
 		want string
 	}{
-		{"futuro o epoch 0", -time.Hour, "-"},
+		{"future or epoch 0", -time.Hour, "-"},
 		{"now", 0, "now"},
-		{"minutos", 5 * time.Minute, "5m"},
-		{"horas", 3 * time.Hour, "3h"},
+		{"minutes", 5 * time.Minute, "5m"},
+		{"hours", 3 * time.Hour, "3h"},
 		{"days", 3 * 24 * time.Hour, "3d"},
-		{"semanas", 3 * 7 * 24 * time.Hour, "3w"},
-		{"meses", 3 * 30 * 24 * time.Hour, "3mo"},
+		{"weeks", 3 * 7 * 24 * time.Hour, "3w"},
+		{"months", 3 * 30 * 24 * time.Hour, "3mo"},
 		{"years", 400 * 24 * time.Hour, "13mo"},
 
 		// The cases above sit at the CENTRE of each bucket, where no guard mutant reaches them (with the sign flipped 3h gives "0d", except "3mo", whose 90 days land in the months bucket either way); only the exact edges tell the sign apart.
@@ -293,13 +293,13 @@ func TestRelativeTimeBuckets(t *testing.T) {
 		{"just before the month", 30*24*time.Hour - time.Hour, "4w"},
 		{"right at the month", 30 * 24 * time.Hour, "1mo"},
 	}
-	for _, c := range casos {
-		epoch := now.Add(-c.edad).Unix()
+	for _, c := range cases {
+		epoch := now.Add(-c.age).Unix()
 		if c.want == "-" {
 			epoch = 0
 		}
 		if got := relativeTime(epoch); got != c.want {
-			t.Errorf("%s: relativeTime(-%s) = %q, want %q", c.name, c.edad, got, c.want)
+			t.Errorf("%s: relativeTime(-%s) = %q, want %q", c.name, c.age, got, c.want)
 		}
 	}
 }
@@ -350,7 +350,7 @@ func TestSyncOfAndNameResolveTheMatchingPath(t *testing.T) {
 }
 
 func TestSyncOfFallbackOnlyInTheDefault(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name     string
 		project  discovery.Project
 		global   string
@@ -359,11 +359,11 @@ func TestSyncOfFallbackOnlyInTheDefault(t *testing.T) {
 		wantFB   bool
 	}{
 		{"undeclared default", discovery.Project{Path: "/a"}, "main", false, "main", true},
-		{"marcador declarado", discovery.Project{Path: "/a", SyncBranch: "develop"}, "main", false, "develop", false},
+		{"declared marker", discovery.Project{Path: "/a", SyncBranch: "develop"}, "main", false, "develop", false},
 		{"explicit global config", discovery.Project{Path: "/a"}, "release", true, "release", false},
 		{"marker over the explicit global", discovery.Project{Path: "/a", SyncBranch: "develop"}, "release", true, "develop", false},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := newTestModel(t, []discovery.Project{c.project}, map[string]gitstatus.Snapshot{})
 			m.cfg.SyncBranch = c.global
@@ -386,15 +386,15 @@ func TestHeaderAndRowsFitTheSameColumns(t *testing.T) {
 
 	for _, width := range []int{24, 30, 40, 55, 60, 80, 120, 200} {
 		m.width = width
-		anchoCabecera := len([]rune(headerColumns(width)))
+		headerWidth := len([]rune(headerColumns(width)))
 		for _, e := range entries {
 			if e.kind != kindRepo {
 				continue
 			}
 			row := stripANSI(m.renderRow(e.r, false))
-			if got := len([]rune(row)) - 2; got != anchoCabecera {
+			if got := len([]rune(row)) - 2; got != headerWidth {
 				t.Errorf("width=%d: the row of %s composes %d cells and the header %d",
-					width, e.r.project.Name, got, anchoCabecera)
+					width, e.r.project.Name, got, headerWidth)
 			}
 		}
 	}
@@ -403,63 +403,63 @@ func TestHeaderAndRowsFitTheSameColumns(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
 	mw := newTestModel(t, []discovery.Project{p}, st)
 	mw, _ = press(mw, "enter") // expands the worktrees
-	var vistas int
+	var visible int
 	for _, e := range mw.entries() {
 		if e.kind != kindWorktree {
 			continue
 		}
-		vistas++
+		visible++
 		for _, width := range []int{24, 40, 60, 80, 120} {
 			mw.width = width
 			row := stripANSI(mw.renderWorktreeRow(e.wt, false))
 			// Compared against the sum of the columns (and not against another row's length), which is what pins this width to the split.
-			esperado := worktreeIndent
+			expected := worktreeIndent
 			for _, c := range tableColumns[:fitColumns(width-4)] {
-				esperado += c.width
+				expected += c.width
 			}
-			if len([]rune(row)) != esperado {
+			if len([]rune(row)) != expected {
 				t.Errorf("width=%d: the worktree row measures %d, want %d (columns + indent): %q",
-					width, len([]rune(row)), esperado, row)
+					width, len([]rune(row)), expected, row)
 			}
 		}
 	}
-	if vistas == 0 {
+	if visible == 0 {
 		t.Fatal("the fixture produced no worktree subrows: the check would be vacuous")
 	}
 }
 
-func fixtureConGruposYErrores() ([]discovery.Project, map[string]gitstatus.Snapshot) {
+func fixtureWithGroupsAndErrors() ([]discovery.Project, map[string]gitstatus.Snapshot) {
 	projects := []discovery.Project{
-		{Path: "/tmp/g-doble", Name: "doble", HasRepo: true, PrimaryGroup: "vsocial", SecondaryGroup: "backend"},
-		{Path: "/tmp/g-solo", Name: "solo", HasRepo: true, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-double", Name: "double", HasRepo: true, PrimaryGroup: "vsocial", SecondaryGroup: "backend"},
+		{Path: "/tmp/g-only", Name: "only", HasRepo: true, PrimaryGroup: "vsocial"},
 		{Path: "/tmp/g-without", Name: "without", HasRepo: true},
-		{Path: "/tmp/g-error", Name: "roto", HasRepo: true, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-error", Name: "broken", HasRepo: true, PrimaryGroup: "vsocial"},
 		{Path: "/tmp/g-norepo", Name: "norepo", HasRepo: false, PrimaryGroup: "vsocial"},
-		{Path: "/tmp/g-withoutrama", Name: "sinrama", HasRepo: true, PrimaryGroup: "vsocial"},
+		{Path: "/tmp/g-without-branch", Name: "nobranch", HasRepo: true, PrimaryGroup: "vsocial"},
 	}
 	states := map[string]gitstatus.Snapshot{
-		"/tmp/g-doble":       snapClean(),
-		"/tmp/g-solo":        snapClean(),
-		"/tmp/g-without":     snapClean(),
-		"/tmp/g-error":       {Status: gitstatus.Status{Branch: "main"}, Err: "fatal: I do not write"},
-		"/tmp/g-norepo":      {},
-		"/tmp/g-withoutrama": {Status: gitstatus.Status{}},
+		"/tmp/g-double":         snapClean(),
+		"/tmp/g-only":           snapClean(),
+		"/tmp/g-without":        snapClean(),
+		"/tmp/g-error":          {Status: gitstatus.Status{Branch: "main"}, Err: "fatal: I do not write"},
+		"/tmp/g-norepo":         {},
+		"/tmp/g-without-branch": {Status: gitstatus.Status{}},
 	}
 	return projects, states
 }
 
 func TestGroupLabelOfTwoLevels(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		p    discovery.Project
 		want string
 	}{
 		{"both levels", discovery.Project{PrimaryGroup: "vsocial", SecondaryGroup: "backend"}, "vsocial/backend"},
-		{"solo primario", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
+		{"primary only", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
 		{"no group", discovery.Project{}, ""},
 		{"secondary only is not shown (one level does not nest)", discovery.Project{SecondaryGroup: "backend"}, ""},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := groupLabel(c.p); got != c.want {
 			t.Errorf("%s: groupLabel = %q, want %q", c.name, got, c.want)
 		}
@@ -478,7 +478,7 @@ func TestBranchCellWithoutBranchAndDetached(t *testing.T) {
 	}{
 		{"no repo", row{state: gitstatus.StateNoRepo}, "-"},
 		{"repo with no branch (unborn HEAD)", row{state: gitstatus.StateClean}, "-"},
-		{"rama normal", row{state: gitstatus.StateClean, snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "feat/x"}}}, "feat/x"},
+		{"normal branch", row{state: gitstatus.StateClean, snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "feat/x"}}}, "feat/x"},
 		{"detached", row{state: gitstatus.StateDetached, snap: gitstatus.Snapshot{Status: gitstatus.Status{Branch: "abc123", Detached: true}}}, "abc123 (detached)"},
 	} {
 		got, _ := m.branchCell(c.r)
@@ -489,7 +489,7 @@ func TestBranchCellWithoutBranchAndDetached(t *testing.T) {
 }
 
 func TestGroupStatsCountsTheErrors(t *testing.T) {
-	projects, states := fixtureConGruposYErrores()
+	projects, states := fixtureWithGroupsAndErrors()
 	m := newTestModel(t, projects, states)
 
 	st := m.groupStats(groupKey("vsocial", ""))
@@ -509,15 +509,15 @@ func TestRelativeTimeWalksItsBands(t *testing.T) {
 	now := time.Now().Unix()
 	for _, c := range []struct {
 		name string
-		edad time.Duration
+		age  time.Duration
 		want string
 	}{
 		{"just now", 0, "now"},
-		{"minutos", 5 * time.Minute, "5m"},
-		{"horas", 3 * time.Hour, "3h"},
+		{"minutes", 5 * time.Minute, "5m"},
+		{"hours", 3 * time.Hour, "3h"},
 		{"days", 2 * 24 * time.Hour, "2d"},
-		{"semanas", 10 * 24 * time.Hour, "1w"},
-		{"meses", 60 * 24 * time.Hour, "2mo"},
+		{"weeks", 10 * 24 * time.Hour, "1w"},
+		{"months", 60 * 24 * time.Hour, "2mo"},
 		// A "3h" case does not tell a 24h threshold from a 23h one: it takes an age falling BETWEEN the two, which is exactly what a boundary mutant moves (the real age is the requested one plus the microseconds the test takes, so the cases stay below the threshold, never right on it).
 		{"59s is still now", 59 * time.Second, "now"},
 		{"30m is already minutes", 30 * time.Minute, "30m"},
@@ -528,7 +528,7 @@ func TestRelativeTimeWalksItsBands(t *testing.T) {
 		{"29d23h is still weeks", 29*24*time.Hour + 23*time.Hour, "4w"},
 		{"30d1h is already months", 30*24*time.Hour + time.Hour, "1mo"},
 	} {
-		if got := relativeTime(now - int64(c.edad.Seconds())); got != c.want {
+		if got := relativeTime(now - int64(c.age.Seconds())); got != c.want {
 			t.Errorf("%s: relativeTime = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -536,13 +536,13 @@ func TestRelativeTimeWalksItsBands(t *testing.T) {
 		t.Errorf("no epoch: relativeTime = %q, want -", got)
 	}
 	if got := relativeTime(-5); got != "-" {
-		t.Errorf("epoch negativo: relativeTime = %q, want -", got)
+		t.Errorf("negative epoch: relativeTime = %q, want -", got)
 	}
 }
 
 func TestStripANSIOnlyRemovesSequences(t *testing.T) {
-	if got := stripANSI("\x1b[31mrojo\x1b[0m"); got != "rojo" {
-		t.Errorf("SGR: %q, want rojo", got)
+	if got := stripANSI("\x1b[31mred\x1b[0m"); got != "red" {
+		t.Errorf("SGR: %q, want red", got)
 	}
 	if got := stripANSI("before\x1b[2Kafter"); got != "beforeafter" {
 		t.Errorf("erase: %q, want beforeafter", got)
@@ -604,14 +604,14 @@ func TestSummaryNotCountsWorktreesFolded(t *testing.T) {
 		PrimaryGroup: "backend", HasRepo: true,
 		IsWorktree: true, MainRepo: main.Path,
 	}
-	solo := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{
+	only := newTestModel(t, []discovery.Project{main}, map[string]gitstatus.Snapshot{
 		main.Path: snapClean(),
 	})
 	conWt := newTestModel(t, []discovery.Project{main, wt}, map[string]gitstatus.Snapshot{
 		main.Path: snapClean(),
 		wt.Path:   snapClean(),
 	})
-	a, _, _, _ := solo.summary()
+	a, _, _, _ := only.summary()
 	b, _, _, _ := conWt.summary()
 	if a != b {
 		t.Errorf("summary with a folded worktree = %d repos, want %d (it does not count)", b, a)
@@ -670,7 +670,7 @@ func TestWorktreeBranchLabel(t *testing.T) {
 func TestRelativeAgeInTheThresholdExact(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		edad time.Duration
+		age  time.Duration
 		want string
 	}{
 		{"1ns before the minute", time.Minute - time.Nanosecond, "now"},
@@ -684,8 +684,8 @@ func TestRelativeAgeInTheThresholdExact(t *testing.T) {
 		{"1ns before the month", 30*24*time.Hour - time.Nanosecond, "4w"},
 		{"right at the month", 30 * 24 * time.Hour, "1mo"},
 	} {
-		if got := relativeAge(c.edad); got != c.want {
-			t.Errorf("%s: relativeAge(%s) = %q, want %q", c.name, c.edad, got, c.want)
+		if got := relativeAge(c.age); got != c.want {
+			t.Errorf("%s: relativeAge(%s) = %q, want %q", c.name, c.age, got, c.want)
 		}
 	}
 }

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRenderWithTitleWidthExactAndGlyphs(t *testing.T) {
-	out := RenderWithTitle(Rounded(), lipgloss.Color("238"), " gitdash ", "hola", 20)
+	out := RenderWithTitle(Rounded(), lipgloss.Color("238"), " gitdash ", "text", 20)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("lines = %d, want 3 (border + content + border)", len(lines))
@@ -21,14 +21,14 @@ func TestRenderWithTitleWidthExactAndGlyphs(t *testing.T) {
 	}
 	top := ansi.Strip(lines[0])
 	if !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
-		t.Errorf("esquinas superiores incorrectas: %q", top)
+		t.Errorf("wrong top corners: %q", top)
 	}
 	if !strings.Contains(top, " gitdash ") {
 		t.Errorf("title not embedded in the top line: %q", top)
 	}
 	bot := ansi.Strip(lines[2])
 	if !strings.HasPrefix(bot, "╰") || !strings.HasSuffix(bot, "╯") {
-		t.Errorf("esquinas inferiores incorrectas: %q", bot)
+		t.Errorf("wrong bottom corners: %q", bot)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestRenderWithTitlesLegendLower(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	bot := ansi.Strip(lines[len(lines)-1])
 	if !strings.Contains(bot, " bottom ") {
-		t.Errorf("leyenda inferior ausente: %q", bot)
+		t.Errorf("bottom legend missing: %q", bot)
 	}
 	if !strings.HasSuffix(bot, "╯") {
 		t.Errorf("bottom right corner missing: %q", bot)
@@ -143,11 +143,11 @@ func TestRenderWithTitlesAlignsTheTitle(t *testing.T) {
 		wantTop    string
 		wantBottom string
 	}{
-		{"left: the whole gap on the right", AlignLeft, "╭hola───╮", "╰───────╯"},
-		{"centre: 1 on the left and 2 on the right (odd)", AlignCenter, "╭─hola──╮", "╰───────╯"},
-		{"right: the whole gap on the left", AlignRight, "╭───hola╮", "╰───────╯"},
+		{"left: the whole gap on the right", AlignLeft, "╭text───╮", "╰───────╯"},
+		{"centre: 1 on the left and 2 on the right (odd)", AlignCenter, "╭─text──╮", "╰───────╯"},
+		{"right: the whole gap on the left", AlignRight, "╭───text╮", "╰───────╯"},
 	} {
-		out := RenderWithTitles(Rounded(), nil, "hola", c.align, "", c.align, "x", width)
+		out := RenderWithTitles(Rounded(), nil, "text", c.align, "", c.align, "x", width)
 		lines := strings.Split(out, "\n")
 		if len(lines) != 3 {
 			t.Fatalf("%s: %d lines, want 3 (border + content + border):\n%s",
@@ -188,18 +188,18 @@ func TestRenderWithTitlesWithoutTitleNotLeavesGap(t *testing.T) {
 
 // The empty border character is replaced by a space, and the reason is width: with the border at "" the box would draw a line one cell short on that side and would look crooked. The case is forced by calling the function with empty borders, which is what Render does when the style does not bring them.
 func TestContentLinesReplacesBordersEmpty(t *testing.T) {
-	got := contentLines(nil, "", "", "hola", 12)
+	got := contentLines(nil, "", "", "text", 12)
 	if len(got) != 1 {
 		t.Fatalf("contentLines returned %d lines, want 1", len(got))
 	}
-	if want := " hola         "; got[0] != want {
+	if want := " text         "; got[0] != want {
 		t.Errorf("line = %q, want %q (the empty borders are one space each)", got[0], want)
 	}
 	if w := ansi.StringWidth(got[0]); w != 14 {
 		t.Errorf("width = %d, want 14 (12 of interior + 2 borders)", w)
 	}
-	got = contentLines(nil, "|", "|", "hola", 12)
-	if got[0] != "|hola        |" {
+	got = contentLines(nil, "|", "|", "text", 12)
+	if got[0] != "|text        |" {
 		t.Errorf("line with borders = %q, want the frame borders", got[0])
 	}
 }

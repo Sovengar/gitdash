@@ -26,7 +26,7 @@ func TestParseClean(t *testing.T) {
 		t.Errorf("st = %+v", st)
 	}
 	if st.Ahead != 0 || st.Behind != 0 || st.Dirty() != 0 || len(files) != 0 {
-		t.Errorf("falla: %+v files=%v", st, files)
+		t.Errorf("fails: %+v files=%v", st, files)
 	}
 	if got := st.Derive(); got != StateClean {
 		t.Errorf("derive = %v, want clean", got)
@@ -112,12 +112,12 @@ func TestParseUnbornBranch(t *testing.T) {
 }
 
 func TestParseLog(t *testing.T) {
-	out := "abc1234\x001700000000\x00feat: uno\ndef5678\x001699000000\x00fix: dos\n"
+	out := "abc1234\x001700000000\x00feat: one\ndef5678\x001699000000\x00fix: two\n"
 	commits := ParseLog(out)
 	if len(commits) != 2 {
 		t.Fatalf("commits = %d", len(commits))
 	}
-	if commits[0].Sha != "abc1234" || commits[0].Subject != "feat: uno" || commits[0].When != 1700000000 {
+	if commits[0].Sha != "abc1234" || commits[0].Subject != "feat: one" || commits[0].When != 1700000000 {
 		t.Errorf("commits[0] = %+v", commits[0])
 	}
 }
@@ -229,7 +229,7 @@ func TestParseListFilesClamped(t *testing.T) {
 
 // A truncated entry line (fewer fields than required) is dropped, parsing what it can without indexing past the slice; a "1 " line with 7 fields instead of 8 is exactly that guard's edge.
 func TestParseLineTruncatedIsDiscards(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name, body string
 		beforePath int
 	}{
@@ -239,7 +239,7 @@ func TestParseLineTruncatedIsDiscards(t *testing.T) {
 		{"2 with 7 fields (the path is missing)", "R. N... 100644 100644 abc", 8},
 		{"u with 8 fields (the path is missing)", "UU N... 100644 100644 100644 abc def", 9},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, ok := parseEntry(c.body, c.beforePath); ok {
 				t.Errorf("parseEntry(%q, %d) = true, want false (incomplete line)", c.body, c.beforePath)
@@ -275,17 +275,17 @@ func TestCollectWithoutCommits(t *testing.T) {
 
 // An empty log with exit 0 is not what a repo with no commits does (it fails), but a wrapped git can do it: the last commit date is 0, not an out-of-range index.
 func TestLastCommitWhen(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name    string
 		commits []Commit
 		want    int64
 	}{
 		{"nil", nil, 0},
 		{"empty", []Commit{}, 0},
-		{"uno", []Commit{{Sha: "a", When: 1700000000}}, 1700000000},
+		{"one", []Commit{{Sha: "a", When: 1700000000}}, 1700000000},
 		{"several, it uses the first", []Commit{{When: 99}, {When: 1}}, 99},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := lastCommitWhen(c.commits); got != c.want {
 			t.Errorf("%s: lastCommitWhen = %d, want %d", c.name, got, c.want)
 		}
@@ -294,7 +294,7 @@ func TestLastCommitWhen(t *testing.T) {
 
 // The edge of that truncation is exactly 7 characters: with fewer there is nothing to show and with more it is cut.
 func TestNormalizeBranchDetachedShaShort(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		st   Status
 		want string
@@ -307,7 +307,7 @@ func TestNormalizeBranchDetachedShaShort(t *testing.T) {
 		{"attached with a branch and no detached marker", Status{Branch: "main", OID: "abc1234", Detached: false}, "main"},
 		{"detached but with a branch", Status{Detached: true, Branch: "main"}, "main"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := normalizeBranch(c.st); got != c.want {
 			t.Errorf("%s: normalizeBranch(%+v) = %q, want %q", c.name, c.st, got, c.want)
 		}
@@ -346,12 +346,12 @@ func TestStreamPoolCeilingIsMultiplication(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	inFlight, pico := 0, 0
+	inFlight, peak := 0, 0
 	StreamPool(t.Context(), projects, "", false, n, func(_ string, _ Snapshot) {
 		mu.Lock()
 		inFlight++
-		if inFlight > pico {
-			pico = inFlight
+		if inFlight > peak {
+			peak = inFlight
 		}
 		mu.Unlock()
 		// Without this pause the emits resolve before the next goroutine reaches the semaphore and the peak would always measure 1.
@@ -361,9 +361,9 @@ func TestStreamPoolCeilingIsMultiplication(t *testing.T) {
 		mu.Unlock()
 	})
 
-	if pico < cpus {
+	if peak < cpus {
 		t.Errorf("peak of simultaneous emits = %d, want >= %d (the NumCPU()*4 cap not applied; "+
-			"with NumCPU()-4 the peak stays at %d or less)", pico, cpus, cpus-4)
+			"with NumCPU()-4 the peak stays at %d or less)", peak, cpus, cpus-4)
 	}
 }
 
@@ -387,7 +387,7 @@ func TestStreamPool(t *testing.T) {
 		t.Fatalf("emit = %d paths, want 2", len(got))
 	}
 	if got[a] != StateClean || got[b] != StateDirty {
-		t.Errorf("estados = %v", got)
+		t.Errorf("states = %v", got)
 	}
 }
 
@@ -398,7 +398,7 @@ func snapSummary(s Snapshot) string {
 // A conflict counts as a tracked change, and it is the only case where the state column's count says what has to be done: a repo with a conflict and nothing else must show as dirty, not clean.
 func TestParseConflictsCountAsDirty(t *testing.T) {
 	out := porcelainClean + `u UU N... 100644 100644 100644 100644 abc def ghi conflicted.go
-u AA N... 100644 100644 100644 100644 abc def ghi ambos-nuevos.go
+u AA N... 100644 100644 100644 100644 abc def ghi both-new.go
 `
 	st, files := ParsePorcelain(out)
 	if st.TrackedChanges != 2 {
@@ -454,24 +454,24 @@ func TestStateStringAndHasScore(t *testing.T) {
 
 // The assertion states the ORDER between groups instead of each loose number: the three informational states share a score on purpose (none needs immediate attention, so ties are correct and the path breaks them) and what must not happen is one of them sneaking in front of dirty.
 func TestScoreSortsForAttention(t *testing.T) {
-	grupos := []struct {
-		name    string
-		estados []State
+	groups := []struct {
+		name   string
+		states []State
 	}{
 		{"error", []State{StateError}},
 		{"diverged", []State{StateDiverged}},
 		{"dirty", []State{StateDirty}},
 		{"ahead/behind", []State{StateAhead, StateBehind}},
-		{"informativos", []State{StateDetached, StateNoUpstream, StateNoRepo}},
+		{"informational", []State{StateDetached, StateNoUpstream, StateNoRepo}},
 		{"clean", []State{StateClean}},
 	}
-	for i := 1; i < len(grupos); i++ {
-		ant, cur := grupos[i-1], grupos[i]
-		for _, a := range ant.estados {
-			for _, b := range cur.estados {
+	for i := 1; i < len(groups); i++ {
+		prev, cur := groups[i-1], groups[i]
+		for _, a := range prev.states {
+			for _, b := range cur.states {
 				if State(b).Score() >= State(a).Score() {
 					t.Errorf("%s (%v, %d) does not come BEFORE %s (%v, %d)",
-						a, ant.name, State(a).Score(),
+						a, prev.name, State(a).Score(),
 						b, cur.name, State(b).Score())
 				}
 			}
@@ -538,14 +538,14 @@ func TestStreamPoolWithContextCancelled(t *testing.T) {
 	cancel()
 
 	var mu sync.Mutex
-	emitidas := 0
+	emitted := 0
 	StreamPool(ctx, projects, "", false, 1, func(string, Snapshot) {
 		mu.Lock()
-		emitidas++
+		emitted++
 		mu.Unlock()
 	})
-	if emitidas > len(projects) {
-		t.Errorf("emits %d events with the context cancelled, want <= %d", emitidas, len(projects))
+	if emitted > len(projects) {
+		t.Errorf("emits %d events with the context cancelled, want <= %d", emitted, len(projects))
 	}
 }
 

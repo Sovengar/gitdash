@@ -202,7 +202,7 @@ func TestRemoveWorktreeArgv(t *testing.T) {
 	}
 	got = strings.Join(append([]string{"git"}, RemoveWorktreeArgv("/tmp/wt", true)...), " ")
 	if want := "git worktree remove --force /tmp/wt"; got != want {
-		t.Errorf("argv forzado = %q, want %q", got, want)
+		t.Errorf("forced argv = %q, want %q", got, want)
 	}
 }
 

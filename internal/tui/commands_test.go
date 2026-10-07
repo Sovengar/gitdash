@@ -22,30 +22,30 @@ import (
 
 // The `!` deadline is 5 MINUTES written as a product, so the ARITHMETIC_BASE mutant makes it 8.3ms and every real command dies with no output; checked with a half-second sleep and the exit code, never by waiting it out.
 func TestCommandNotIsCutsInMiddleSecond(t *testing.T) {
-	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "sleep 0.5; echo tardado")
+	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "sleep 0.5; echo delayed")
 	if code != 0 {
 		t.Fatalf("a half-second command must exit 0, got %d (output %q): "+
 			"the %v deadline cut it short before it finished", code, out, commandTimeout())
 	}
-	if !strings.Contains(out, "tardado") {
+	if !strings.Contains(out, "delayed") {
 		t.Errorf("the command never printed its output: %q", out)
 	}
 }
 
 func TestRunShellCmdCapturesOutputAndExit(t *testing.T) {
-	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "echo hola && exit 0")
+	out, code := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "echo hello && exit 0")
 	if code != 0 {
-		t.Fatalf("code = %d, quiero 0", code)
+		t.Fatalf("code = %d, want 0", code)
 	}
-	if !strings.Contains(out, "hola") {
-		t.Fatalf("output = %q, quiero contener \"hola\"", out)
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("output = %q, want to contain \"hello\"", out)
 	}
 
-	out2, code2 := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "stderr-va-junto 1>&2; exit 3")
+	out2, code2 := runShellCmd(t.Context(), t.TempDir(), "/bin/sh", "stderr-goes-together 1>&2; exit 3")
 	if code2 != 3 {
-		t.Fatalf("code = %d, quiero 3", code2)
+		t.Fatalf("code = %d, want 3", code2)
 	}
-	if !strings.Contains(out2, "stderr-va-junto") {
+	if !strings.Contains(out2, "stderr-goes-together") {
 		t.Fatalf("stderr was not captured: %q", out2)
 	}
 }
@@ -64,7 +64,7 @@ func TestBangModeCommandFlow(t *testing.T) {
 	m, _ = press(m, "i")
 	m, _ = press(m, "t")
 	if got := m.cmdInput.Value(); got != "git" {
-		t.Fatalf("input = %q, quiero \"git\"", got)
+		t.Fatalf("input = %q, want \"git\"", got)
 	}
 
 	m, _ = press(m, "enter")
@@ -72,7 +72,7 @@ func TestBangModeCommandFlow(t *testing.T) {
 		t.Fatal("enter did not close the command mode")
 	}
 	if m.running[p.Path] != "cmd" {
-		t.Fatalf("running = %q, quiero \"cmd\"", m.running[p.Path])
+		t.Fatalf("running = %q, want \"cmd\"", m.running[p.Path])
 	}
 }
 
@@ -142,7 +142,7 @@ func TestGLazygit(t *testing.T) {
 
 	m, cmd := press(m, "g")
 	if m.running[p.Path] != "lazygit" {
-		t.Fatalf("running = %q, quiero \"lazygit\"", m.running[p.Path])
+		t.Fatalf("running = %q, want \"lazygit\"", m.running[p.Path])
 	}
 	if cmd == nil {
 		t.Fatal("g returned no tea.Cmd")
@@ -248,21 +248,21 @@ func TestHandoffWithErrorWarns(t *testing.T) {
 	m := newTestModel(t, projects, states)
 
 	for _, c := range []struct {
-		name     string
-		err      error
-		want     string
-		quiereNo string
+		name       string
+		err        error
+		want       string
+		wantAbsent string
 	}{
 		{"the failed one reports the reason", errHandoff("no such file or directory"), "command", ""},
 		{"the successful one reports nothing", nil, "", "command:"},
 	} {
 		out, _ := m.Update(execDoneMsg{path: "/tmp/old-clean", action: "lazygit", err: c.err})
-		plano := stripANSI(out.(Model).View().Content)
-		if c.want != "" && !strings.Contains(plano, c.want) {
-			t.Errorf("%s: %q is not visible:\n%s", c.name, c.want, plano)
+		flat := stripANSI(out.(Model).View().Content)
+		if c.want != "" && !strings.Contains(flat, c.want) {
+			t.Errorf("%s: %q is not visible:\n%s", c.name, c.want, flat)
 		}
-		if c.quiereNo != "" && strings.Contains(plano, c.quiereNo) {
-			t.Errorf("%s: it reported %q with no reason:\n%s", c.name, c.quiereNo, plano)
+		if c.wantAbsent != "" && strings.Contains(flat, c.wantAbsent) {
+			t.Errorf("%s: it reported %q with no reason:\n%s", c.name, c.wantAbsent, flat)
 		}
 	}
 }
@@ -274,29 +274,29 @@ func (e errHandoff) Error() string { return string(e) }
 func TestFetchDoneReportsOkAndFailed(t *testing.T) {
 	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 2, failed: 1})
 	m := out.(Model)
-	plano := stripANSI(m.View().Content)
-	if !strings.Contains(plano, "2 ok") && !strings.Contains(plano, "ok 2") {
-		t.Errorf("the summary does not say how many succeeded:\n%s", plano)
+	flat := stripANSI(m.View().Content)
+	if !strings.Contains(flat, "2 ok") && !strings.Contains(flat, "ok 2") {
+		t.Errorf("the summary does not say how many succeeded:\n%s", flat)
 	}
-	if !strings.Contains(plano, "1 failed") && !strings.Contains(plano, "failed 1") {
-		t.Errorf("the summary does not say how many failed:\n%s", plano)
+	if !strings.Contains(flat, "1 failed") && !strings.Contains(flat, "failed 1") {
+		t.Errorf("the summary does not say how many failed:\n%s", flat)
 	}
 	out, _ = newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 3})
-	plano = stripANSI(out.(Model).View().Content)
-	if strings.Contains(plano, "failed") {
-		t.Errorf("with no failures the failure line was painted:\n%s", plano)
+	flat = stripANSI(out.(Model).View().Content)
+	if strings.Contains(flat, "failed") {
+		t.Errorf("with no failures the failure line was painted:\n%s", flat)
 	}
 }
 
 func TestFetchAllCountsTheOnesThatFail(t *testing.T) {
 	good, _ := testutil.NewRepo(t, false)
-	roto, _ := testutil.NewRepo(t, false)
-	testutil.BreakGit(t, roto) // this repo's fetch fails
+	broken, _ := testutil.NewRepo(t, false)
+	testutil.BreakGit(t, broken) // this repo's fetch fails
 	projects := []discovery.Project{
 		proj("good", good, true),
-		proj("roto", roto, true),
+		proj("broken", broken, true),
 	}
-	states := map[string]gitstatus.Snapshot{good: snapClean(), roto: snapClean()}
+	states := map[string]gitstatus.Snapshot{good: snapClean(), broken: snapClean()}
 	m := newTestModel(t, projects, states)
 
 	m, _ = press(m, "F") // fetch_all
@@ -320,16 +320,16 @@ func TestFetchAllCountsTheOnesThatFail(t *testing.T) {
 func TestSaveCollapsedWithMoreExpandedThanFolded(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
-	m.expanded = map[string]bool{"/tmp/multi": true, "/tmp/otro": true, "/tmp/tercero": true}
+	m.expanded = map[string]bool{"/tmp/multi": true, "/tmp/other": true, "/tmp/third": true}
 	m.collapsed = map[string]bool{} // no collapsed group: a negative hint if it is subtracted
 
 	m.saveCollapsed()
 
 	got := m.store.LoadCollapsed()
 	if len(got) != 3 {
-		t.Fatalf("persistidos = %v, want 3 claves", got)
+		t.Fatalf("persisted = %v, want 3 keys", got)
 	}
-	for _, path := range []string{"/tmp/multi", "/tmp/otro", "/tmp/tercero"} {
+	for _, path := range []string{"/tmp/multi", "/tmp/other", "/tmp/third"} {
 		key := state.WorktreePrefix + path
 		if !got[key] {
 			t.Errorf("the expanded worktree key %q is missing: %v", key, got)
@@ -379,8 +379,8 @@ func TestActionOfGitRunsAndReCollects(t *testing.T) {
 // The flag is computed ONLY when the action failed and was a pull: with the guard reversed it would be consulted on the correct pulls (where there is never a rebase) and never on the clashing ones.
 func TestPullThatClashesMarksTheRebaseHalfDone(t *testing.T) {
 	dir, origin := testutil.NewRepo(t, true)
-	testutil.PushUpstreamFile(t, origin, "conflicto.txt", "remoto", "remote")
-	testutil.CommitFiles(t, dir, map[string]string{"conflicto.txt": "local"}, "local")
+	testutil.PushUpstreamFile(t, origin, "conflict.txt", "remoto", "remote")
+	testutil.CommitFiles(t, dir, map[string]string{"conflict.txt": "local"}, "local")
 	testutil.FetchLocal(t, dir)
 	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {
 		t.Fatal(err)
@@ -416,11 +416,11 @@ func TestPullThatClashesMarksTheRebaseHalfDone(t *testing.T) {
 // $SHELL (the user's) is what makes aliases and config load instead of /bin/sh, and the argv left in the command log is what proves it, so that is what is looked at.
 func TestShellOfTheHandoffIsTheOfTheUser(t *testing.T) {
 	dir := t.TempDir()
-	proyectos, states := fixtureProjects()
+	projects, states := fixtureProjects()
 	states[dir] = snapClean()
-	proyectos = append(proyectos, proj("cwd", dir, true))
+	projects = append(projects, proj("cwd", dir, true))
 
-	escribir := func(m Model, text string) Model {
+	typeIn := func(m Model, text string) Model {
 		for _, k := range text {
 			m, _ = press(m, string(k))
 		}
@@ -433,7 +433,7 @@ func TestShellOfTheHandoffIsTheOfTheUser(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("SHELL", bash)
-		m := newTestModel(t, proyectos, states)
+		m := newTestModel(t, projects, states)
 		rec := cmdlog.Active()
 		t.Cleanup(func() { cmdlog.SetRecorder(nil) })
 		m = cursorOn(t, m, dir)
@@ -442,22 +442,22 @@ func TestShellOfTheHandoffIsTheOfTheUser(t *testing.T) {
 		if !m.cmdOpen {
 			t.Fatal("the ! key did not open the command input")
 		}
-		m = escribir(m, "hola")
+		m = typeIn(m, "hello")
 		m, _ = press(m, "enter") // runs the command with the user's shell
-		assertUltimoArgvShell(t, rec, bash, "cmd")
+		assertLastArgvShell(t, rec, bash, "cmd")
 	})
 
 	t.Run("without SHELL it falls back to /bin/sh", func(t *testing.T) {
 		t.Setenv("SHELL", "")
-		m := newTestModel(t, proyectos, states)
+		m := newTestModel(t, projects, states)
 		rec := cmdlog.Active()
 		t.Cleanup(func() { cmdlog.SetRecorder(nil) })
 		m = cursorOn(t, m, dir)
 
 		m, _ = press(m, m.cfg.KeyFor("command"))
-		m = escribir(m, "hola")
+		m = typeIn(m, "hello")
 		m, _ = press(m, "enter")
-		assertUltimoArgvShell(t, rec, "/bin/sh", "cmd")
+		assertLastArgvShell(t, rec, "/bin/sh", "cmd")
 	})
 
 }
@@ -478,7 +478,7 @@ func TestUserShell(t *testing.T) {
 	})
 }
 
-func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, action string) {
+func assertLastArgvShell(t *testing.T, rec *cmdlog.Recorder, want, action string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -487,7 +487,7 @@ func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, action stri
 				continue
 			}
 			if e.Argv[0] != want {
-				t.Errorf("argv[0] = %q, want la shell %q", e.Argv[0], want)
+				t.Errorf("argv[0] = %q, want the shell %q", e.Argv[0], want)
 			}
 			return
 		}
@@ -500,12 +500,12 @@ func assertUltimoArgvShell(t *testing.T, rec *cmdlog.Recorder, want, action stri
 
 func TestFetchOfAOnlyRepoNotCarriesCount(t *testing.T) {
 	out, _ := newTestModel(t, nil, nil).Update(fetchDoneMsg{ok: 1})
-	plano := stripANSI(out.(Model).View().Content)
-	if !strings.Contains(plano, "fetch ok") {
-		t.Errorf("the toast does not say the fetch went well:\n%s", plano)
+	flat := stripANSI(out.(Model).View().Content)
+	if !strings.Contains(flat, "fetch ok") {
+		t.Errorf("the toast does not say the fetch went well:\n%s", flat)
 	}
-	if strings.Contains(plano, "(1 repos)") {
-		t.Errorf("a single-repo fetch carries no count, let alone the word \"repos\":\n%s", plano)
+	if strings.Contains(flat, "(1 repos)") {
+		t.Errorf("a single-repo fetch carries no count, let alone the word \"repos\":\n%s", flat)
 	}
 }
 
@@ -520,17 +520,17 @@ func TestCommandSuccessAndOutputNotIsConfuse(t *testing.T) {
 		{"a non-zero exit code is", "3", "exit 3"},
 	} {
 		out, _ := newTestModel(t, nil, nil).Update(cmdResultMsg{
-			path: "/tmp/dirty-api", command: "echo hola", exit: c.exit,
+			path: "/tmp/dirty-api", command: "echo hello", exit: c.exit,
 		})
 		m := out.(Model)
-		plano := stripANSI(m.View().Content)
-		if !strings.Contains(plano, c.want) {
-			t.Errorf("%s: the warning does not say %q:\n%s", c.name, c.want, plano)
+		flat := stripANSI(m.View().Content)
+		if !strings.Contains(flat, c.want) {
+			t.Errorf("%s: the warning does not say %q:\n%s", c.name, c.want, flat)
 		}
 		if got := m.lastCmd["/tmp/dirty-api"]; got.exit != c.exit {
 			t.Errorf("%s: lastCmd.exit = %q, want %q", c.name, got.exit, c.exit)
 		}
-		if got := m.lastCmd["/tmp/dirty-api"]; got.command != "echo hola" {
+		if got := m.lastCmd["/tmp/dirty-api"]; got.command != "echo hello" {
 			t.Errorf("%s: lastCmd.command = %q, want the typed command", c.name, got.command)
 		}
 		// A failed `!` must not leave the row blocked with "already running" forever.
@@ -670,7 +670,7 @@ func (h *handoffSpy) exec(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
 	return func() tea.Msg { return nil }
 }
 
-func (h *handoffSpy) salir(err error) tea.Msg {
+func (h *handoffSpy) finish(err error) tea.Msg {
 	h.t.Helper()
 	return h.done(err)
 }
@@ -712,7 +712,7 @@ func TestHandoffRunsTheProcessInTheRepo(t *testing.T) {
 			if len(spy.argv) == 0 {
 				t.Fatalf("empty argv")
 			}
-			msg, ok := spy.salir(nil).(execDoneMsg)
+			msg, ok := spy.finish(nil).(execDoneMsg)
 			if !ok {
 				t.Fatalf("%s's handoff returned no execDoneMsg on exit", c.action)
 			}
@@ -801,7 +801,7 @@ func TestHandoffsWithGuardOfBusy(t *testing.T) {
 		if strings.Contains(strings.Join(spy.argv, " "), "origin/main") {
 			t.Errorf("argv = %q, want no ref: git-sim's pull takes no argument", spy.argv)
 		}
-		msg, ok := spy.salir(nil).(execDoneMsg)
+		msg, ok := spy.finish(nil).(execDoneMsg)
 		if !ok || msg.action != "visual" {
 			t.Fatalf("the returned message = %#v, want a visual execDoneMsg", msg)
 		}
@@ -816,7 +816,7 @@ func TestRecollectWithRepoBusyNotRelaunch(t *testing.T) {
 	mm := newTestModel(t, nil, nil)
 	m := &mm
 	m.running = map[string]string{"/tmp/api": "pull"}
-	antes := len(m.running)
+	before := len(m.running)
 
 	if cmd := m.recollectCmd("/tmp/api"); cmd != nil {
 		t.Errorf("recollectCmd over a busy repo returned %#v, want nil", cmd())
@@ -824,8 +824,8 @@ func TestRecollectWithRepoBusyNotRelaunch(t *testing.T) {
 	if got := m.running["/tmp/api"]; got != "pull" {
 		t.Errorf("running = %q, want it to still be the original action", got)
 	}
-	if len(m.running) != antes {
-		t.Errorf("running has %d entries, want %d (the guard does not write)", len(m.running), antes)
+	if len(m.running) != before {
+		t.Errorf("running has %d entries, want %d (the guard does not write)", len(m.running), before)
 	}
 }
 
@@ -932,7 +932,7 @@ func TestPullAIHappyPathArmsTheHandoff(t *testing.T) {
 	if promptArg != nasty {
 		t.Errorf("no argv element is the whole prompt; it got split or interpolated: %q", spy.argv)
 	}
-	if msg, ok := spy.salir(nil).(execDoneMsg); !ok || msg.action != "pull_ai" {
+	if msg, ok := spy.finish(nil).(execDoneMsg); !ok || msg.action != "pull_ai" {
 		t.Errorf("the returned message = %#v, want a pull_ai execDoneMsg", msg)
 	}
 	if m.running[dir] != "pull_ai" {

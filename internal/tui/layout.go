@@ -63,10 +63,10 @@ func panelCandidates(height, chrome, filterH, keybinds int) []int {
 	if top < detailHeadLines {
 		return nil
 	}
-	vueltas := top - detailHeadLines + 1
+	turns := top - detailHeadLines + 1
 	// `range` over the number of turns, not a counter in the for header: that is the difference between an INCREMENT_DECREMENT mutant that reverses the list and one that hangs, since range has no post expression to invert.
-	c := make([]int, 0, vueltas)
-	for i := range vueltas {
+	c := make([]int, 0, turns)
+	for i := range turns {
 		c = append(c, top-i)
 	}
 	return c

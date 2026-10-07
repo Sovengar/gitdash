@@ -12,33 +12,33 @@ import (
 
 // They are the only two renderDetail lines whose text comes from the error instead of a repo datum, so a content test does not cover them by accident: without this `MarkerErr` or `snap.Err` could vanish from the card and no test would notice (they would be NOT COVERED, not survivors).
 func TestCardPaintsTheErrorsOfTheRepo(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name      string
 		markerErr string
 		gitErr    string
 		want      []string
-		ausente   []string
+		absent    []string
 	}{
 		{
-			name:      "marcador roto",
+			name:      "broken marker",
 			markerErr: "line 3: invalid value",
 			want:      []string{"marker:", "line 3: invalid value"},
-			ausente:   []string{"git:"},
+			absent:    []string{"git:"},
 		},
 		{
-			name:    "repo without git",
-			gitErr:  "fatal: not a git repository",
-			want:    []string{"git:", "fatal: not a git repository"},
-			ausente: []string{"marker:"},
+			name:   "repo without git",
+			gitErr: "fatal: not a git repository",
+			want:   []string{"git:", "fatal: not a git repository"},
+			absent: []string{"marker:"},
 		},
 		{
 			name:      "both at once",
 			markerErr: "bad",
-			gitErr:    "roto",
-			want:      []string{"marker:", "bad", "git:", "roto"},
+			gitErr:    "broken",
+			want:      []string{"marker:", "bad", "git:", "broken"},
 		},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := "/tmp/api"
 			snap := snapClean()
@@ -56,7 +56,7 @@ func TestCardPaintsTheErrorsOfTheRepo(t *testing.T) {
 					t.Errorf("the card does not say %q:\n%s", w, out)
 				}
 			}
-			for _, a := range c.ausente {
+			for _, a := range c.absent {
 				if strings.Contains(out, a) {
 					t.Errorf("the card says %q and should not (there is no such error):\n%s", a, out)
 				}
@@ -67,7 +67,7 @@ func TestCardPaintsTheErrorsOfTheRepo(t *testing.T) {
 
 // The EXACT fits are what is looked at here, because a `> ` in the wrong place changes the answer precisely when the list fits exactly (and there no "N more" warning with N=0 should be left).
 func TestListBudget(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name         string
 		avail, items int
 		wantShown    int
@@ -82,10 +82,10 @@ func TestListBudget(t *testing.T) {
 		{"one item line, does not fit", minListBlockLines + 1, 2, 0, true},
 		{"fits exactly at the limit", minListBlockLines + 3, 3, 3, false},
 		{"one too many", minListBlockLines + 3, 4, 2, true},
-		{"holgada", 20, 2, 2, false},
-		{"muy larga", 10, 100, 7, true},
+		{"roomy", 20, 2, 2, false},
+		{"very long", 10, 100, 7, true},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		shown, rest := listBudget(c.avail, c.items)
 		if shown != c.wantShown || rest != c.wantRest {
 			t.Errorf("%s: listBudget(%d, %d) = (%d, %v), want (%d, %v)",
@@ -109,23 +109,23 @@ func TestListBudgetTheWarningCountsWhatIsMissing(t *testing.T) {
 }
 
 func TestActionTail(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name, out string
 		n         int
 		want      string
 	}{
 		{"empty", "", 3, ""},
-		{"solo newlines", "\n\n", 3, ""},
-		{"one line", "hola", 3, "hola"},
+		{"only newlines", "\n\n", 3, ""},
+		{"one line", "text", 3, "text"},
 		{"fits whole", "a\nb", 3, "a\nb"},
 		{"fits exactly", "a\nb\nc", 3, "a\nb\nc"},
 		{"clips from behind", "a\nb\nc\nd", 2, "c\nd"},
 		{"more lines than fit", "a\nb\nc", 1, "c"},
 		{"n=0", "a\nb", 0, ""},
-		{"n negativo", "a\nb", -1, ""},
+		{"negative n", "a\nb", -1, ""},
 		{"ignores the trailing newline", "a\nb\n", 5, "a\nb"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := actionTail(c.out, c.n); got != c.want {
 			t.Errorf("%s: actionTail(%q, %d) = %q, want %q", c.name, c.out, c.n, got, c.want)
 		}
@@ -142,21 +142,21 @@ func TestAsOrDash(t *testing.T) {
 }
 
 func TestFitLinesFillsAndClipToNot(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name, content string
 		n             int
 		wantFit       []string
 		wantClip      []string
 	}{
 		{"fits exactly", "a\nb", 2, []string{"a", "b"}, []string{"a", "b"}},
-		{"sobra", "a\nb\nc", 2, []string{"a", "b"}, []string{"a", "b"}},
+		{"extra", "a\nb\nc", 2, []string{"a", "b"}, []string{"a", "b"}},
 		{"missing", "a", 3, []string{"a", "", ""}, []string{"a"}},
 		{"empty", "", 2, []string{"", ""}, []string{""}},
 		{"n=0 with content", "a\nb", 0, []string{""}, []string{""}},
 		{"n=0 empty", "", 0, []string{""}, []string{""}},
-		{"n negativo", "a", -1, []string{""}, []string{""}},
+		{"negative n", "a", -1, []string{""}, []string{""}},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := strings.Split(fitLines(c.content, c.n), "\n"); !equalStrings(got, c.wantFit) {
 			t.Errorf("%s: fitLines(%q, %d) = %q, want %q", c.name, c.content, c.n, got, c.wantFit)
 		}
@@ -304,9 +304,9 @@ func TestCardTheWarningCountsTheMissingFiles(t *testing.T) {
 	if !strings.Contains(out, fmt.Sprintf("files (%d)", total)) {
 		t.Errorf("the header does not count the %d files:\n%s", total, out)
 	}
-	wantAviso := fmt.Sprintf("… %d more", total-4)
-	if !strings.Contains(out, wantAviso) {
-		t.Errorf("the warning does not say %q:\n%s", wantAviso, out)
+	wantWarning := fmt.Sprintf("… %d more", total-4)
+	if !strings.Contains(out, wantWarning) {
+		t.Errorf("the warning does not say %q:\n%s", wantWarning, out)
 	}
 	if !strings.Contains(out, "file00.go") {
 		t.Errorf("the first of the list was not painted:\n%s", out)
@@ -372,26 +372,26 @@ func TestCardNotPaintsListsEmpty(t *testing.T) {
 // The 3-line floor is a contract too: with the minimal card 3 lines are still visible, not 0.
 func TestCardClipsTheQueueOfTheLastAction(t *testing.T) {
 	path := "/tmp/api"
-	prologo := strings.Repeat("line\n", 30)
-	finales := "resultado1\nresultado2\nresultado3\nresultado4\nresultado5"
+	prologue := strings.Repeat("line\n", 30)
+	tailLines := "result1\nresult2\nresult3\nresult4\nresult5"
 
 	t.Run("with room", func(t *testing.T) {
 		m, r := detailRowWith(t, path, snapClean())
-		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologo + finales + "\n"}
+		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologue + tailLines + "\n"}
 		out := stripANSI(m.renderDetail(r, detailHeadLines+10))
-		if !strings.Contains(out, "resultado5") || !strings.Contains(out, "resultado3") {
+		if !strings.Contains(out, "result5") || !strings.Contains(out, "result3") {
 			t.Errorf("the end of the output is not visible:\n%s", out)
 		}
-		if strings.Contains(out, "resultado1") {
+		if strings.Contains(out, "result1") {
 			t.Errorf("the tail swallowed the beginning of the output:\n%s", out)
 		}
 	})
 
-	t.Run("with room amplio", func(t *testing.T) {
+	t.Run("with wide room", func(t *testing.T) {
 		m, r := detailRowWith(t, path, snapClean())
-		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologo + finales + "\n"}
+		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologue + tailLines + "\n"}
 		out := stripANSI(m.renderDetail(r, 44))
-		if !strings.Contains(out, "line") || !strings.Contains(out, "resultado5") {
+		if !strings.Contains(out, "line") || !strings.Contains(out, "result5") {
 			t.Errorf("with plenty of room the full output is not visible:\n%s", out)
 		}
 	})
@@ -631,12 +631,12 @@ func TestCardTheVerdictOfTheLastCommand(t *testing.T) {
 			if !strings.Contains(out, c.want) {
 				t.Errorf("the verdict does not say %q:\n%s", c.want, out)
 			}
-			otro := "exit 0"
+			other := "exit 0"
 			if c.want == "exit 0" {
-				otro = "exit 3"
+				other = "exit 3"
 			}
-			if strings.Contains(out, otro) {
-				t.Errorf("%q appeared, the verdict of the other case:\n%s", otro, out)
+			if strings.Contains(out, other) {
+				t.Errorf("%q appeared, the verdict of the other case:\n%s", other, out)
 			}
 		})
 	}
@@ -647,13 +647,13 @@ func TestCardTheOutputOfTheCommandRespectsTheBudget(t *testing.T) {
 	m, r := detailRowWith(t, path, snapClean())
 	m.lastCmd[path] = cmdResult{
 		command: "ls",
-		output:  "uno\ndos\ntres\ncuatro\ncinco\n",
+		output:  "one\ntwo\nthree\nfour\nfive\n",
 		exit:    "0",
 	}
 
-	conAlto := stripANSI(m.renderDetail(r, 40))
-	if !strings.Contains(conAlto, "cinco") {
-		t.Errorf("with room the command output does not appear:\n%s", conAlto)
+	withHeight := stripANSI(m.renderDetail(r, 40))
+	if !strings.Contains(withHeight, "five") {
+		t.Errorf("with room the command output does not appear:\n%s", withHeight)
 	}
 
 	m.width = 60
@@ -742,7 +742,7 @@ func TestCardClipsTheCommandToTheWidthThatIsLeft(t *testing.T) {
 func TestHeaderDistinguishesDetachedAndWithoutUpstream(t *testing.T) {
 	proj := discovery.Project{Path: "/api", Name: "api", HasRepo: true}
 
-	t.Run("detached conserva la rama", func(t *testing.T) {
+	t.Run("detached keeps the branch", func(t *testing.T) {
 		s := snapClean()
 		s.Status.Branch = "feat/x"
 		s.Status.Detached = true
@@ -759,7 +759,7 @@ func TestHeaderDistinguishesDetachedAndWithoutUpstream(t *testing.T) {
 		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
 		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
 		if !strings.Contains(out, "branch  -") {
-			t.Errorf("la ficha = %q, want '-' en la rama", out)
+			t.Errorf("the card = %q, want '-' for the branch", out)
 		}
 	})
 
@@ -779,11 +779,11 @@ func TestWorktreeOfAnotherRootShowsPathAbsolute(t *testing.T) {
 	proj := discovery.Project{Path: "/home/api", Name: "api", HasRepo: true}
 	s := snapClean()
 	s.Worktrees = []gitstatus.Worktree{
-		{Path: "/mnt/wt-otro", Branch: "feat/x"},
+		{Path: "/mnt/wt-other", Branch: "feat/x"},
 	}
 	m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
 	out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
-	if !strings.Contains(out, "/mnt/wt-otro") {
+	if !strings.Contains(out, "/mnt/wt-other") {
 		t.Errorf("card = %q, want the absolute path of a worktree in another root", out)
 	}
 }

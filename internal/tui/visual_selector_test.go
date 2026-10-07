@@ -119,7 +119,7 @@ func TestVisualResolvesAboutTheArmed(t *testing.T) {
 		t.Fatal("the variant launched nothing")
 	}
 	if m.running["/tmp/old-clean"] != "visual" {
-		t.Errorf("running = %q, want visual en /tmp/old-clean", m.running["/tmp/old-clean"])
+		t.Errorf("running = %q, want visual in /tmp/old-clean", m.running["/tmp/old-clean"])
 	}
 	if _, ok := m.running["/tmp/dirty-api"]; ok {
 		t.Error("the variant resolved on the row under the cursor, not on the armed one")
@@ -416,7 +416,7 @@ func TestVisualExecDoneRecords(t *testing.T) {
 		t.Errorf("Exit = %d, want 0", got.Exit)
 	}
 	if got.Class != cmdlog.ClassAction || got.Dir != path {
-		t.Errorf("clase/dir = %v/%q", got.Class, got.Dir)
+		t.Errorf("class/dir = %v/%q", got.Class, got.Dir)
 	}
 }
 

@@ -97,7 +97,7 @@ func TestActionNoteShowsTheArgvOnlyIfExists(t *testing.T) {
 			t.Errorf("note = %q, want the argv and the reason", got)
 		}
 		if !strings.Contains(got, "could not apply") {
-			t.Errorf("note = %q, want the reason de git", got)
+			t.Errorf("note = %q, want git's reason", got)
 		}
 	})
 	t.Run("without argv on failure", func(t *testing.T) {

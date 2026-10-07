@@ -248,7 +248,7 @@ func (m *Model) renderGroupSummary(e tableEntry, rows int) string {
 	if st.worktrees > 0 {
 		b.WriteString(key("wt       ") + fmt.Sprint(st.worktrees) + "\n")
 	}
-	return m.fichaTail(b.String(), rows)
+	return m.cardTail(b.String(), rows)
 }
 
 func fitLines(content string, n int) string {

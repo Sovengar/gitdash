@@ -7,7 +7,7 @@
 # Policy (see the PR description for the reasoning):
 #   - blocks branch deletion            (`deletion`)
 #   - blocks force-pushes               (`non_fast_forward`)
-#   - requires a PR to merge            (`pull_request`, 0 approvals -> solo dev)
+#   - requires a PR to merge            (`pull_request`, 0 approvals -> only the dev)
 #   - requires the CI checks            (`required_status_checks`, strict = false)
 #
 # `strict_required_status_checks_policy` is deliberately false: requiring the branch to be up to date before merging would force a rebase on every concurrent PR, and forced rebases are not wanted.

@@ -24,7 +24,7 @@ func TestForgeForHost(t *testing.T) {
 		t.Run(tc.host, func(t *testing.T) {
 			got, ok := ForgeForHost(tc.host)
 			if got != tc.want || ok != tc.ok {
-				t.Fatalf("ForgeForHost(%q) = %q, %v; quiero %q, %v", tc.host, got, ok, tc.want, tc.ok)
+				t.Fatalf("ForgeForHost(%q) = %q, %v; want %q, %v", tc.host, got, ok, tc.want, tc.ok)
 			}
 		})
 	}

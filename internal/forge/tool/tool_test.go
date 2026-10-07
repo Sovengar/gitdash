@@ -75,34 +75,34 @@ func TestEnvAddsTheVariablesOfTheForge(t *testing.T) {
 func TestRunCapturesStderrAndCodeOfOutput(t *testing.T) {
 	bin := stub(t, "#!/bin/sh\necho 'the real reason' >&2\nexit 3\n")
 	_, err := (&Runner{Bin: bin}).Run(context.Background(), "-t", "x")
-	var cerr *Error
-	if !errors.As(err, &cerr) {
+	var terr *Error
+	if !errors.As(err, &terr) {
 		t.Fatalf("error = %T, want *tool.Error", err)
 	}
-	if cerr.Msg != "the real reason" {
-		t.Errorf("Msg = %q, want the stderr", cerr.Msg)
+	if terr.Msg != "the real reason" {
+		t.Errorf("Msg = %q, want the stderr", terr.Msg)
 	}
-	if cerr.ExitCode != 3 {
-		t.Errorf("ExitCode = %d, want 3", cerr.ExitCode)
+	if terr.ExitCode != 3 {
+		t.Errorf("ExitCode = %d, want 3", terr.ExitCode)
 	}
-	if cerr.Bin != bin || !slicesHas(cerr.Args, "-t") {
-		t.Errorf("Error does not remember the argv: %+v", cerr)
+	if terr.Bin != bin || !slicesHas(terr.Args, "-t") {
+		t.Errorf("Error does not remember the argv: %+v", terr)
 	}
-	if !strings.Contains(cerr.Error(), "exit 3") {
-		t.Errorf("the message does not mention the code: %q", cerr)
+	if !strings.Contains(terr.Error(), "exit 3") {
+		t.Errorf("the message does not mention the code: %q", terr)
 	}
 
 	_, err = (&Runner{Bin: stub(t, "#!/bin/sh\nexit 7\n")}).Run(context.Background())
-	if !errors.As(err, &cerr) {
+	if !errors.As(err, &terr) {
 		t.Fatalf("error = %T, want *tool.Error", err)
 	}
-	if cerr.Msg == "" {
+	if terr.Msg == "" {
 		t.Error("without stderr the reason cannot be empty")
 	}
-	if cerr.ExitCode != 7 {
-		t.Errorf("ExitCode = %d, want 7", cerr.ExitCode)
+	if terr.ExitCode != 7 {
+		t.Errorf("ExitCode = %d, want 7", terr.ExitCode)
 	}
-	if cerr.Unwrap() == nil {
+	if terr.Unwrap() == nil {
 		t.Error("Unwrap returns nil: exec's cause is lost")
 	}
 }
@@ -167,18 +167,18 @@ func TestRunWithBinaryNonexistent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	var cerr *Error
-	if !errors.As(err, &cerr) {
+	var terr *Error
+	if !errors.As(err, &terr) {
 		t.Fatalf("error = %T, want *tool.Error", err)
 	}
-	if cerr.Err == nil {
+	if terr.Err == nil {
 		t.Error("exec's cause was not preserved")
 	}
-	if !strings.Contains(cerr.Msg, "nonexistent") {
-		t.Errorf("Msg = %q, want it to name the missing binary", cerr.Msg)
+	if !strings.Contains(terr.Msg, "nonexistent") {
+		t.Errorf("Msg = %q, want it to name the missing binary", terr.Msg)
 	}
-	if cerr.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0: it never ran", cerr.ExitCode)
+	if terr.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0: it never ran", terr.ExitCode)
 	}
 }
 
@@ -196,11 +196,11 @@ func TestExitCode(t *testing.T) {
 		t.Errorf("ExitCode(wrapped) = %d, want 9", got)
 	}
 	_, err := (&Runner{Bin: stub(t, "#!/bin/sh\nexit 6\n")}).Run(context.Background())
-	var cerr *Error
-	if !errors.As(err, &cerr) {
+	var terr *Error
+	if !errors.As(err, &terr) {
 		t.Fatalf("error = %T, want *tool.Error", err)
 	}
-	if got := ExitCode(cerr.Err); got != 6 {
+	if got := ExitCode(terr.Err); got != 6 {
 		t.Errorf("ExitCode(exec.ExitError) = %d, want 6", got)
 	}
 }

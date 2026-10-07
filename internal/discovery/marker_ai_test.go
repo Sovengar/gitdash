@@ -50,7 +50,7 @@ func TestMarkerPromptWithoutFile(t *testing.T) {
 func TestMarkerPromptMalformed(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir)
-	writeMarker(t, dir, "name = [roto\n")
+	writeMarker(t, dir, "name = [broken\n")
 
 	if _, err := MarkerPrompt(dir, ".gitdash.toml", "pull"); err == nil {
 		t.Error("expected an error with a malformed marker")

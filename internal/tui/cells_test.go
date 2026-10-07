@@ -108,7 +108,7 @@ func TestHeaderSpacing(t *testing.T) {
 
 	for _, bad := range []string{"ACTIVITYFETCH", "Tree↑", "upSYNC", "NAMEBRANCH"} {
 		if strings.Contains(out, bad) {
-			t.Errorf("header pegado: %q", bad)
+			t.Errorf("stuck header: %q", bad)
 		}
 	}
 	for _, want := range []string{"Work Tree", "↑↓up", "SYNC", "ACTIVITY", "FETCH"} {

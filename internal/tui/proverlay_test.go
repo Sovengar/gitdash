@@ -466,14 +466,14 @@ func TestPROverlayBodyIsMultiline(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m = focusField(t, m, prFieldBody)
 
-	m = typeText(m, "primera")
+	m = typeText(m, "first")
 	m, _ = press(m, "enter")
-	m = typeText(m, "segunda")
+	m = typeText(m, "second")
 
 	if m.pr == nil {
 		t.Fatal("enter in the body submitted the form")
 	}
-	if got := m.prParams().Body; got != "primera\nsegunda" {
+	if got := m.prParams().Body; got != "first\nsecond" {
 		t.Errorf("Body = %q, want two lines", got)
 	}
 }
@@ -522,16 +522,16 @@ func TestPROverlayClipsTheTextOfALine(t *testing.T) {
 
 	p := m.prPending.params
 	if p.Title != "a title" {
-		t.Errorf("Title = %q, want recortado", p.Title)
+		t.Errorf("Title = %q, want clipped", p.Title)
 	}
 	if p.Base != "main" {
-		t.Errorf("Base = %q, want recortado", p.Base)
+		t.Errorf("Base = %q, want clipped", p.Base)
 	}
 }
 
 func TestPROverlayEscClosesWithoutEffects(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
-	m = typeText(m, "borrado")
+	m = typeText(m, "cleared")
 	m, _ = press(m, "esc")
 
 	if m.pr != nil {
@@ -550,7 +550,7 @@ func TestPROverlayEscClosesWithoutEffects(t *testing.T) {
 
 func TestPROverlayReopenStartsClean(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
-	m = typeText(m, "borrado")
+	m = typeText(m, "cleared")
 	m = focusField(t, m, prFieldDraft)
 	m, _ = press(m, " ")
 	m = focusField(t, m, prFieldBase)
@@ -596,24 +596,24 @@ func TestPROverlayOpenDropsTheSelectorsArmed(t *testing.T) {
 	m, _ = press(m, "O")
 
 	if m.pullArmed != nil || m.visualArmed != nil {
-		t.Errorf("quedaron selectores armados: %v %v", m.pullArmed, m.visualArmed)
+		t.Errorf("selectors stayed armed: %v %v", m.pullArmed, m.visualArmed)
 	}
 }
 
 func TestPROverlayCloseDropsTheFocusOfTheFields(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		foco prField
+		name  string
+		focus prField
 	}{
 		{"the title", prFieldTitle},
 		{"the base", prFieldBase},
 		{"the body", prFieldBody},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			m := focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), c.foco)
+			m := focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), c.focus)
 			// A pointer to the widget and not its value: m.pr becomes nil on close and what matters is the widget Blur was called on; the close reads the widget THROUGH the pointer instead of through a method value, since `w.Focused` would bind to a copy and always answer the same.
 			var conFoco func() bool
-			switch c.foco {
+			switch c.focus {
 			case prFieldTitle:
 				w := &m.pr.title
 				conFoco = func() bool { return w.Focused() }
@@ -825,14 +825,14 @@ func TestPROverlayTheWidgetsIsSizeOnTheGap(t *testing.T) {
 		t.Errorf("body width = %d, want %d (the box's whole interior, prompt included)",
 			got, width-2-prBodyPrompt)
 	}
-	wantValor := width - 2 - prLabelWidth - prValueSlack
+	wantValue := width - 2 - prLabelWidth - prValueSlack
 	for _, in := range []struct {
 		name string
 		got  int
 	}{{"title", m.pr.title.Width()}, {"base", m.pr.baseIn.Width()}} {
-		if in.got != wantValor {
+		if in.got != wantValue {
 			t.Errorf("width of the %s input = %d, want %d (the interior minus labels and margin)",
-				in.name, in.got, wantValor)
+				in.name, in.got, wantValue)
 		}
 	}
 	if got, want := m.pr.body.Height(), m.layout().bodyLines-prFixedLines; got != want {

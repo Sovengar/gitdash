@@ -34,7 +34,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		t.Errorf("got[0] = %+v", got[0])
 	}
 	if !got[1].IsWorktree {
-		t.Errorf("worktree perdido: %+v", got[1])
+		t.Errorf("worktree lost: %+v", got[1])
 	}
 }
 
@@ -45,21 +45,21 @@ func TestLoadDiscardsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Save(path, []discovery.Project{
-		{Path: alive, Name: "vivo"},
-		{Path: filepath.Join(t.TempDir(), "borrado"), Name: "muerto"},
+		{Path: alive, Name: "live"},
+		{Path: filepath.Join(t.TempDir(), "cleared"), Name: "dead"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	got := Load(path, ".gitdash.toml")
-	if len(got) != 1 || got[0].Name != "vivo" {
+	if len(got) != 1 || got[0].Name != "live" {
 		t.Errorf("got = %+v", got)
 	}
 }
 
 func TestLoadCorruptSilent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repos.json")
-	if err := os.WriteFile(path, []byte("{roto"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := Load(path, ".gitdash.toml"); got != nil {
@@ -84,7 +84,7 @@ func TestLoadV2Ignored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := Load(path, ".gitdash.toml"); got != nil {
-		t.Errorf("cache v2 aceptado: %+v", got)
+		t.Errorf("cache v2 accepted: %+v", got)
 	}
 }
 
@@ -126,24 +126,24 @@ func TestPathWithoutDirectoryOfUserGivesError(t *testing.T) {
 // An entry without Path cannot be validated against the marker (.Stat on "" is the process working directory, not a repo) and is useless for navigation, so it is dropped BEFORE the marker is looked at; moving the filter after would let a corrupt entry in repos.json start the dashboard with a row that does not exist on disk.
 func TestLoadDiscardsInputWithoutPath(t *testing.T) {
 	dir := t.TempDir()
-	vivo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(vivo, ".gitdash.toml"), []byte(""), 0o644); err != nil {
+	live := t.TempDir()
+	if err := os.WriteFile(filepath.Join(live, ".gitdash.toml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "repos.json")
 	raw := fmt.Sprintf(`{"version":%d,"repos":[
-		{"path":%q,"name":"vivo"},
+		{"path":%q,"name":"live"},
 		{"path":"","name":"no-path"},
 		{"name":"no-field"}
-	]}`, version, vivo)
+	]}`, version, live)
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got := Load(path, ".gitdash.toml")
 	if len(got) != 1 {
-		t.Fatalf("Load devolvio %d repos, want 1: %+v", len(got), got)
+		t.Fatalf("Load returned %d repos, want 1: %+v", len(got), got)
 	}
-	if got[0].Name != "vivo" {
+	if got[0].Name != "live" {
 		t.Errorf("it kept %q, want the one with a marker", got[0].Name)
 	}
 }

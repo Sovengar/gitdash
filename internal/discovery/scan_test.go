@@ -90,8 +90,8 @@ func TestNestedValid(t *testing.T) {
 // Scan returns the projects sorted by path and not in walk order (which depends on the filesystem); without this, inverting the comparator would go unnoticed and the TUI would see repos reshuffled between scans.
 func TestScanSortsForPath(t *testing.T) {
 	root := t.TempDir()
-	creados := []string{"zeta", "alfa", "middle"}
-	for _, name := range creados {
+	created := []string{"zeta", "alpha", "middle"}
+	for _, name := range created {
 		dir := filepath.Join(root, name)
 		testutil.Init(t, dir)
 		testutil.Marker(t, dir, "", "", "", false)
@@ -105,7 +105,7 @@ func TestScanSortsForPath(t *testing.T) {
 		t.Fatalf("projects = %d, want 3", len(projects))
 	}
 	want := []string{
-		filepath.Join(root, "alfa"),
+		filepath.Join(root, "alpha"),
 		filepath.Join(root, "middle"),
 		filepath.Join(root, "zeta"),
 	}
@@ -273,7 +273,7 @@ func TestUnreadableRootNotAborts(t *testing.T) {
 	testutil.Init(t, proj)
 	testutil.Marker(t, proj, "", "", "", false)
 
-	_, err := Scan(cfgRoots(root, filepath.Join(root, "fantasma")))
+	_, err := Scan(cfgRoots(root, filepath.Join(root, "ghost")))
 	if err == nil {
 		t.Error("expected an aggregated error for an unreadable root")
 	}
@@ -313,7 +313,7 @@ func TestScanToleratesRootsUseless(t *testing.T) {
 func TestClassifyGitWithoutGit(t *testing.T) {
 	dir := t.TempDir()
 	if k, main := classifyGit(filepath.Join(dir, ".git")); k != gitNone || main != "" {
-		t.Errorf("classifyGit(inexistente) = %v/%q, want gitNone/\"\"", k, main)
+		t.Errorf("classifyGit(nonexistent) = %v/%q, want gitNone/\"\"", k, main)
 	}
 
 	repo := filepath.Join(dir, "repo")
@@ -348,12 +348,12 @@ func TestClassifyGitWorktree(t *testing.T) {
 	if err := os.WriteFile(pointer, []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	k, repoPrincipal := classifyGit(pointer)
+	k, mainRepo := classifyGit(pointer)
 	if k != gitFile {
 		t.Fatalf("classifyGit = %v, want gitFile (it is a worktree)", k)
 	}
-	if want := main; repoPrincipal != want {
-		t.Errorf("repo principal = %q, want %q", repoPrincipal, want)
+	if want := main; mainRepo != want {
+		t.Errorf("repo main = %q, want %q", mainRepo, want)
 	}
 }
 
@@ -395,7 +395,7 @@ func TestScanJumpsDirectoryUnreadable(t *testing.T) {
 
 func TestMarkerPromptMalformedIsError(t *testing.T) {
 	dir := t.TempDir()
-	writeMarker(t, dir, "name = [roto\n")
+	writeMarker(t, dir, "name = [broken\n")
 	p, err := MarkerPrompt(dir, ".gitdash.toml", "pull")
 	if err == nil {
 		t.Fatal("MarkerPrompt with a malformed marker = nil, want an error (the file is broken)")
@@ -444,9 +444,9 @@ func TestMarkerPromptWithMarkerNotReadableIsError(t *testing.T) {
 
 // The warning matters: without it a relative root with a broken cwd returns zero projects and NO error, which reads as "I have no repos" instead of "I cannot even tell where I am".
 func TestScanWithCwdDeletedReportsTheRoot(t *testing.T) {
-	roto := t.TempDir()
-	t.Chdir(roto)
-	if err := os.RemoveAll(roto); err != nil {
+	broken := t.TempDir()
+	t.Chdir(broken)
+	if err := os.RemoveAll(broken); err != nil {
 		t.Fatal(err)
 	}
 

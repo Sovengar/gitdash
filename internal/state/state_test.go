@@ -103,8 +103,8 @@ func TestCompositeKeysNotCollision(t *testing.T) {
 	store := NewStoreAt(t.TempDir())
 	// Two secondary groups with same name "backend" under different primaries
 	groups := map[string]bool{
-		"alfa/backend": true,
-		"beta/backend": false,
+		"alpha/backend": true,
+		"beta/backend":  false,
 	}
 
 	if err := store.SaveCollapsed(groups); err != nil {
@@ -112,8 +112,8 @@ func TestCompositeKeysNotCollision(t *testing.T) {
 	}
 
 	loaded := store.LoadCollapsed()
-	if loaded["alfa/backend"] != true {
-		t.Errorf("loaded[alfa/backend] = %v, want true", loaded["alfa/backend"])
+	if loaded["alpha/backend"] != true {
+		t.Errorf("loaded[alpha/backend] = %v, want true", loaded["alpha/backend"])
 	}
 	if loaded["beta/backend"] != false {
 		t.Errorf("loaded[beta/backend] = %v, want false", loaded["beta/backend"])

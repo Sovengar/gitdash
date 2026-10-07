@@ -48,12 +48,12 @@ func TestFoldToggle(t *testing.T) {
 
 	m, _ = press(m, "enter") // cursor on the backend header
 	if len(m.entries()) != 1 {
-		t.Errorf("plegado entries = %d, want 1 (solo header)", len(m.entries()))
+		t.Errorf("folded entries = %d, want 1 (only header)", len(m.entries()))
 	}
 
 	m, _ = press(m, "enter")
 	if len(m.entries()) != 3 {
-		t.Errorf("desplegado entries = %d, want 3", len(m.entries()))
+		t.Errorf("expanded entries = %d, want 3", len(m.entries()))
 	}
 
 	m, _ = press(m, "enter")
@@ -80,7 +80,7 @@ func TestGroupsWithFilter(t *testing.T) {
 		}
 	}
 	if len(entries) != 2 || len(groups) != 1 || groups["backend"] != 1 {
-		t.Errorf("entries = %v, want solo backend", rowsOf(entries))
+		t.Errorf("entries = %v, want only backend", rowsOf(entries))
 	}
 }
 
@@ -105,10 +105,10 @@ func TestNestedView(t *testing.T) {
 		t.Errorf("entry 0 = %+v, want header primary vsocial", entries[0])
 	}
 	if entries[1].kind != kindSecondary || entries[1].group != "vsocial/backend" {
-		t.Errorf("entry 1 = %+v, want header secundario vsocial/backend", entries[1])
+		t.Errorf("entry 1 = %+v, want secondary header vsocial/backend", entries[1])
 	}
 	if entries[4].kind != kindSecondary || entries[4].group != "vsocial/frontend" {
-		t.Errorf("entry 4 = %+v, want header secundario vsocial/frontend", entries[4])
+		t.Errorf("entry 4 = %+v, want secondary header vsocial/frontend", entries[4])
 	}
 	if entries[5].r.project.Name != "b" {
 		t.Errorf("entry 5 = %+v, want repo b", entries[5])
@@ -132,7 +132,7 @@ func TestFoldSecondary(t *testing.T) {
 
 	m, _ = press(m, "down") // cursor on the backend secondary header
 	if m.entries()[m.cursor].kind != kindSecondary {
-		t.Fatalf("cursor en %+v, want header secundario", m.entries()[m.cursor])
+		t.Fatalf("cursor at %+v, want a secondary header", m.entries()[m.cursor])
 	}
 	m, _ = press(m, "enter")
 	entries := m.entries()
@@ -158,7 +158,7 @@ func TestFoldPrimaryHidesSecondaryHeaders(t *testing.T) {
 
 	m, _ = press(m, "enter") // cursor on the vsocial primary header: folds it
 	if n := len(m.entries()); n != 1 {
-		t.Errorf("entries = %s, want solo header primary", rowsOf(m.entries()))
+		t.Errorf("entries = %s, want only header primary", rowsOf(m.entries()))
 	}
 }
 
@@ -193,7 +193,7 @@ func TestEnterInRepoNotFoldsTheGroup(t *testing.T) {
 
 func TestFoldKeysNotCollision(t *testing.T) {
 	projects := []discovery.Project{
-		{Path: "/a", Name: "a", PrimaryGroup: "alfa", SecondaryGroup: "backend", HasRepo: true},
+		{Path: "/a", Name: "a", PrimaryGroup: "alpha", SecondaryGroup: "backend", HasRepo: true},
 		{Path: "/b", Name: "b", PrimaryGroup: "beta", SecondaryGroup: "backend", HasRepo: true},
 	}
 	states := map[string]gitstatus.Snapshot{"/a": snapClean(), "/b": snapClean()}
@@ -201,8 +201,8 @@ func TestFoldKeysNotCollision(t *testing.T) {
 
 	m, _ = press(m, "down") // alpha/backend secondary header
 	m, _ = press(m, "enter")
-	if !m.collapsed["alfa/backend"] {
-		t.Fatalf("alfa/backend not folded: %v", m.collapsed)
+	if !m.collapsed["alpha/backend"] {
+		t.Fatalf("alpha/backend not folded: %v", m.collapsed)
 	}
 	entries := m.entries()
 	for _, e := range entries {
@@ -210,7 +210,7 @@ func TestFoldKeysNotCollision(t *testing.T) {
 			return // repo b stays visible: beta/backend is intact
 		}
 	}
-	t.Errorf("repo b disappeared when folding alfa/backend: %s", rowsOf(entries))
+	t.Errorf("repo b disappeared when folding alpha/backend: %s", rowsOf(entries))
 }
 
 func TestPrimaryCountIncludesSecondary(t *testing.T) {

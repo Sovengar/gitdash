@@ -77,7 +77,7 @@ func newPROverlay(r row, head, base string) *prDraft {
 
 	body := textarea.New()
 	body.ShowLineNumbers = false
-	body.Placeholder = "detalle, contexto, checklist…"
+	body.Placeholder = "detail, context, checklist…"
 
 	baseIn := textinput.New()
 	baseIn.Prompt = ""
