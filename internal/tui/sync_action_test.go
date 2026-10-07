@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -386,6 +387,149 @@ func TestSyncFailureClearsTheCardAndKeepsTheToastShort(t *testing.T) {
 	}
 	if strings.Contains(last.text, " — conflict") {
 		t.Errorf("toast = %q, the outcome must not be appended on failure", last.text)
+	}
+}
+
+// The refusal reads the last snapshot; when it cannot pin the branch down (not collected, stale, detached) git's own result governs instead of refusing a sync the repo can do.
+func TestSyncUnknownBranchDoesNotRefuse(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	testutil.FetchLocal(t, dir)
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("")})
+	m = cursorOn(t, m, dir)
+
+	m, _ = press(m, "s")
+	acc, _ := collectAction(t, m)
+
+	if acc.err != "" {
+		t.Fatalf("an unknown branch refused the sync: %q", acc.err)
+	}
+	if acc.outcome == "" {
+		t.Errorf("the sync did not classify its outcome: %+v", acc)
+	}
+	if got := execArgvs(); len(got) != 2 {
+		t.Errorf("execs = %v, want fetch + pull", got)
+	}
+}
+
+// A sync branch missing on origin fails at the pull with git's own reason; the action never invents the legacy fallback ref the SYNC column might be displaying.
+func TestSyncBranchMissingOnOriginReportsGitReason(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	m := newTestModel(t,
+		[]discovery.Project{{Path: dir, Name: "demo", HasRepo: true, SyncBranch: "release"}},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
+	m = cursorOn(t, m, dir)
+
+	m, _ = press(m, "s")
+	acc := collectActionMsg(t, m)
+
+	if !strings.Contains(acc.err, "couldn't find remote ref") {
+		t.Fatalf("failure = %q, want git's missing-remote-ref reason", acc.err)
+	}
+	argvs := execArgvs()
+	if len(argvs) != 2 {
+		t.Fatalf("recorded %d execs, want fetch + the failed pull: %v", len(argvs), argvs)
+	}
+	if got := strings.Join(argvs[1], " "); got != "git pull --rebase --autostash origin release" {
+		t.Errorf("pull exec = %q, want the resolved ref and no fallback", got)
+	}
+}
+
+// `sync` is a configurable action: rebinding the key moves both the routing and the intent it leaves behind.
+func TestSyncKeyIsRebindable(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	testutil.FetchLocal(t, dir)
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
+	m.cfg.Keybindings["sync"] = "y"
+	m = cursorOn(t, m, dir)
+
+	if got := m.cfg.KeyFor("sync"); got != "y" {
+		t.Fatalf("KeyFor(sync) = %q, want the rebound key", got)
+	}
+	if hints := strings.Join(m.cfg.HintBarLines(), "\n"); !strings.Contains(hints, "y sync") {
+		t.Errorf("the hint bar did not follow the rebind: %v", m.cfg.HintBarLines())
+	}
+	m, _ = press(m, "y")
+	if m.running[dir] != "sync" {
+		t.Fatalf("the rebound key did not launch the sync: running = %v", m.running)
+	}
+	var intent *cmdlog.Entry
+	for _, e := range cmdlog.Entries() {
+		if e.Intent && e.Action == "sync" {
+			cp := e
+			intent = &cp
+		}
+	}
+	if intent == nil || intent.Key != "y" {
+		t.Errorf("intent = %+v, want the rebound key recorded", intent)
+	}
+	collectAction(t, m)
+}
+
+// The command-log panel is a view mode, not a modal: `s` is not among the guarded keys, so it runs and its execs land in the panel.
+func TestSyncRunsWithTheLogPanelOpen(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	testutil.FetchLocal(t, dir)
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
+	m = cursorOn(t, m, dir)
+	m.logOpen = true
+
+	m, _ = press(m, "s")
+	acc, _ := collectAction(t, m)
+
+	if acc.err != "" {
+		t.Fatalf("sync did not run with the panel open: %q", acc.err)
+	}
+	if !m.logOpen {
+		t.Error("the panel was closed by the sync key")
+	}
+	if got := execArgvs(); len(got) != 2 {
+		t.Errorf("execs = %v, want fetch + pull reaching the panel", got)
+	}
+}
+
+// A worktree sub-row resolves the ref against the global default (the parent's marker is not consulted) and runs in the worktree directory; with no snapshot of its own the refusal cannot fire.
+func TestSyncWorktreeSubrowUsesTheGlobalDefault(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	wtDir := filepath.Join(t.TempDir(), "wt-real")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-real")
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
+	if len(snap.Worktrees) != 1 {
+		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
+	}
+
+	parent := discovery.Project{Path: dir, Name: "demo", HasRepo: true, SyncBranch: "release"}
+	m := newTestModel(t, []discovery.Project{parent}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, "enter")
+	m = cursorOn(t, m, wtDir)
+
+	m, _ = press(m, "s")
+	acc, _ := collectAction(t, m)
+
+	if acc.err != "" {
+		t.Fatalf("sync in the worktree failed: %q", acc.err)
+	}
+	want := "git fetch origin && git pull --rebase --autostash origin main"
+	if acc.cmd != want {
+		t.Errorf("resolved argv = %q, want the global default (%q)", acc.cmd, want)
+	}
+	for _, e := range cmdlog.Entries() {
+		if e.Intent || e.Class != cmdlog.ClassAction {
+			continue
+		}
+		if filepath.Clean(e.Dir) != filepath.Clean(wtDir) {
+			t.Errorf("exec ran in %q, want the worktree directory", e.Dir)
+		}
 	}
 }
 
