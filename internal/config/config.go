@@ -193,6 +193,7 @@ func DefaultKeybindings() Keybindings {
 		"search":    "/",
 		"fetch":     "f",
 		"fetch_all": "F",
+		"sync":      "s",
 		"pull":      "p",
 		"push":      "P",
 		"editor":    "e",
@@ -218,6 +219,8 @@ func DefaultCommands() Commands {
 		"pull_merge":  "pull --no-rebase",
 		"push":        "push",
 		"fetch":       "fetch --prune",
+		// Base argv of `s`; the builder appends `origin <resolved sync>`, so the tail is the repo's and only the policy is configurable.
+		"sync": "pull --rebase --autostash",
 	}
 }
 
@@ -293,6 +296,7 @@ var hintLabels = map[string]string{
 	"search":          "filter",
 	"fetch":           "fetch",
 	"fetch_all":       "fetch all",
+	"sync":            "sync",
 	"pull":            "pull ▸",
 	"push":            "push",
 	"lazygit":         "lazygit",
@@ -310,7 +314,7 @@ var hintLabels = map[string]string{
 
 // Lives outside HintBarLines so a test can require a label per action: an unlabelled one would render as a bare key ("p "), indistinguishable from a render bug.
 var hintActions = []string{
-	"dirty", "search", "fetch", "fetch_all", "pull",
+	"dirty", "search", "fetch", "fetch_all", "sync", "pull",
 	"push", "lazygit", "editor", "rescan", "recollect",
 	"fold", "command", "log", "quit", "worktree_remove", "visual",
 	"pr",
@@ -331,7 +335,7 @@ func (c Config) HintBarLines() []string {
 		switch action {
 		case "dirty", "search", "fold", "command":
 			row1 = append(row1, hint)
-		case "fetch", "fetch_all", "pull", "push":
+		case "fetch", "fetch_all", "sync", "pull", "push":
 			row2 = append(row2, hint)
 		default:
 			row3 = append(row3, hint)

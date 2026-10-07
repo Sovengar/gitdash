@@ -235,6 +235,18 @@ func TestStreamPoolPropagatesTheFallback(t *testing.T) {
 	}
 }
 
+func TestSyncArgvAppendsTheRemoteAndBranchToTheBase(t *testing.T) {
+	base := []string{"pull", "--rebase", "--autostash"}
+	got := strings.Join(SyncArgv(base, "origin", "main"), " ")
+	if want := "pull --rebase --autostash origin main"; got != want {
+		t.Errorf("SyncArgv = %q, want %q", got, want)
+	}
+	// The base may be a shared default map value: appending to it in place would corrupt every later sync.
+	if got := strings.Join(base, " "); got != "pull --rebase --autostash" {
+		t.Errorf("the base was mutated: %q", got)
+	}
+}
+
 func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	rec := installRecorder(t)
 	dir := repoWithoutMain(t)

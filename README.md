@@ -62,6 +62,18 @@ timeout     = "30s"   # timeout per fetch
 command = "jcode -run {prompt}"   # executable behind the selector's AI pull variant
 ```
 
+The `s` key syncs the current branch with the repo's *sync branch*: it runs
+`git fetch origin` and then the `[commands] sync` base argv with `origin` and the
+resolved sync branch appended:
+
+```toml
+[commands]
+sync = "pull --rebase --autostash"   # `s` runs this, then appends `origin <sync_branch>`
+```
+
+The tail is not configurable on purpose: the ref has to come from the repo (marker
+`sync_branch` over the global default), which a static config string cannot carry.
+
 The AI command is **opt-in and the executable always comes from the global
 config** (the marker travels with the repo and is not trustworthy): the
 `.gitdash.toml` only contributes the `prompt` text. That text goes in as **a
@@ -132,6 +144,7 @@ what demands attention is painted (the order is still attention-first).
 | `r` | full rescan (discovery + states + auto fetch) |
 | `R` | re-collect the cursor's repo |
 | `f` / `F` | fetch the repo / fetch everything |
+| `s` | sync the current branch with the repo's *sync branch* (`git pull --rebase --autostash origin <sync>`) |
 | `p` | pull selector (see below) |
 | `P` | push |
 | `e` | open `$EDITOR` in the repo's directory |
@@ -269,8 +282,6 @@ Architecture: `internal/config` (XDG TOML), `internal/discovery` (marker walk),
 
 ## Roadmap
 
-- Sync the branch with the *sync branch* (`git pull --rebase origin <sync>`):
-  the SYNC column already reports the gap, but there is no key that fixes it
 - Fetch the sync branch (refresh the SYNC column without a manual pull)
 - Group actions (fetch/pull a whole group)
 - Extra actions: stash, PRs
