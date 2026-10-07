@@ -56,7 +56,7 @@ func TestWtDetachedKeepsDirty(t *testing.T) {
 	if !strings.Contains(branch, "abc1234 (detached)") {
 		t.Errorf("branch = %q, want 'abc1234 (detached)'", branch)
 	}
-	if n := strings.Count(stripANSI(m.renderRow(m.rows()[0], false)), "detached"); n != 1 {
+	if n := strings.Count(stripANSI(m.renderRow(m.rows()[0], false, m.width)), "detached"); n != 1 {
 		t.Errorf("detached appears %d times in the row, want 1", n)
 	}
 }
@@ -96,8 +96,8 @@ func TestFetchCellTransient(t *testing.T) {
 		}
 	}
 	check("ok", "") // no permanent check mark
-	check("fetching", "⟳ fetch")
-	check("failed", "✗ fetch")
+	check("fetching", "⟳ ")
+	check("failed", "✗ ")
 	check("", "")
 }
 
@@ -111,7 +111,12 @@ func TestHeaderSpacing(t *testing.T) {
 			t.Errorf("stuck header: %q", bad)
 		}
 	}
-	for _, want := range []string{"Work Tree", "↑↓up", "SYNC", "ACTIVITY", "FETCH"} {
+	for _, gone := range []string{"ACTIVITY", "FETCH"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the removed column %q is still painted", gone)
+		}
+	}
+	for _, want := range []string{"Work Tree", "↑↓up", "SYNC"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing header %q", want)
 		}

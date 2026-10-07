@@ -125,7 +125,7 @@ func TestFitColumnsFitExact(t *testing.T) {
 	for _, c := range tableColumns {
 		total += c.width
 	}
-	if total != colName+colBranch+colWT+colUpDown+colSync+colActivity+colFetch {
+	if total != colName+colBranch+colWT+colUpDown+colSync {
 		t.Fatalf("precondition: the total width is %d", total)
 	}
 
@@ -153,16 +153,28 @@ func TestFitColumnsFitExact(t *testing.T) {
 	}
 }
 
-// The deducted width (borders and the "  " indent) is 4: adding it instead of subtracting would teach a narrow terminal columns that overflow the border.
+// The deducted width (borders and the 4-cell row prefix) is 6: adding it instead of subtracting would teach a narrow terminal columns that overflow the border. The column counts are literal and not recomputed with fitColumns(width-6).
 func TestHeaderUsesTheWidthInterior(t *testing.T) {
-	for _, width := range []int{24, 30, 40, 55, 60, 80, 120, 200} {
-		want := fitColumns(width - 4)
+	for _, c := range []struct {
+		width int
+		cols  int
+	}{
+		{24, 1},
+		{30, 1},
+		{40, 1},
+		{55, 1},
+		{60, 2},
+		{80, 4},
+		{86, 4},
+		{120, 5},
+		{200, 5},
+	} {
 		var expected strings.Builder
-		for _, c := range tableColumns[:want] {
-			expected.WriteString(pad(c.title, c.width))
+		for _, tc := range tableColumns[:c.cols] {
+			expected.WriteString(pad(tc.title, tc.width))
 		}
-		if got := headerColumns(width); got != expected.String() {
-			t.Errorf("width=%d: header = %q, want %q", width, got, expected.String())
+		if got := headerColumns(c.width); got != expected.String() {
+			t.Errorf("width=%d: header = %q, want %q (%d columns)", c.width, got, expected.String(), c.cols)
 		}
 	}
 }
@@ -376,23 +388,25 @@ func TestSyncOfFallbackOnlyInTheDefault(t *testing.T) {
 	}
 }
 
-const worktreeIndent = 2
-
-// The header and the rows must PAINT THE SAME COLUMNS: if the row computed its width with a different criterion than the header, every datum would land under a column that does not exist (or the row would overflow the border, which is what the box hides).
+// The header and the rows must PAINT THE SAME COLUMNS: if the row computed its width with a different criterion than the header, every datum would land under a column that does not exist (or the row would overflow the border, which is what the box hides). The header widths and the worktree row lengths are literal, not recomputed with fitColumns.
 func TestHeaderAndRowsFitTheSameColumns(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
 	entries := m.entries()
 
-	for _, width := range []int{24, 30, 40, 55, 60, 80, 120, 200} {
+	headerWidths := map[int]int{24: 26, 30: 26, 40: 26, 55: 26, 60: 50, 80: 70, 86: 70, 120: 82, 200: 82}
+	for _, width := range []int{24, 30, 40, 55, 60, 80, 86, 120, 200} {
 		m.width = width
 		headerWidth := len([]rune(headerColumns(width)))
+		if headerWidth != headerWidths[width] {
+			t.Errorf("width=%d: the header composes %d cells, want the literal %d", width, headerWidth, headerWidths[width])
+		}
 		for _, e := range entries {
 			if e.kind != kindRepo {
 				continue
 			}
-			row := stripANSI(m.renderRow(e.r, false))
-			if got := len([]rune(row)) - 2; got != headerWidth {
+			row := stripANSI(m.renderRow(e.r, false, width))
+			if got := len([]rune(row)) - rowPrefixWidth; got != headerWidth {
 				t.Errorf("width=%d: the row of %s composes %d cells and the header %d",
 					width, e.r.project.Name, got, headerWidth)
 			}
@@ -409,17 +423,14 @@ func TestHeaderAndRowsFitTheSameColumns(t *testing.T) {
 			continue
 		}
 		visible++
-		for _, width := range []int{24, 40, 60, 80, 120} {
+		// Literal total lengths (4-cell prefix + the columns that fit); a derived expectation would move with fitColumns(width-6). Width 86 pins the 82-cell boundary between the 4- and 5-column splits.
+		wantLen := map[int]int{24: 30, 40: 30, 60: 54, 80: 74, 86: 74, 120: 86}
+		for _, width := range []int{24, 40, 60, 80, 86, 120} {
 			mw.width = width
-			row := stripANSI(mw.renderWorktreeRow(e.wt, false))
-			// Compared against the sum of the columns (and not against another row's length), which is what pins this width to the split.
-			expected := worktreeIndent
-			for _, c := range tableColumns[:fitColumns(width-4)] {
-				expected += c.width
-			}
-			if len([]rune(row)) != expected {
-				t.Errorf("width=%d: the worktree row measures %d, want %d (columns + indent): %q",
-					width, len([]rune(row)), expected, row)
+			row := stripANSI(mw.renderWorktreeRow(e.wt, false, width))
+			if got := len([]rune(row)); got != wantLen[width] {
+				t.Errorf("width=%d: the worktree row measures %d, want the literal %d (4-cell prefix + columns): %q",
+					width, got, wantLen[width], row)
 			}
 		}
 	}

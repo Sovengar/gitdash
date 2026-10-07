@@ -50,7 +50,7 @@ func TestCardPaintsTheErrorsOfTheRepo(t *testing.T) {
 			m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{path: snap})
 			r := row{project: p, snap: snap, state: snap.State(true)}
 
-			out := stripANSI(m.renderDetail(r, 40))
+			out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 			for _, w := range c.want {
 				if !strings.Contains(out, w) {
 					t.Errorf("the card does not say %q:\n%s", w, out)
@@ -186,29 +186,27 @@ func detailRowWith(t *testing.T, path string, snap gitstatus.Snapshot) (Model, r
 }
 
 func TestCardClipsEachFieldAItsWidth(t *testing.T) {
-	const width = 60
-	long := strings.Repeat("long", 30) // 150 chars, plenty to clip
+	long := strings.Repeat("long", 30) // 120 chars, plenty to clip
 
 	pathLargo := "/tmp/api/" + long
 	snap := snapClean()
 	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: long + ".go"}}
-	snap.Commits = []gitstatus.Commit{{Sha: "abc1234", When: 1700000000, Subject: long + " commit"}}
 	m, r := detailRowWith(t, pathLargo, snap)
-	m.width = width
+	m.width = 120
 	m.lastAction[pathLargo] = actionResult{kind: "pull_rebase", cmd: "git pull --rebase " + long, output: ""}
 
-	out := stripANSI(m.renderDetail(r, 40))
+	// Literal widths, not the same max(...) the card computes: a derived expectation moves with the mutant.
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	for _, c := range []struct {
 		that string
 		want string
 	}{
-		{"repo path", truncate(pathLargo, max(20, width-13))},
-		{"file", truncate(long+".go", max(20, width-8))},
-		{"commit", truncate(long+" commit", max(20, width-24))},
-		{"argv", truncate("git pull --rebase "+long, max(20, width-30))},
+		{"repo path", truncate(pathLargo, 28)},            // cardLeftWidth - 8
+		{"file", truncate(long+".go", 19)},                // cardRightWidth - 5
+		{"argv", truncate("git pull --rebase "+long, 90)}, // 120 - 30
 	} {
 		if !strings.Contains(out, c.want) {
-			t.Errorf("the %s is not clipped to its width (want %d chars: %q…):\n%s", c.that, len(c.want), c.want[:20], out)
+			t.Errorf("the %s is not clipped to its width (%q…):\n%s", c.that, c.want[:20], out)
 		}
 	}
 
@@ -217,50 +215,34 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 		s.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt/" + long, Branch: "feat", Head: "abc1234"}}
 		return s
 	}())
-	m2.width = width
-	outWT := stripANSI(m2.renderDetail(r2, 40))
-	if want := truncate("wt/"+long, max(20, width-16)); !strings.Contains(outWT, want) {
-		t.Errorf("the worktree path is not clipped to its width (want %d chars: %q…):\n%s", len(want), want[:20], outWT)
-	}
-
-	// The 20-character floor is a contract too: with a narrow terminal a path is clipped to 20 at minimum instead of disappearing or eating the box.
-	m.width = 30
-	if want := truncate(pathLargo, 20); !strings.Contains(stripANSI(m.renderDetail(r, 40)), want) {
-		t.Errorf("with width=30 the path should clip to the 20-char floor (%q…)", want[:20])
+	m2.width = 120
+	outWT := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
+	if want := truncate("wt/"+long, 12); !strings.Contains(outWT, want) { // cardRightWidth - 2 - wtBranchWidth
+		t.Errorf("the worktree path is not clipped to its width (%q…):\n%s", want[:20], outWT)
 	}
 }
 
-// The expectations are literal run lengths and NOT the same `max(20, width-N)` the card computes: a test that derives its expectation from the expression under test moves with the mutant and kills nothing.
+// The expectations are literal run lengths and NOT the same expression the card computes: a test that derives its expectation from the expression under test moves with the mutant and kills nothing.
 func TestCardClipsTheListsToLiteralWidths(t *testing.T) {
 	// ONE repeated rune, not a repeated word: with "longlong…" a suffix test only matches at multiples of the pattern's period, so a run one word longer would slip through.
 	run := strings.Repeat("x", 150)
 	m, r := detailRowWith(t, "/tmp/api", func() gitstatus.Snapshot {
 		s := snapClean()
 		s.Files = []gitstatus.FileEntry{{Code: ".M", Path: run + ".go"}}
-		s.Commits = []gitstatus.Commit{{Sha: "abc1234", When: 1700000000, Subject: run + " commit"}}
 		return s
 	}())
-	m.width = 60
-	out := stripANSI(m.renderDetail(r, 40))
-	// At width 60 the file row gets 60-8 = 52 columns and the commit row 60-24 = 36, so the clip leaves 51 and 35 runes before the ellipsis.
-	for _, c := range []struct {
-		that, marker string
-		shown        int
-	}{
-		{"file", ".M", 51},
-		{"commit", "abc1234", 35},
-	} {
-		var line string
-		for _, l := range strings.Split(out, "\n") {
-			if strings.Contains(l, c.marker) && strings.Contains(l, "x") {
-				line = strings.TrimSuffix(l, "…")
-				break
-			}
+	m.width = 120
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	// The right column gives the file path cardRightWidth-5 = 19 runes, so the clip leaves 18 x's before the ellipsis.
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, ".M") && strings.Contains(l, "x") {
+			line = strings.TrimSuffix(l, "…")
+			break
 		}
-		// The EXACT length is what kills the mutant: a wider clip still contains the shorter expectation, so any "is the expected prefix present" check lets it through.
-		if got := trailingRun(line, 'x'); got != c.shown {
-			t.Errorf("the %s paints a run of %d, want its literal %d (%d columns):\n%s", c.that, got, c.shown, c.shown+1, out)
-		}
+	}
+	if got := trailingRun(line, 'x'); got != 18 {
+		t.Errorf("the file paints a run of %d, want its literal 18 (19 columns):\n%s", got, out)
 	}
 }
 
@@ -274,7 +256,7 @@ func TestCardShowsTheArgvOfTheLastAction(t *testing.T) {
 	m, r := detailRowWith(t, path, snap)
 
 	m.lastAction[path] = actionResult{kind: "pull_ai"}
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "last pull (AI)") && !strings.Contains(out, "AI") {
 		t.Errorf("the no-argv variant of the action is missing:\n%s", out)
 	}
@@ -283,7 +265,7 @@ func TestCardShowsTheArgvOfTheLastAction(t *testing.T) {
 	}
 
 	m.lastAction[path] = actionResult{kind: "pull_rebase", cmd: "git pull --rebase --autostash", output: ""}
-	out = stripANSI(m.renderDetail(r, 40))
+	out = stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "git pull --rebase --autostash") {
 		t.Errorf("the resolved argv does not appear in the card:\n%s", out)
 	}
@@ -299,24 +281,24 @@ func TestCardTheWarningCountsTheMissingFiles(t *testing.T) {
 	}
 	m, r := detailRowWith(t, path, snap)
 
-	rows := detailHeadLines + minListBlockLines + 5 // gap + header + 4
-	out := stripANSI(m.renderDetail(r, rows))
+	rows := detailHeadLines + minListBlockLines + 5 // the right column's own budget
+	out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, fmt.Sprintf("files (%d)", total)) {
 		t.Errorf("the header does not count the %d files:\n%s", total, out)
 	}
-	wantWarning := fmt.Sprintf("… %d more", total-4)
+	wantWarning := "… 10 more"
 	if !strings.Contains(out, wantWarning) {
 		t.Errorf("the warning does not say %q:\n%s", wantWarning, out)
 	}
 	if !strings.Contains(out, "file00.go") {
 		t.Errorf("the first of the list was not painted:\n%s", out)
 	}
-	if strings.Contains(out, "file04.go") {
+	if strings.Contains(out, "file10.go") {
 		t.Errorf("a file that did not fit was painted:\n%s", out)
 	}
 }
 
-func TestCardWithTheGapMinimumOfTheList(t *testing.T) {
+func TestCardListsPaintUnderTheSplit(t *testing.T) {
 	path := "/tmp/api"
 	snap := snapDirty(1, 1)
 	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
@@ -324,21 +306,15 @@ func TestCardWithTheGapMinimumOfTheList(t *testing.T) {
 	snap.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt", Branch: "feat", Head: "abc1234"}}
 	m, r := detailRowWith(t, path, snap)
 
-	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines))
+	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "worktrees (1)") {
-		t.Errorf("with avail=%d the first list must paint its header:\n%s", minListBlockLines, out)
+		t.Errorf("the right column does not paint the worktrees list:\n%s", out)
 	}
-	for _, sinHueco := range []string{"files (", "commits"} {
-		if strings.Contains(out, sinHueco) {
-			t.Errorf("with avail=%d the list %q had no room and was painted anyway:\n%s", minListBlockLines, sinHueco, out)
-		}
+	if !strings.Contains(out, "files (1)") {
+		t.Errorf("the right column does not paint the files list:\n%s", out)
 	}
-
-	out = stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines-1))
-	for _, header := range []string{"worktrees (", "files (", "commits"} {
-		if strings.Contains(out, header) {
-			t.Errorf("with avail=%d the list %q was painted with no room:\n%s", minListBlockLines-1, header, out)
-		}
+	if strings.Contains(out, "commits") {
+		t.Errorf("the card paints the commits block, which left for the panel:\n%s", out)
 	}
 }
 
@@ -347,7 +323,7 @@ func TestCardBranchEmptyIsShowsAsDash(t *testing.T) {
 	snap := snapClean()
 	snap.Status.Branch = ""
 	m, r := detailRowWith(t, path, snap)
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "branch  -") {
 		t.Errorf("with no branch the card does not show the dash:\n%s", out)
 	}
@@ -356,13 +332,13 @@ func TestCardBranchEmptyIsShowsAsDash(t *testing.T) {
 func TestCardNotPaintsListsEmpty(t *testing.T) {
 	path := "/tmp/api"
 	m, r := detailRowWith(t, path, snapClean())
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	for _, header := range []string{"files (", "worktrees (", "commits"} {
 		if strings.Contains(out, header) {
 			t.Errorf("a repo with no data painted the %q list:\n%s", header, out)
 		}
 	}
-	for _, field := range []string{"path", "branch", "upstream", "state", "sync"} {
+	for _, field := range []string{"path", "branch", "upstream", "state", "sync", "activity"} {
 		if !strings.Contains(out, field) {
 			t.Errorf("the header field %q is missing:\n%s", field, out)
 		}
@@ -378,7 +354,7 @@ func TestCardClipsTheQueueOfTheLastAction(t *testing.T) {
 	t.Run("with room", func(t *testing.T) {
 		m, r := detailRowWith(t, path, snapClean())
 		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologue + tailLines + "\n"}
-		out := stripANSI(m.renderDetail(r, detailHeadLines+10))
+		out := stripANSI(m.renderDetail(r, detailHeadLines+10, m.width, m.layout().cardSplit))
 		if !strings.Contains(out, "result5") || !strings.Contains(out, "result3") {
 			t.Errorf("the end of the output is not visible:\n%s", out)
 		}
@@ -390,7 +366,7 @@ func TestCardClipsTheQueueOfTheLastAction(t *testing.T) {
 	t.Run("with wide room", func(t *testing.T) {
 		m, r := detailRowWith(t, path, snapClean())
 		m.lastAction[path] = actionResult{kind: "pull_rebase", output: prologue + tailLines + "\n"}
-		out := stripANSI(m.renderDetail(r, 44))
+		out := stripANSI(m.renderDetail(r, 44, m.width, m.layout().cardSplit))
 		if !strings.Contains(out, "line") || !strings.Contains(out, "result5") {
 			t.Errorf("with plenty of room the full output is not visible:\n%s", out)
 		}
@@ -407,7 +383,7 @@ func TestCardMinimumWorktreeClipsThePathAndRespectsTheBranch(t *testing.T) {
 		Head:   "abc1234",
 	}, parent: "/tmp/multi"}
 
-	out := stripANSI(m.renderWorktreeDetail(e, 20))
+	out := stripANSI(m.renderWorktreeDetail(e, 20, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "feat/x") {
 		t.Errorf("the worktree branch is not visible:\n%s", out)
 	}
@@ -430,7 +406,7 @@ func TestCardWorktreeWithPathRelative(t *testing.T) {
 	snap := snapClean()
 	snap.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt-feat", Branch: "feat", Head: "abc1234"}}
 	m, r := detailRowWith(t, path, snap)
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "wt-feat") {
 		t.Errorf("the worktree path is not visible:\n%s", out)
 	}
@@ -439,15 +415,15 @@ func TestCardWorktreeWithPathRelative(t *testing.T) {
 	}
 }
 
-func TestCardTheListsShareTheBudget(t *testing.T) {
+func TestCardTheListsOwnTheirBudgets(t *testing.T) {
 	path := "/tmp/api"
 	snap := snapClean()
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 40; i++ {
 		snap.Worktrees = append(snap.Worktrees, gitstatus.Worktree{
 			Path: path + "/wt", Branch: "feat", Head: "abc1234",
 		})
 	}
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 40; i++ {
 		snap.Files = append(snap.Files, gitstatus.FileEntry{
 			Code: ".M", Path: fmt.Sprintf("pkg/f%d.go", i),
 		})
@@ -459,26 +435,30 @@ func TestCardTheListsShareTheBudget(t *testing.T) {
 	}
 	m, r := detailRowWith(t, path, snap)
 
-	for rows := detailHeadLines + 2; rows <= 40; rows++ {
-		out := stripANSI(m.renderDetail(r, rows))
+	for rows := detailHeadLines; rows <= 40; rows++ {
+		out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
 		if got := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); got > rows {
 			t.Errorf("rows=%d: the card paints %d lines, it overflows the box", rows, got)
 		}
 	}
 
-	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines+3))
-	if !strings.Contains(out, "worktrees (3)") {
-		t.Errorf("with minimum room no item list should be visible:\n%s", out)
+	out := stripANSI(m.renderDetail(r, detailHeadLines+6, m.width, m.layout().cardSplit))
+	if !strings.Contains(out, "worktrees (40)") || !strings.Contains(out, "files (40)") {
+		t.Errorf("the two lists are not both present:\n%s", out)
 	}
-	if strings.Contains(out, "files (") || strings.Contains(out, "commits") {
-		t.Errorf("the following lists painted a header with no room:\n%s", out)
+	// Independent budgets: an oversized worktrees list does not starve the files list of its own warning.
+	if got := strings.Count(out, "… "); got != 2 {
+		t.Errorf("the card paints %d truncation warnings, want 2 (one per list):\n%s", got, out)
+	}
+	if strings.Contains(out, "commits") {
+		t.Errorf("the card paints the commits block:\n%s", out)
 	}
 }
 
 func TestCardTheWarningCountsTheMissingWorktrees(t *testing.T) {
 	path := "/tmp/api"
 	snap := snapClean()
-	const total = 8
+	const total = 20
 	for i := 0; i < total; i++ {
 		snap.Worktrees = append(snap.Worktrees, gitstatus.Worktree{
 			Path:   path + "/wt",
@@ -488,12 +468,12 @@ func TestCardTheWarningCountsTheMissingWorktrees(t *testing.T) {
 	}
 	m, r := detailRowWith(t, path, snap)
 
-	rows := detailHeadLines + minListBlockLines + 4
-	out := stripANSI(m.renderDetail(r, rows))
+	rows := detailHeadLines + 6
+	out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, fmt.Sprintf("worktrees (%d)", total)) {
 		t.Errorf("the header does not count the worktrees:\n%s", out)
 	}
-	if want := fmt.Sprintf("… %d more", total-3); !strings.Contains(out, want) {
+	if want := "… 11 more"; !strings.Contains(out, want) {
 		t.Errorf("the worktrees warning does not say %q:\n%s", want, out)
 	}
 }
@@ -504,7 +484,7 @@ func TestCardTheGapMinimumItSpendsTheFirstList(t *testing.T) {
 	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	m, r := detailRowWith(t, path, snap) // no worktrees nor commits
 
-	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines))
+	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "files (1)") {
 		t.Errorf("with minimum room the files header is missing:\n%s", out)
 	}
@@ -516,11 +496,11 @@ func TestCardMinimumWorktreeNamesItsRepo(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{p.Path: snapClean()})
 	e := tableEntry{kind: kindWorktree, wt: wt, parent: "/tmp/multi"}
 
-	if out := stripANSI(m.renderWorktreeDetail(e, 20)); !strings.Contains(out, "multi") {
+	if out := stripANSI(m.renderWorktreeDetail(e, 20, m.width, m.layout().cardSplit)); !strings.Contains(out, "multi") {
 		t.Errorf("the card does not name the parent repo:\n%s", out)
 	}
 	e.parent = ""
-	if out := stripANSI(m.renderWorktreeDetail(e, 20)); strings.Contains(out, "repo ") {
+	if out := stripANSI(m.renderWorktreeDetail(e, 20, m.width, m.layout().cardSplit)); strings.Contains(out, "repo ") {
 		t.Errorf("with no parent repo the repo line was painted:\n%s", out)
 	}
 }
@@ -534,15 +514,21 @@ func TestOrDash(t *testing.T) {
 	}
 }
 
-func TestCardTheGapMinimumForTheCommits(t *testing.T) {
+// The commits block left the card for the top-right panel: at no width does the card paint it.
+func TestCardNeverPaintsCommits(t *testing.T) {
 	path := "/tmp/api"
 	snap := snapClean()
-	snap.Commits = []gitstatus.Commit{{Sha: "abc1234", When: 1700000000, Subject: "fix"}}
-	m, r := detailRowWith(t, path, snap) // no worktrees nor files
+	for i := 0; i < 5; i++ {
+		snap.Commits = append(snap.Commits, gitstatus.Commit{Sha: "abc1234", When: 1700000000, Subject: fmt.Sprintf("c%d", i)})
+	}
+	m, r := detailRowWith(t, path, snap)
 
-	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines))
-	if !strings.Contains(out, "commits") {
-		t.Errorf("with minimum room the commits header is missing:\n%s", out)
+	for _, width := range []int{30, 62, 80, 120, 200} {
+		m.width = width
+		out := stripANSI(m.renderDetail(r, 40, width, m.layout().cardSplit))
+		if strings.Contains(out, "commits") {
+			t.Errorf("width=%d: the card paints the commits block:\n%s", width, out)
+		}
 	}
 }
 
@@ -582,7 +568,7 @@ func TestCardTheLineOfSyncHasFourShapes(t *testing.T) {
 			snap.SyncBehind = c.snap.SyncBehind
 			m, r := detailRowWith(t, path, snap)
 
-			out := stripANSI(m.renderDetail(r, 40))
+			out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 			if !strings.Contains(out, c.want) {
 				t.Errorf("the sync line does not say %q:\n%s", c.want, out)
 			}
@@ -600,7 +586,7 @@ func TestCardSyncBehindZeroNotIsPaintsAsDelay(t *testing.T) {
 	snap.SyncBehind = 0
 	m, r := detailRowWith(t, "/tmp/api", snap)
 
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if strings.Contains(out, "↓0") {
 		t.Errorf("a behind of 0 was painted as behind:\n%s", out)
 	}
@@ -624,7 +610,7 @@ func TestCardTheVerdictOfTheLastCommand(t *testing.T) {
 			m, r := detailRowWith(t, path, snapClean())
 			m.lastCmd[path] = cmdResult{command: "go test ./...", output: "ok\n", exit: c.exit}
 
-			out := stripANSI(m.renderDetail(r, 40))
+			out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 			if !strings.Contains(out, "go test ./...") {
 				t.Errorf("the command does not appear in the card:\n%s", out)
 			}
@@ -651,13 +637,13 @@ func TestCardTheOutputOfTheCommandRespectsTheBudget(t *testing.T) {
 		exit:    "0",
 	}
 
-	withHeight := stripANSI(m.renderDetail(r, 40))
+	withHeight := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(withHeight, "five") {
 		t.Errorf("with room the command output does not appear:\n%s", withHeight)
 	}
 
 	m.width = 60
-	short := stripANSI(m.renderDetail(r, 40))
+	short := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	for _, line := range strings.Split(short, "\n") {
 		if w := len([]rune(line)); w > m.width {
 			t.Errorf("the card measures %d with a %d terminal: %q", w, m.width, line)
@@ -675,7 +661,7 @@ func TestCardTheQueueOfTheCommandRespectsItsBudget(t *testing.T) {
 			output:  strings.TrimSuffix(strings.Repeat("output\n", lines), "\n"),
 			exit:    "0",
 		}
-		out := stripANSI(m.renderDetail(r, rows))
+		out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
 		n := 0
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, "output") {
@@ -715,7 +701,7 @@ func TestCardClipsTheCommandToTheWidthThatIsLeft(t *testing.T) {
 		m.width = width
 		m.lastCmd[path] = cmdResult{command: long, output: "", exit: "0"}
 
-		out := stripANSI(m.renderDetail(r, 40))
+		out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 		var line string
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, "command") {
@@ -747,7 +733,7 @@ func TestHeaderDistinguishesDetachedAndWithoutUpstream(t *testing.T) {
 		s.Status.Branch = "feat/x"
 		s.Status.Detached = true
 		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
-		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24, m.width, m.layout().cardSplit))
 		if !strings.Contains(out, "feat/x (detached)") {
 			t.Errorf("card = %q, want the branch with the (detached) suffix", out)
 		}
@@ -757,7 +743,7 @@ func TestHeaderDistinguishesDetachedAndWithoutUpstream(t *testing.T) {
 		s := snapClean()
 		s.Status.Branch = ""
 		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
-		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24, m.width, m.layout().cardSplit))
 		if !strings.Contains(out, "branch  -") {
 			t.Errorf("the card = %q, want '-' for the branch", out)
 		}
@@ -768,23 +754,23 @@ func TestHeaderDistinguishesDetachedAndWithoutUpstream(t *testing.T) {
 		s.Status.HasUpstream = false
 		s.Status.Upstream = ""
 		m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
-		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
+		out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24, m.width, m.layout().cardSplit))
 		if !strings.Contains(out, "no upstream") {
 			t.Errorf("card = %q, want '— (no upstream)'", out)
 		}
 	})
 }
 
-func TestWorktreeOfAnotherRootShowsPathAbsolute(t *testing.T) {
+func TestWorktreeOfAnotherRootStillAppears(t *testing.T) {
 	proj := discovery.Project{Path: "/home/api", Name: "api", HasRepo: true}
 	s := snapClean()
 	s.Worktrees = []gitstatus.Worktree{
 		{Path: "/mnt/wt-other", Branch: "feat/x"},
 	}
 	m := newTestModel(t, []discovery.Project{proj}, map[string]gitstatus.Snapshot{proj.Path: s})
-	out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24))
-	if !strings.Contains(out, "/mnt/wt-other") {
-		t.Errorf("card = %q, want the absolute path of a worktree in another root", out)
+	out := stripANSI(m.renderDetail(row{project: proj, snap: s, state: s.State(true)}, 24, m.width, m.layout().cardSplit))
+	if !strings.Contains(out, "feat/x") {
+		t.Errorf("card = %q, want the worktree of another root to appear", out)
 	}
 }
 
@@ -799,11 +785,12 @@ func TestCardWorktreeWithPathNotComparableFallATheAbsolute(t *testing.T) {
 	}())
 	m.width = 120
 
-	out := stripANSI(m.renderDetail(r, 40))
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "feature") {
 		t.Fatalf("the worktree does not appear in the card:\n%s", out)
 	}
-	if !strings.Contains(out, abs) {
+	// With an impossible Rel the path falls back to the absolute and the right column shows its prefix.
+	if want := string([]rune(abs)[:11]); !strings.Contains(out, want) {
 		t.Errorf("with an impossible Rel the path should fall back to the absolute %q:\n%s", abs, out)
 	}
 }

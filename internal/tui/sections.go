@@ -6,14 +6,15 @@ import (
 	"sort"
 	"strings"
 
+	"gitdash/internal/gitstatus"
 	"gitdash/internal/tui/bordered"
 )
 
-func (m Model) section(title, content string) string {
+func (m Model) section(title, content string, width int) string {
 	if title != "" {
 		title = " " + title + " "
 	}
-	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, m.width)
+	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, width)
 }
 
 // With a warning in keybinds (pull selector, removal confirmation, log or PR legend) what is forced is that section's visibility: degrading it would leave the app waiting for a key without saying which.
@@ -32,6 +33,20 @@ func (m Model) layout() layout {
 		}
 		lay.bodyLines += freed
 		lay.previewLines = 0
+	}
+	// The width split lives here too: the height search stays height-only and every pane reads its
+	// width from this single value, so a degradation decision cannot disagree with what is painted.
+	lay.cardWidth = m.width
+	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
+	// The commits panel is additive on width: it enters only if the table still shows all its
+	// columns at the split width, otherwise it would silently cost the table a column.
+	tableWidth := m.width - commitsPanelWidth - commitsPanelGap
+	if fitColumns(tableWidth-rowPrefixWidth-2) == len(tableColumns) {
+		lay.showPanel = true
+		lay.tableWidth = tableWidth
+		lay.panelWidth = commitsPanelWidth
+	} else {
+		lay.tableWidth = m.width
 	}
 	return lay
 }
@@ -91,7 +106,7 @@ func (m Model) statsSection() string {
 		summary += " [dirty]"
 	}
 	parts = append(parts, styleBar.Render(summary))
-	return m.section("gitdash", strings.Join(parts, "  "))
+	return m.section("gitdash", strings.Join(parts, "  "), m.width)
 }
 
 func (m Model) activityIndicator() string {
@@ -141,11 +156,11 @@ func (m Model) filterSection() string {
 	} else {
 		content = styleWarn.Render("[/" + m.search + "]")
 	}
-	return m.section("filter", content)
+	return m.section("filter", content, m.width)
 }
 
 // Entries arrive already computed: the preview panel needs the same ones and recomposing them here would duplicate the Arrange on every render.
-func (m Model) tableSection(bodyLines int, entries []tableEntry) string {
+func (m Model) tableSection(bodyLines int, entries []tableEntry, width int) string {
 	m.syncOffset(len(entries), bodyLines)
 
 	var rows []string
@@ -153,14 +168,65 @@ func (m Model) tableSection(bodyLines int, entries []tableEntry) string {
 		rows = append(rows, "  "+m.emptyTableHint())
 	} else {
 		for i := m.offset; i < min(len(entries), m.offset+bodyLines); i++ {
-			rows = append(rows, m.renderEntry(entries[i], i == m.cursor))
+			rows = append(rows, m.renderEntry(entries[i], i == m.cursor, width))
 		}
 	}
 	// rellenaHasta instead of a `for len(rows) < bodyLines`: the box measures what the layout says, and comparing inside the loop turns the mutant into a hang.
 	rows = rellenaHasta(rows, bodyLines)
 
-	header := "  " + headerColumns(m.width)
-	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"))
+	header := headerSlot + headerColumns(width)
+	return m.section("repos", styleHint.Render(header)+"\n"+strings.Join(rows, "\n"), width)
+}
+
+// The commits panel is the top-right band: same height as the table box, its own title, and a
+// fixed 30-cell body. It never falls back into the card, so what is dropped is not shown anywhere.
+func (m *Model) panelSection(lay layout, entries []tableEntry) string {
+	rows := lay.bodyLines + 1
+	inner := max(1, lay.panelWidth-2)
+	e, ok := entryAt(entries, m.cursor)
+	var title, content string
+	switch {
+	case !ok:
+		title, content = "commits", m.panelEmpty()
+	case e.kind == kindRepo:
+		title, content = "commits · "+detailTitle(e.r), m.commitsPanel(e.r.snap.Commits, rows, inner)
+	case e.kind == kindWorktree:
+		title, content = "commits · "+worktreeTitle(e), m.worktreeCommitsPanel(e, rows, inner)
+	default:
+		title, content = "commits · "+e.group, m.groupSummaryText(e)
+	}
+	return m.section(title, fitLines(content, rows), lay.panelWidth)
+}
+
+func (m *Model) panelEmpty() string {
+	return styleDim.Render("  " + m.emptyTableHint())
+}
+
+func (m *Model) commitsPanel(commits []gitstatus.Commit, rows, inner int) string {
+	if len(commits) == 0 {
+		return styleDim.Render("  no commits")
+	}
+	var b strings.Builder
+	// One line per commit, newest first, never wrapped: the subject is cut to whatever the 30-cell body leaves after the sha/age prefix.
+	shown := min(len(commits), max(1, rows))
+	for _, c := range commits[:shown] {
+		fmt.Fprintf(&b, "%s %s %s\n",
+			styleDim.Render(pad(c.Sha, 8)),
+			pad(relativeTime(c.When), 6),
+			truncate(c.Subject, max(1, inner-18)),
+		)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m *Model) worktreeCommitsPanel(e tableEntry, rows, inner int) string {
+	if p, ok := m.discoveredByPath(e.wt.Path); ok {
+		if snap, ok := m.states[p.Path]; ok {
+			return m.commitsPanel(snap.Commits, rows, inner)
+		}
+	}
+	// No live snapshot for that path: a dim placeholder, never the parent repo's commits.
+	return styleDim.Render("  no commits")
 }
 
 // It paints the same card clipped to its height and padded with empty lines, since the layout owns the height: without padding the box would shrink moving from a clean repo to one with 30 files.
@@ -175,13 +241,13 @@ func (m *Model) previewSection(lay layout, entries []tableEntry) string {
 	case !ok:
 		title, content = "repos", m.previewEmpty()
 	case e.kind == kindRepo:
-		title, content = detailTitle(e.r), m.renderDetail(e.r, rows)
+		title, content = detailTitle(e.r), m.renderDetail(e.r, rows, lay.cardWidth, lay.cardSplit)
 	case e.kind == kindWorktree:
-		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, rows)
+		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, rows, lay.cardWidth, lay.cardSplit)
 	default:
 		title, content = e.group, m.renderGroupSummary(e, rows)
 	}
-	return m.section(title, fitLines(content, rows))
+	return m.section(title, fitLines(content, rows), lay.cardWidth)
 }
 
 func (m Model) previewEmpty() string {
@@ -208,7 +274,7 @@ func (m Model) keybindsSection(hintLines int) string {
 	for _, l := range lines {
 		rendered = append(rendered, styleHint.Render(l))
 	}
-	return m.section("keybinds", strings.Join(rendered, "\n"))
+	return m.section("keybinds", strings.Join(rendered, "\n"), m.width)
 }
 
 func detailTitle(r row) string {
@@ -228,6 +294,12 @@ func worktreeTitle(e tableEntry) string {
 
 // Only the states present are painted: a clean group does not deserve four lines of zeros (the table is quiet for the same reason).
 func (m *Model) renderGroupSummary(e tableEntry, rows int) string {
+	return m.cardTail(m.groupSummaryText(e), rows)
+}
+
+// The pure aggregate text, shared by the card and the commits panel: the panel must not get the
+// card's `!` footer, so cardTail stays out of here.
+func (m *Model) groupSummaryText(e tableEntry) string {
 	st := m.groupStats(e.group)
 	key := styleDetailKey.Render
 
@@ -248,7 +320,22 @@ func (m *Model) renderGroupSummary(e tableEntry, rows int) string {
 	if st.worktrees > 0 {
 		b.WriteString(key("wt       ") + fmt.Sprint(st.worktrees) + "\n")
 	}
-	return m.cardTail(b.String(), rows)
+	return b.String()
+}
+
+// Horizontal join of two already-rendered panes: the gap is the 1-cell separation and each line
+// is padded to its pane width first, so the joined band keeps the terminal's exact width.
+func joinPanes(left, right string) string {
+	ll := strings.Split(left, "\n")
+	rl := strings.Split(right, "\n")
+	n := max(len(ll), len(rl))
+	out := make([]string, n)
+	lpad := rellenaHasta(ll, n)
+	rpad := rellenaHasta(rl, n)
+	for i := range n {
+		out[i] = lpad[i] + " " + rpad[i]
+	}
+	return strings.Join(out, "\n")
 }
 
 func fitLines(content string, n int) string {

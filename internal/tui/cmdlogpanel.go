@@ -94,7 +94,7 @@ func (m *Model) logSection(bodyLines int) string {
 	}
 	header := "  " + m.logHeader(cols)
 	body := styleHint.Render(header) + "\n" + strings.Join(rows, "\n")
-	return m.section(title, body)
+	return m.section(title, body, m.width)
 }
 
 func (m Model) logHeader(c logColumns) string {

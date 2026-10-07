@@ -320,7 +320,7 @@ func TestDetailShowsLastAction(t *testing.T) {
 	m.lastAction["/tmp/old-clean"] = actionResult{kind: "pull", output: "error: pull diverged\n", err: "exit 1"}
 	m.search = "old-clean"
 	r, _ := m.selected()
-	out := m.renderDetail(r, m.height)
+	out := m.renderDetail(r, m.height, m.width, m.layout().cardSplit)
 	if !strings.Contains(out, "pull") || !strings.Contains(out, "failed") || !strings.Contains(out, "diverged") {
 		t.Errorf("detail without the last action:\n%s", out)
 	}

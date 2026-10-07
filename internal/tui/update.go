@@ -646,7 +646,12 @@ func (m Model) renderDashboard() string {
 		return m.compose(lay, m.prSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
-	return m.compose(lay, m.tableSection(lay.bodyLines, entries), m.previewSection(lay, entries))
+	table := m.tableSection(lay.bodyLines, entries, lay.tableWidth)
+	middle := table
+	if lay.showPanel {
+		middle = joinPanes(table, m.panelSection(lay, entries))
+	}
+	return m.compose(lay, middle, m.previewSection(lay, entries))
 }
 
 func (m Model) toastReserve() int {

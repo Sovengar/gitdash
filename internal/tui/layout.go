@@ -15,6 +15,18 @@ const (
 	minPreviewLines = 10
 	// Below this there is no window left to scroll.
 	minBodyLines = 3
+
+	// Width budget: the table row prefix is a 2-cell cursor plus a 2-cell fetch slot; the commits
+	// panel is a fixed 30 cells with a 1-cell gap, and the card splits into 36 + separator + 24.
+	rowPrefixWidth = 4
+	fetchSlotWidth = 2
+
+	commitsPanelWidth = 30
+	commitsPanelGap   = 1
+
+	cardLeftWidth  = 36
+	cardSepWidth   = 1
+	cardRightWidth = 24
 )
 
 type layout struct {
@@ -24,6 +36,13 @@ type layout struct {
 	hintLines    int
 	bodyLines    int
 	previewLines int
+
+	// Width split, assembled only here: every pane renderer receives its width from this value.
+	showPanel  bool
+	tableWidth int
+	panelWidth int
+	cardWidth  int
+	cardSplit  bool
 }
 
 // The preview panel is ADDITIVE: it only stays at a height that leaves minBodyLines rows and costs no hint or section; with a form open the search is skipped, since a preview would compete for the height of what the user is typing.

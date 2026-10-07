@@ -281,7 +281,7 @@ func (m Model) prSection(rows int) string {
 	notice := m.prNoticeLine()
 
 	lines := []string{title, base, head, draft, notice, m.prBodyLabel(), m.pr.body.View()}
-	return m.section("new PR · "+m.pr.name, fitLines(strings.Join(lines, "\n"), rows))
+	return m.section("new PR · "+m.pr.name, fitLines(strings.Join(lines, "\n"), rows), m.width)
 }
 
 // Reserved ALWAYS, even without an error, so the textarea does not change height when a warning appears: a field jumping under the cursor while typing is worse than an error you have to read twice.

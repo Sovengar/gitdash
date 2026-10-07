@@ -6,13 +6,11 @@ type lipglossStyle = lipgloss.Style
 
 // Column widths, all wider than their header so pad() guarantees a separator between columns.
 const (
-	colName     = 26
-	colBranch   = 24
-	colWT       = 11
-	colUpDown   = 9
-	colSync     = 12
-	colActivity = 10
-	colFetch    = 9
+	colName   = 26
+	colBranch = 24
+	colWT     = 11
+	colUpDown = 9
+	colSync   = 12
 )
 
 var (
