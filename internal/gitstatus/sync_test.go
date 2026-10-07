@@ -32,7 +32,7 @@ func TestSyncBehind(t *testing.T) {
 		t.Fatalf("sync not known: %+v", snap)
 	}
 	if snap.SyncBehind != 1 {
-		t.Errorf("behind = %d, want 1 (solo m1 ausente)", snap.SyncBehind)
+		t.Errorf("behind = %d, want 1 (only m1 missing)", snap.SyncBehind)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestSyncWithoutFallbackAllowedNotChanges(t *testing.T) {
 }
 
 func TestSyncForFallbackOnlyInTheDefault(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name         string
 		p            discovery.Project
 		global       string
@@ -179,11 +179,11 @@ func TestSyncForFallbackOnlyInTheDefault(t *testing.T) {
 		wantFallback bool
 	}{
 		{"undeclared default", discovery.Project{}, "main", false, "main", true},
-		{"marcador declarado", discovery.Project{SyncBranch: "develop"}, "main", false, "develop", false},
+		{"declared marker", discovery.Project{SyncBranch: "develop"}, "main", false, "develop", false},
 		{"explicit global config", discovery.Project{}, "release", true, "release", false},
 		{"marker wins over the explicit global", discovery.Project{SyncBranch: "develop"}, "release", true, "develop", false},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := SyncFor(c.p, c.global); got != c.want {
 				t.Errorf("SyncFor = %q, want %q", got, c.want)

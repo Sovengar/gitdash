@@ -56,7 +56,7 @@ func sinBinario(t *testing.T) {
 	dir := t.TempDir()
 	git, err := exec.LookPath("git")
 	if err != nil {
-		t.Skip("git no disponible")
+		t.Skip("git not available")
 	}
 	if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
 		t.Fatal(err)
@@ -265,24 +265,24 @@ func TestPRTheHeadExitsOfTheSnapshot(t *testing.T) {
 
 func TestPRTheArgvOfThePanelGoesSanitized(t *testing.T) {
 	// Two different paths to the same limit. A paste with an OSC (which hijacks the terminal title) goes through no filter at all: the bubbles widget strips control characters but not sequences, and the panel cannot rely on every path filtering. Format characters (Cf: bidi, zero-width) do arrive through the form's real path, because they are not control characters.
-	casos := []struct {
+	cases := []struct {
 		name     string
 		title    string
 		visible  string   // the part of the title that must still be visible
-		pegado   bool     // the title arrives via the submission, not via the input
+		pasted   bool     // the title arrives via the submission, not via the input
 		injected []string // what must NOT appear in the view
 	}{
-		{"osc", "\x1b]0;secuestrado\x07rojo final", "rojo final", true, []string{"\x1b]0;"}},
+		{"osc", "\x1b]0;hijacked\x07red final", "red final", true, []string{"\x1b]0;"}},
 		{"bidi", "title\u202Emid\u202C", "title", false, []string{"\u202e", "\u202c"}},
-		{"zero-width", "antes\u200Bdespues", "antes", false, []string{"\u200b"}},
+		{"zero-width", "before\u200Bafter", "before", false, []string{"\u200b"}},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := prRepo(t, "git@github.com:acme/widget.git")
 			forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/7")
 			m, rec := prModel(t, dir)
 
-			if c.pegado {
+			if c.pasted {
 				m.prPending = &prSubmission{path: dir, params: forge.Params{
 					Title: c.title, Base: "main", Head: "main",
 				}}
@@ -368,7 +368,7 @@ func TestPRForgeUnknownNotRunsNothing(t *testing.T) {
 	}
 	for _, want := range []string{"no forge", "[forge.github]", "[forge.gitlab]"} {
 		if !strings.Contains(res.reject, want) {
-			t.Errorf("aviso = %q, want menciona %q", res.reject, want)
+			t.Errorf("notice = %q, want mentions %q", res.reject, want)
 		}
 	}
 	if prExec(rec) != nil {
@@ -388,7 +388,7 @@ func TestPRWithoutBinaryNotRunsNothing(t *testing.T) {
 	res := awaitPR(t, &m)
 
 	if !strings.Contains(res.reject, "gh not installed") {
-		t.Errorf("aviso = %q, want \"gh not installed\"", res.reject)
+		t.Errorf("notice = %q, want \"gh not installed\"", res.reject)
 	}
 	if prExec(rec) != nil {
 		t.Error("an exec was recorded with no binary")
@@ -422,8 +422,8 @@ func TestPRNotRelaunchWithTheRepoBusy(t *testing.T) {
 }
 
 func TestPRGitLabSelfManagedRemovesThePrefixOfSubfolder(t *testing.T) {
-	dir := prRepo(t, "git@git.example.com:grupo/sub/widget.git")
-	argvFile := forgeStub(t, "glab", "echo https://git.example.com/git/grupo/sub/widget/-/merge_requests/3")
+	dir := prRepo(t, "git@git.example.com:group/sub/widget.git")
+	argvFile := forgeStub(t, "glab", "echo https://git.example.com/git/group/sub/widget/-/merge_requests/3")
 	m, rec := prModel(t, dir)
 	m.cfg.Forges = prConfig(t, `
 [forge.gitlab]
@@ -452,7 +452,7 @@ api_base = "/git/api/v4/"
 		"-d", "",
 		"-b", "main",
 		"-s", "main",
-		"-y", "-R", "grupo/sub/widget",
+		"-y", "-R", "group/sub/widget",
 	}
 	if !reflect.DeepEqual(e.Argv, want) {
 		t.Errorf("argv = %#v\nwant %#v", e.Argv, want)
@@ -494,7 +494,7 @@ func TestPRFailureOfTheCLIToastWithTheReason(t *testing.T) {
 
 // A failure painted with the ✓ of success is worse than not warning, because the user does not look again; both branches are checked, which is what ties them to the result, since with only one an inverted `== toastSuccess` would keep painting half the cases right.
 func TestPRTheWarningOfTheOutcomeCarriesItsLevel(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		stub string
 		want toastLevel
@@ -502,7 +502,7 @@ func TestPRTheWarningOfTheOutcomeCarriesItsLevel(t *testing.T) {
 		{"success", "echo https://github.com/acme/widget/pull/42", toastSuccess},
 		{"failure", "echo 'could not create PR: head branch already exists' >&2\nexit 1", toastError},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := prRepo(t, "git@github.com:acme/widget.git")
 			forgeStub(t, "gh", c.stub)
@@ -532,11 +532,11 @@ func TestPRTheWarningOfTheOutcomeCarriesItsLevel(t *testing.T) {
 			if !strings.Contains(painted, toastIcon(c.want)) {
 				t.Errorf("the notice does not carry the %v icon:\n%s", c.want, painted)
 			}
-			otro := toastSuccess
+			other := toastSuccess
 			if c.want == toastSuccess {
-				otro = toastError
+				other = toastError
 			}
-			if strings.Contains(painted, toastIcon(otro)) {
+			if strings.Contains(painted, toastIcon(other)) {
 				t.Errorf("the painted notice carries the opposite level's icon:\n%s", painted)
 			}
 		})
@@ -590,7 +590,7 @@ func containsPair(argv []string, flag, value string) bool {
 }
 
 func TestPRGitReasonGetsTheReasonOfTheArgv(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		err  string
 		want string
@@ -621,7 +621,7 @@ func TestPRGitReasonGetsTheReasonOfTheArgv(t *testing.T) {
 			"wrapped: git [x]: detail",
 		},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := prGitReason(errors.New(c.err)); got != c.want {
 			t.Errorf("%s: prGitReason = %q, want %q", c.name, got, c.want)
 		}
@@ -630,7 +630,7 @@ func TestPRGitReasonGetsTheReasonOfTheArgv(t *testing.T) {
 
 // A toast mixing both cases would leave the user configuring a remote that does exist.
 func TestPRRemoteRejectDistinguishesTheCaseNormal(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		err  string
 		want string
@@ -646,7 +646,7 @@ func TestPRRemoteRejectDistinguishesTheCaseNormal(t *testing.T) {
 			"widget: cannot read origin — fatal: not a git repository",
 		},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := prRemoteReject("widget", errors.New(c.err)); got != c.want {
 			t.Errorf("%s: prRemoteReject = %q, want %q", c.name, got, c.want)
 		}
@@ -654,7 +654,7 @@ func TestPRRemoteRejectDistinguishesTheCaseNormal(t *testing.T) {
 }
 
 func TestPRURLYNoteOfTheOutcome(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name string
 		out  string
 		want string
@@ -667,23 +667,23 @@ func TestPRURLYNoteOfTheOutcome(t *testing.T) {
 		{"http glued to something else does not count", "verhttp://x\n", ""},
 		{"https with one slash missing is not a URL", "https:/g.c/a/b\n", ""},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := prURL(c.out); got != c.want {
 			t.Errorf("%s: prURL = %q, want %q", c.name, got, c.want)
 		}
 	}
 
-	nivel, msg := prNote("widget", prResultMsg{out: "https://github.com/a/b/pull/1"})
-	if nivel != toastSuccess || !strings.Contains(msg, "https://github.com/a/b/pull/1") {
-		t.Errorf("success with no visible link: (%v, %q)", nivel, msg)
+	level, msg := prNote("widget", prResultMsg{out: "https://github.com/a/b/pull/1"})
+	if level != toastSuccess || !strings.Contains(msg, "https://github.com/a/b/pull/1") {
+		t.Errorf("success with no visible link: (%v, %q)", level, msg)
 	}
-	if nivel, msg := prNote("widget", prResultMsg{out: "hecho"}); nivel != toastSuccess || strings.Contains(msg, "http") || strings.Contains(msg, "—") {
-		t.Errorf("output with no URL: (%v, %q), want a success toast with no link", nivel, msg)
+	if level, msg := prNote("widget", prResultMsg{out: "done"}); level != toastSuccess || strings.Contains(msg, "http") || strings.Contains(msg, "—") {
+		t.Errorf("output with no URL: (%v, %q), want a success toast with no link", level, msg)
 	}
 	cerr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "secret title", "-b", "long body"}, ExitCode: 1, Msg: "no commits between main and feat"}
-	nivel, msg = prNote("widget", prResultMsg{err: cerr})
-	if nivel != toastError {
-		t.Errorf("failure: nivel = %v, want error", nivel)
+	level, msg = prNote("widget", prResultMsg{err: cerr})
+	if level != toastError {
+		t.Errorf("failure: level = %v, want error", level)
 	}
 	if !strings.Contains(msg, "no commits between main and feat") {
 		t.Errorf("the failure does not show the reason: %q", msg)

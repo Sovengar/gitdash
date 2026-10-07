@@ -11,7 +11,7 @@ command = "jcode -run {prompt}"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if got := cfg.AICommand("pull"); got != "jcode -run {prompt}" {
 		t.Errorf("AICommand(pull) = %q, want the template", got)
@@ -61,7 +61,7 @@ func TestBuildAIArgvNotRescansThePrompt(t *testing.T) {
 }
 
 func TestBuildAIArgvTemplateEmpty(t *testing.T) {
-	if argv := BuildAIArgv("", "algo", nil); len(argv) != 0 {
+	if argv := BuildAIArgv("", "something", nil); len(argv) != 0 {
 		t.Errorf("argv = %#v, want empty", argv)
 	}
 }

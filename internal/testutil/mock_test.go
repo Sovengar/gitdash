@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func ficheroComoPadre(t *testing.T) string {
+func fileAsParent(t *testing.T) string {
 	t.Helper()
 	f := filepath.Join(t.TempDir(), "i-am-a-file")
 	if err := os.WriteFile(f, []byte("content"), 0o644); err != nil {
@@ -19,7 +19,7 @@ func ficheroComoPadre(t *testing.T) string {
 
 func TestInitFailsWithDirectoryUnreadable(t *testing.T) {
 	tb := &MockTB{Temp: tptr(t)}
-	Init(tb, filepath.Join(ficheroComoPadre(t), "sub"))
+	Init(tb, filepath.Join(fileAsParent(t), "sub"))
 
 	if !tb.Failed() {
 		t.Fatal("Init without failure, want the MkdirAll error (the parent is a file)")
@@ -70,14 +70,14 @@ func TestCommitFilesFailsWithPathImpossible(t *testing.T) {
 func TestWriteUncommittedAndUntrackedFail(t *testing.T) {
 	t.Run("uncommitted", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
-		WriteUncommitted(tb, ficheroComoPadre(t), map[string]string{"a.txt": "x"})
+		WriteUncommitted(tb, fileAsParent(t), map[string]string{"a.txt": "x"})
 		if !tb.Failed() {
 			t.Error("WriteUncommitted without failure, want the write error")
 		}
 	})
 	t.Run("untracked", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
-		WriteUntracked(tb, ficheroComoPadre(t), map[string]string{"a.txt": "x"})
+		WriteUntracked(tb, fileAsParent(t), map[string]string{"a.txt": "x"})
 		if !tb.Failed() {
 			t.Error("WriteUntracked without failure, want the write error")
 		}
@@ -86,7 +86,7 @@ func TestWriteUncommittedAndUntrackedFail(t *testing.T) {
 
 func TestMarkerFailsWithPathUnreadable(t *testing.T) {
 	tb := &MockTB{Temp: tptr(t)}
-	Marker(tb, ficheroComoPadre(t), "n", "g", "s", false)
+	Marker(tb, fileAsParent(t), "n", "g", "s", false)
 	if !tb.Failed() {
 		t.Error("Marker without failure, want the marker's write error")
 	}
@@ -118,9 +118,9 @@ func TestMockTBRespectsTheContract(t *testing.T) {
 
 	empty.Fatalf("failure %d of %d", 3, 7)
 	if len(empty.Failures) != 1 {
-		t.Fatalf("fallos = %d, want 1", len(empty.Failures))
+		t.Fatalf("failures = %d, want 1", len(empty.Failures))
 	}
-	if !strings.Contains(empty.Failures[0], "failure 3 de 7") {
+	if !strings.Contains(empty.Failures[0], "failure 3 of 7") {
 		t.Errorf("failure = %q, want the formatted message", empty.Failures[0])
 	}
 	if !empty.Failed() {
@@ -136,7 +136,7 @@ func TestMockTBRespectsTheContract(t *testing.T) {
 func TestHelpersThatWriteFail(t *testing.T) {
 	t.Run("InitBare", func(t *testing.T) {
 		tb := &MockTB{Temp: tptr(t)}
-		InitBare(tb, filepath.Join(ficheroComoPadre(t), "origin.git"))
+		InitBare(tb, filepath.Join(fileAsParent(t), "origin.git"))
 		if !tb.Failed() {
 			t.Error("InitBare without failure, want the MkdirAll error")
 		}

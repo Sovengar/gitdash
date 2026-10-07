@@ -64,7 +64,7 @@ func TestParseRemoteURL(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "barra final",
+			name:   "trailing slash",
 			raw:    "https://github.com/acme/widget/",
 			want:   RepoRef{Forge: ForgeGitHub, Host: "github.com", Project: "acme/widget", Owner: "acme", Name: "widget"},
 			wantOK: true,
@@ -95,23 +95,23 @@ func TestParseRemoteURL(t *testing.T) {
 		},
 		{
 			name:   "gitlab with a subgroup",
-			raw:    "https://gitlab.example.com/grupo/sub/proy.git",
-			want:   RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "grupo/sub/proy", Owner: "sub", Name: "proy"},
+			raw:    "https://gitlab.example.com/group/sub/proj.git",
+			want:   RepoRef{Forge: ForgeGitLab, Host: "gitlab.example.com", Project: "group/sub/proj", Owner: "sub", Name: "proj"},
 			wantOK: true,
 		},
 		{
 			name:     "gitlab in an instance subfolder",
-			raw:      "https://gitlab.example.com/git/grupo/sub/proy.git",
+			raw:      "https://gitlab.example.com/git/group/sub/proj.git",
 			prefixes: map[string]string{"gitlab.example.com": "git"},
-			want:     refGL("grupo/sub/proy"),
+			want:     refGL("group/sub/proj"),
 			wantOK:   true,
 		},
-		{name: "host desconocido", raw: "https://bitbucket.org/acme/widget.git", wantOK: false},
+		{name: "unknown host", raw: "https://bitbucket.org/acme/widget.git", wantOK: false},
 		{name: "local path", raw: "/home/u/dev/widget", wantOK: false},
 		{name: "local path with the file scheme", raw: "file:///home/u/dev/widget", wantOK: false},
 		{name: "empty", raw: "", wantOK: false},
 		{name: "without owner nor repo", raw: "https://github.com/acme.git", wantOK: false},
-		{name: "solo owner", raw: "https://github.com/", wantOK: false},
+		{name: "only owner", raw: "https://github.com/", wantOK: false},
 		{name: "scheme without host", raw: "https:///acme/widget.git", wantOK: false},
 		{name: "scp without path", raw: "git@github.com:", wantOK: false},
 		{name: "user without host", raw: "git@", wantOK: false},
@@ -125,10 +125,10 @@ func TestParseRemoteURL(t *testing.T) {
 			}
 			got, ok := ParseRemoteURL(tc.raw, hosts, tc.prefixes)
 			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, quiero %v", ok, tc.wantOK)
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
 			if ok && got != tc.want {
-				t.Fatalf("ref = %+v, quiero %+v", got, tc.want)
+				t.Fatalf("ref = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
@@ -137,16 +137,16 @@ func TestParseRemoteURL(t *testing.T) {
 func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 	hosts := map[string]string{"gitlab.example.com": ForgeGitLab}
 	prefixes := map[string]string{"gitlab.example.com": "git"}
-	want := refGL("grupo/sub/proy")
+	want := refGL("group/sub/proj")
 
 	cases := []struct {
 		name string
 		raw  string
 	}{
-		{"without prefix", "https://gitlab.example.com/grupo/sub/proy.git"},
-		{"with prefix", "https://gitlab.example.com/git/grupo/sub/proy.git"},
-		{"with prefix y barra final", "https://gitlab.example.com/git/grupo/sub/proy/"},
-		{"scp with prefix", "git@gitlab.example.com:git/grupo/sub/proy.git"},
+		{"without prefix", "https://gitlab.example.com/group/sub/proj.git"},
+		{"with prefix", "https://gitlab.example.com/git/group/sub/proj.git"},
+		{"with prefix y trailing slash", "https://gitlab.example.com/git/group/sub/proj/"},
+		{"scp with prefix", "git@gitlab.example.com:git/group/sub/proj.git"},
 		{"scp with prefix and no .git", "git@gitlab.example.com:git/group/sub/proj"},
 	}
 	for _, tc := range cases {
@@ -156,7 +156,7 @@ func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 				t.Fatalf("did not parse %q", tc.raw)
 			}
 			if got != want {
-				t.Fatalf("ref = %+v, quiero %+v", got, want)
+				t.Fatalf("ref = %+v, want %+v", got, want)
 			}
 		})
 	}
@@ -166,15 +166,15 @@ func TestParseRemoteURLKeepsConfiguredPrefix(t *testing.T) {
 	hosts := map[string]string{"gitlab.example.com": ForgeGitLab}
 	prefixes := map[string]string{"gitlab.example.com": "/git/"}
 
-	got, ok := ParseRemoteURL("https://gitlab.example.com/grupo/proy.git", hosts, prefixes)
+	got, ok := ParseRemoteURL("https://gitlab.example.com/group/proj.git", hosts, prefixes)
 	if !ok {
 		t.Fatal("did not parse")
 	}
-	if got.Project != "grupo/proy" {
-		t.Fatalf("Project = %q, want %q (a path without the prefix is not touched)", got.Project, "grupo/proy")
+	if got.Project != "group/proj" {
+		t.Fatalf("Project = %q, want %q (a path without the prefix is not touched)", got.Project, "group/proj")
 	}
-	if got.Owner != "grupo" || got.Name != "proy" {
-		t.Fatalf("Owner/Name = %q/%q, quiero grupo/proy", got.Owner, got.Name)
+	if got.Owner != "group" || got.Name != "proj" {
+		t.Fatalf("Owner/Name = %q/%q, want group/proj", got.Owner, got.Name)
 	}
 }
 
@@ -189,15 +189,15 @@ func TestPrefixFromAPIBase(t *testing.T) {
 		{"instance in a subfolder without slashes", "git/api/v4", "git"},
 		{"subfolder with more levels", "/custom/api/v4/", "custom"},
 		{"empty", "", ""},
-		{"api_base inesperado: v3", "/git/api/v3/", ""},
-		{"api_base inesperado: subruta", "/api/v4/projects", ""},
+		{"unexpected api_base: v3", "/git/api/v3/", ""},
+		{"unexpected api_base: subpath", "/api/v4/projects", ""},
 		{"unexpected api_base: only the api prefix", "/git/api/", ""},
 		{"api_base absoluto", "https://gitlab.example.com/api/v4/", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := PrefixFromAPIBase(tc.apiBase); got != tc.want {
-				t.Fatalf("PrefixFromAPIBase(%q) = %q, quiero %q", tc.apiBase, got, tc.want)
+				t.Fatalf("PrefixFromAPIBase(%q) = %q, want %q", tc.apiBase, got, tc.want)
 			}
 		})
 	}
@@ -241,6 +241,6 @@ func TestParseRemoteWithColonInThePositionZero(t *testing.T) {
 		t.Errorf("ParseRemoteURL(empty host) = %+v, want unparseable", ref)
 	}
 	if ref, ok := ParseRemoteURL("git@github.com:acme/widget.git", hosts, nil); !ok {
-		t.Errorf("ParseRemoteURL(scp bien formado) = %+v, want parseable", ref)
+		t.Errorf("ParseRemoteURL(well-formed scp) = %+v, want parseable", ref)
 	}
 }

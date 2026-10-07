@@ -52,7 +52,7 @@ func TestForgeDefaults(t *testing.T) {
 func TestForgeSelfManagedInSubfolder(t *testing.T) {
 	cfg, warn := LoadFrom(write(t, forgeSelfManaged))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	hosts := cfg.ForgeHosts()
 	if len(hosts) != 2 {
@@ -81,7 +81,7 @@ host = "umane.emeal.nttdata.com"
 api_base = "/git/api/v4/"
 `))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if _, ok := cfg.ForgeHosts()["umane.emeal.nttdata.com"]; ok {
 		t.Error("the host of a disabled provider resolved to forge")
@@ -126,7 +126,7 @@ func TestForgeCloneBaseIsOverrideOfThePrefix(t *testing.T) {
 		},
 		{
 			name: "clone_base wins over an api_base with another subfolder",
-			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v4/\"\nclone_base = \"otro\"\n",
+			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v4/\"\nclone_base = \"other\"\n",
 			want: "other",
 		},
 		{
@@ -144,7 +144,7 @@ func TestForgeCloneBaseIsOverrideOfThePrefix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, warn := LoadFrom(write(t, tc.toml))
 			if warn != "" {
-				t.Fatalf("warn inesperado: %q", warn)
+				t.Fatalf("unexpected warning: %q", warn)
 			}
 			if got := cfg.ForgePrefixes()["a.example.com"]; got != tc.want {
 				t.Errorf("prefix = %q, want %q", got, tc.want)
@@ -170,7 +170,7 @@ host = "github.com"
 host = "gitlab.com"
 `))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	hosts := cfg.ForgeHosts()
 	if len(hosts) != 2 {
@@ -211,7 +211,7 @@ func TestForgeNameNormalized(t *testing.T) {
 host = "a.example.com"
 `))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if got := cfg.ForgeHosts()["a.example.com"]; got != "gitlab" {
 		t.Errorf("ForgeHosts()[a.example.com] = %q, want gitlab", got)
@@ -275,14 +275,14 @@ func TestDefaultKeybindingsPRRebind(t *testing.T) {
 pr = "W"
 `))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if got := cfg.KeyFor("pr"); got != "W" {
 		t.Errorf("pr = %q, want W", got)
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
 	if !strings.Contains(hints, "W open PR") {
-		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+		t.Errorf("rebound hint missing: %v", cfg.HintBarLines())
 	}
 }
 

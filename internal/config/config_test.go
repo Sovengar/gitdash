@@ -48,7 +48,7 @@ func TestPartialOverride(t *testing.T) {
 	path := write(t, `roots = ["~/code", "~/work"]`)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if len(cfg.Roots) != 2 || filepath.Base(cfg.Roots[0]) != "code" {
 		t.Errorf("roots = %v", cfg.Roots)
@@ -72,7 +72,7 @@ func TestMalformed(t *testing.T) {
 func TestMissingFile(t *testing.T) {
 	cfg, warn := LoadFrom(filepath.Join(t.TempDir(), "nope.toml"))
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.Marker != ".gitdash.toml" || len(cfg.Roots) != 1 {
 		t.Errorf("cfg = %+v", cfg)
@@ -97,7 +97,7 @@ timeout = "10s"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.FetchAuto {
 		t.Error("auto should be false")
@@ -115,7 +115,7 @@ timeout = "nope"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.FetchConcurrency != 4 || cfg.FetchTimeout != 30*time.Second {
 		t.Errorf("invalid values not ignored: %+v", cfg)
@@ -126,7 +126,7 @@ func TestFetchConcurrencyMinimumAccepted(t *testing.T) {
 	path := write(t, "[fetch]\nconcurrency = 1\n")
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.FetchConcurrency != 1 {
 		t.Errorf("concurrency = %d, want 1 (minimum valid accepted)", cfg.FetchConcurrency)
@@ -151,7 +151,7 @@ func TestKeysMissingKeepDefaults(t *testing.T) {
 	path := write(t, `roots = ["/tmp"]`)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.Marker != DefaultMarker {
 		t.Errorf("marker = %q, want %q", cfg.Marker, DefaultMarker)
@@ -255,14 +255,14 @@ fold = "w"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.KeyFor("fold") != "w" {
 		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
 	if !strings.Contains(hints, "w fold") {
-		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+		t.Errorf("rebound hint missing: %v", cfg.HintBarLines())
 	}
 	if strings.Contains(hints, "enter fold") {
 		t.Errorf("the hint still has the old key: %v", cfg.HintBarLines())
@@ -284,13 +284,13 @@ worktree_remove = "W"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.KeyFor("worktree_remove") != "W" {
 		t.Errorf("worktree_remove = %q, want W", cfg.KeyFor("worktree_remove"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "W remove wt") {
-		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+		t.Errorf("rebound hint missing: %v", cfg.HintBarLines())
 	}
 }
 
@@ -309,13 +309,13 @@ visual = "V"
 `)
 	cfg, warn := LoadFrom(path)
 	if warn != "" {
-		t.Fatalf("warn inesperado: %q", warn)
+		t.Fatalf("unexpected warning: %q", warn)
 	}
 	if cfg.KeyFor("visual") != "V" {
 		t.Errorf("visual = %q, want V", cfg.KeyFor("visual"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "V visual") {
-		t.Errorf("hint rebindeado ausente: %v", cfg.HintBarLines())
+		t.Errorf("rebound hint missing: %v", cfg.HintBarLines())
 	}
 }
 
@@ -385,8 +385,8 @@ func TestLoadReadsTheFileOfThePathResolved(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, DirName), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raiz := t.TempDir()
-	body := fmt.Sprintf("roots = [%q]\nsync_branch = \"develop\"\n", raiz)
+	root := t.TempDir()
+	body := fmt.Sprintf("roots = [%q]\nsync_branch = \"develop\"\n", root)
 	if err := os.WriteFile(filepath.Join(dir, DirName, FileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -395,8 +395,8 @@ func TestLoadReadsTheFileOfThePathResolved(t *testing.T) {
 	if warn != "" {
 		t.Errorf("valid config, Load warns %q", warn)
 	}
-	if len(cfg.Roots) != 1 || cfg.Roots[0] != raiz {
-		t.Errorf("Roots = %v, want [%q]", cfg.Roots, raiz)
+	if len(cfg.Roots) != 1 || cfg.Roots[0] != root {
+		t.Errorf("Roots = %v, want [%q]", cfg.Roots, root)
 	}
 	if cfg.SyncBranch != "develop" {
 		t.Errorf("SyncBranch = %q, want develop", cfg.SyncBranch)
@@ -413,7 +413,7 @@ func TestSyncBranchExplicit(t *testing.T) {
 			t.Errorf("SyncBranch = %q, want main (the default)", cfg.SyncBranch)
 		}
 	})
-	t.Run("declarada", func(t *testing.T) {
+	t.Run("declared", func(t *testing.T) {
 		cfg, _ := LoadFrom(write(t, `sync_branch = "develop"`))
 		if !cfg.SyncBranchExplicit {
 			t.Error("SyncBranchExplicit = false with sync_branch in the TOML")
@@ -453,13 +453,13 @@ func TestCommandEmptyOfAActionUnknownNotIsRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path,
-		[]byte("[commands]\ninventada = \"\"\nreal = \"log --oneline -5\"\n"), 0o644); err != nil {
+		[]byte("[commands]\ninvented = \"\"\nreal = \"log --oneline -5\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := LoadFrom(path)
 
-	if v, ok := cfg.Commands["inventada"]; ok {
-		t.Errorf("commands[\"inventada\"] = %q recorded: an empty command is not a command", v)
+	if v, ok := cfg.Commands["invented"]; ok {
+		t.Errorf("commands[\"invented\"] = %q recorded: an empty command is not a command", v)
 	}
 	if got := cfg.Commands["real"]; got != "log --oneline -5" {
 		t.Errorf("commands[\"real\"] = %q, want the declared value", got)
@@ -475,7 +475,7 @@ func TestHintBarSkipsActionsWithoutKey(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("HintBarLines returned %d lines, want 3", len(rows))
 	}
-	antes := Defaults().HintBarLines()
+	before := Defaults().HintBarLines()
 	for i, r := range rows {
 		for _, hint := range []string{"f fetch", "O open PR"} {
 			if strings.Contains(r, hint) {
@@ -483,7 +483,7 @@ func TestHintBarSkipsActionsWithoutKey(t *testing.T) {
 			}
 		}
 	}
-	if len(rows[2]) >= len(antes[2]) {
+	if len(rows[2]) >= len(before[2]) {
 		t.Errorf("the tools line did not shorten when removing pr: %q", rows[2])
 	}
 	if !strings.Contains(rows[2], "e edit") {
@@ -521,7 +521,7 @@ func TestKeyForAndCmdArgsFallsOnTheDefault(t *testing.T) {
 		t.Errorf("KeyFor(invented) = %q, want empty (there is no default for it)", got)
 	}
 	if got := cfg.CmdArgs("invented_action"); len(got) != 0 {
-		t.Errorf("CmdArgs(inventada) = %q, want an empty slice", got)
+		t.Errorf("CmdArgs(invented) = %q, want an empty slice", got)
 	}
 	delete(cfg.Commands, "pull")
 	argv := cfg.CmdArgs("pull")
@@ -577,9 +577,9 @@ editor = ""
 		t.Errorf("Editor = %q, want the default %q (an empty string does not clear the editor)",
 			cfg.Editor, Defaults().Editor)
 	}
-	path2 := write(t, "marker = \".mi-marcador\"\neditor = \"nano\"\n")
+	path2 := write(t, "marker = \".my-marker\"\neditor = \"nano\"\n")
 	cfg2, _ := LoadFrom(path2)
-	if cfg2.Marker != ".mi-marcador" || cfg2.Editor != "nano" {
+	if cfg2.Marker != ".my-marker" || cfg2.Editor != "nano" {
 		t.Errorf("Marker/Editor = %q/%q, want the file's ones", cfg2.Marker, cfg2.Editor)
 	}
 }
