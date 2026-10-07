@@ -114,8 +114,8 @@ for f, bs in sorted(blocks.items()):
     if not touched:
         continue
     # Statement lines per the profile itself: the only source of truth on what is executable.
-    ejecutable = {ln for (sl, sc, el, ec) in bs for ln in range(sl, el + 1)}
-    touched = touched & ejecutable
+    executable = {ln for (sl, sc, el, ec) in bs for ln in range(sl, el + 1)}
+    touched = touched & executable
     if not touched:
         continue
     hit = set()

@@ -62,7 +62,7 @@ func TestSyncDisabled(t *testing.T) {
 	dir := setupDivergedFromSync(t)
 	snap := Collect(t.Context(), dir, "", false)
 	if snap.SyncKnown || snap.SyncBranch != "" {
-		t.Errorf("sync = %v/%d/%q, want desconocida", snap.SyncKnown, snap.SyncBehind, snap.SyncBranch)
+		t.Errorf("sync = %v/%d/%q, want unknown", snap.SyncKnown, snap.SyncBehind, snap.SyncBranch)
 	}
 }
 
@@ -97,7 +97,7 @@ func gitLocal(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func repoSinMain(t *testing.T) string {
+func repoWithoutMain(t *testing.T) string {
 	t.Helper()
 	dir, _ := testutil.NewRepo(t, false)
 	gitLocal(t, dir, "branch", "-m", "master")
@@ -106,7 +106,7 @@ func repoSinMain(t *testing.T) string {
 
 // What resolves is what gets COMPARED and what is SHOWN: leaving "main" in the column would keep showing "main —" and `glab mr create -b main` would keep failing.
 func TestSyncFallbackAMaster(t *testing.T) {
-	dir := repoSinMain(t)
+	dir := repoWithoutMain(t)
 	testutil.NewBranch(t, dir, "feat")
 	testutil.Checkout(t, dir, "master")
 	testutil.CommitFiles(t, dir, map[string]string{"m.txt": "m"}, "master 1")
@@ -157,7 +157,7 @@ func TestSyncFallbackNotLaunchesGitIfTheGlobalResolves(t *testing.T) {
 }
 
 func TestSyncWithoutFallbackAllowedNotChanges(t *testing.T) {
-	dir := repoSinMain(t)
+	dir := repoWithoutMain(t)
 	testutil.CommitFiles(t, dir, map[string]string{"m.txt": "m"}, "master 1")
 
 	snap := Collect(t.Context(), dir, "main", false)
@@ -196,7 +196,7 @@ func TestSyncForFallbackOnlyInTheDefault(t *testing.T) {
 }
 
 func TestSyncReferenceDeclaredNotMakesFallback(t *testing.T) {
-	dir := repoSinMain(t)
+	dir := repoWithoutMain(t)
 	snap := Collect(t.Context(), dir, "nonexistent", false)
 	if snap.SyncKnown {
 		t.Error("known with a declared ref that does not exist")
@@ -208,7 +208,7 @@ func TestSyncReferenceDeclaredNotMakesFallback(t *testing.T) {
 
 // It is the difference between passing the flag and always passing false, which compiles just as well and does not say the same thing.
 func TestStreamPoolPropagatesTheFallback(t *testing.T) {
-	dir := repoSinMain(t)
+	dir := repoWithoutMain(t)
 	projects := []discovery.Project{{Path: dir, HasRepo: true}}
 	for _, c := range []struct {
 		name     string
@@ -237,7 +237,7 @@ func TestStreamPoolPropagatesTheFallback(t *testing.T) {
 
 func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	rec := installRecorder(t)
-	dir := repoSinMain(t)
+	dir := repoWithoutMain(t)
 	Collect(t.Context(), dir, "main", true)
 
 	var probadaMain, probadaMaster bool

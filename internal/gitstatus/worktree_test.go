@@ -16,7 +16,7 @@ func TestParseWorktrees(t *testing.T) {
 		"worktree /repos/wt2\nHEAD def5678lorem\ndetached\n\n"
 	wts := ParseWorktrees(out, "/repos/main")
 	if len(wts) != 2 {
-		t.Fatalf("wts = %d, want 2 (main excluido)", len(wts))
+		t.Fatalf("wts = %d, want 2 (main excluded)", len(wts))
 	}
 	if wts[0].Path != "/repos/wt1" || wts[0].Branch != "wt-1" || wts[0].Head != "1234567" {
 		t.Errorf("wts[0] = %+v", wts[0])
@@ -76,7 +76,7 @@ func TestRemoveWorktreeDirtyNeedsForce(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty")
-	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "uncommitted"})
+	testutil.WriteUntracked(t, wtDir, map[string]string{"untracked.txt": "uncommitted"})
 
 	out, err := RemoveWorktree(t.Context(), dir, wtDir, false)
 	if err == nil {

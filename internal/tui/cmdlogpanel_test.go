@@ -25,14 +25,14 @@ func logModel(t *testing.T) (Model, *cmdlog.Recorder) {
 	return m, cmdlog.Active()
 }
 
-func sembrar(rec *cmdlog.Recorder, entries ...cmdlog.Entry) {
+func seed(rec *cmdlog.Recorder, entries ...cmdlog.Entry) {
 	for _, e := range entries {
 		cmdlog.RecordExec(e)
 	}
 }
 
 // The intent goes in through RecordIntent and not RecordExec, which would leave Intent=false and label the line "exec" with the Key inside the argv, so any assertion about the key would be satisfied by the wrong entry.
-func sembrarIntent(e cmdlog.Entry) {
+func seedIntent(e cmdlog.Entry) {
 	e.Intent = true
 	e.Exit = 0
 	e.Dur = 0
@@ -69,15 +69,15 @@ func TestPanelTeachesTheCommandRealAndItsResult(t *testing.T) {
 	m, _ = press(m, "p")
 	m, _ = press(m, "p")
 
-	sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "p", Action: "pull", Class: cmdlog.ClassAction})
-	sembrar(rec, execEntry("dirty-api", "pull", "git pull", "rebase+autostash", 0))
+	seedIntent(cmdlog.Entry{Repo: "dirty-api", Key: "p", Action: "pull", Class: cmdlog.ClassAction})
+	seed(rec, execEntry("dirty-api", "pull", "git pull", "rebase+autostash", 0))
 
 	m, _ = press(m, "l")
 	if !m.logOpen {
 		t.Fatal("l did not open the panel")
 	}
-	plano := stripANSI(m.View().Content)
-	log := sectionContent(t, plano, "log")
+	flat := stripANSI(m.View().Content)
+	log := sectionContent(t, flat, "log")
 	if !strings.Contains(log, "git pull") {
 		t.Errorf("the panel does not show the argv:\n%s", log)
 	}
@@ -95,8 +95,8 @@ func TestPanelDistinguishesTheVariantOfPull(t *testing.T) {
 	m, _ = press(m, "p")
 	m, _ = press(m, "r") // explicit rebase variant
 
-	sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
-	sembrar(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
+	seedIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
+	seed(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
 	m, _ = press(m, "l")
 
 	log := sectionContent(t, stripANSI(m.View().Content), "log")
@@ -110,7 +110,7 @@ func TestPanelDistinguishesTheVariantOfPull(t *testing.T) {
 
 func TestPanelHidesTheReadsForBug(t *testing.T) {
 	m, rec := logModel(t)
-	sembrar(rec,
+	seed(rec,
 		cmdlog.Entry{Repo: "dirty-api", Action: "status", Class: cmdlog.ClassRead,
 			Argv: []string{"git", "status", "--porcelain=v2", "--branch"}, Exit: 0},
 		execEntry("dirty-api", "pull", "git pull", "up-to-date", 0),
@@ -128,7 +128,7 @@ func TestPanelHidesTheReadsForBug(t *testing.T) {
 
 func TestPanelAlternatesTheFilterWithA(t *testing.T) {
 	m, rec := logModel(t)
-	sembrar(rec,
+	seed(rec,
 		cmdlog.Entry{Repo: "dirty-api", Action: "status", Class: cmdlog.ClassRead,
 			Argv: []string{"git", "status", "--porcelain=v2", "--branch"}, Exit: 0},
 		cmdlog.Entry{Repo: "dirty-api", Action: "fetch", Class: cmdlog.ClassAuto,
@@ -142,11 +142,11 @@ func TestPanelAlternatesTheFilterWithA(t *testing.T) {
 	if !m.logShowAll {
 		t.Fatal("a did not enable logShowAll")
 	}
-	plano := stripANSI(m.View().Content)
-	if !strings.Contains(plano, "log · all") {
-		t.Errorf("the title does not reflect the filter:\n%s", plano)
+	flat := stripANSI(m.View().Content)
+	if !strings.Contains(flat, "log · all") {
+		t.Errorf("the title does not reflect the filter:\n%s", flat)
 	}
-	log := sectionContent(t, plano, "log")
+	log := sectionContent(t, flat, "log")
 	if !strings.Contains(log, "porcelain") || !strings.Contains(log, "fetch --prune") {
 		t.Errorf("with the wide filter reads and the automatic fetch must be visible:\n%s", log)
 	}
@@ -159,7 +159,7 @@ func TestPanelAlternatesTheFilterWithA(t *testing.T) {
 func TestPanelScrollNotMovesTheCursor(t *testing.T) {
 	m, rec := logModel(t)
 	for range 40 {
-		sembrar(rec, execEntry("dirty-api", "pull", "git pull", "up-to-date", 0))
+		seed(rec, execEntry("dirty-api", "pull", "git pull", "up-to-date", 0))
 	}
 	m, _ = press(m, "l")
 	if m.logOffset != 0 {
@@ -185,7 +185,7 @@ func TestPanelShowsOnTheLessALine(t *testing.T) {
 		t.Run(fmt.Sprintf("a %d-line terminal", height), func(t *testing.T) {
 			m, rec := logModel(t)
 			for i := range 5 {
-				sembrar(rec, execEntry(fmt.Sprintf("repo-%d", i), "pull", "git pull", "up-to-date", 0))
+				seed(rec, execEntry(fmt.Sprintf("repo-%d", i), "pull", "git pull", "up-to-date", 0))
 			}
 			m, _ = press(m, "l")
 			m.height = height
@@ -202,7 +202,7 @@ func TestPanelShowsOnTheLessALine(t *testing.T) {
 func TestPanelOffsetIsClips(t *testing.T) {
 	m, rec := logModel(t)
 	for range 40 {
-		sembrar(rec, execEntry("dirty-api", "pull", "git pull", "up-to-date", 0))
+		seed(rec, execEntry("dirty-api", "pull", "git pull", "up-to-date", 0))
 	}
 	m, _ = press(m, "l")
 	visible := max(1, m.layout().bodyLines-1)
@@ -305,7 +305,7 @@ func TestArmPullInsideOfThePanelNotArms(t *testing.T) {
 }
 
 func TestPanelNotIsEatsThePOfTheInputs(t *testing.T) {
-	t.Run("filtro", func(t *testing.T) {
+	t.Run("filter", func(t *testing.T) {
 		m, _ := logModel(t)
 		m, _ = press(m, "l") // opens the panel
 		m, _ = press(m, "/") // activates the filter
@@ -372,8 +372,8 @@ func TestIntentWithoutRowNotIsRecords(t *testing.T) {
 func TestPanelRespectsTheWidth(t *testing.T) {
 	for _, width := range []int{200, 120, 80, 60, 40} {
 		m, rec := logModel(t)
-		sembrar(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
-		sembrarIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
+		seed(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase+autostash", 0))
+		seedIntent(cmdlog.Entry{Repo: "dirty-api", Key: "r", Action: "pull_rebase", Class: cmdlog.ClassAction})
 		m.width, m.height = width, 24
 		m, _ = press(m, "l")
 		for i, l := range strings.Split(stripANSI(m.View().Content), "\n") {
@@ -386,7 +386,7 @@ func TestPanelRespectsTheWidth(t *testing.T) {
 
 func TestPanelPrioritisesTheCommandInWidthNarrow(t *testing.T) {
 	m, rec := logModel(t)
-	sembrar(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase", 0))
+	seed(rec, execEntry("dirty-api", "pull", "git pull --rebase --autostash", "rebase", 0))
 	m.width, m.height = 60, 24
 	m, _ = press(m, "l")
 
@@ -403,7 +403,7 @@ func TestLogTakesTheTerminalInAllTheHeights(t *testing.T) {
 			m, rec := logModel(t)
 			if withEntries {
 				for range 50 {
-					sembrar(rec, execEntry("dirty-api", "pull", "git pull", "rebase", 0))
+					seed(rec, execEntry("dirty-api", "pull", "git pull", "rebase", 0))
 				}
 			}
 			m.width, m.height = 100, height
@@ -435,26 +435,26 @@ func TestLogColumnsNotBreakWithWidthsImpossible(t *testing.T) {
 
 // The edges matter: at the width where the fixed columns plus the minimum argv fit EXACTLY nothing is degraded, and a `> ` in the wrong place would start dropping columns with no need.
 func TestLogColumnsInTheFitExact(t *testing.T) {
-	holgura := logColTime + 4*logColSep + logColKind + logColRepo + logColOutcome + logColVerdict
-	if holgura != 65 {
-		t.Fatalf("precondition: the slack width is %d, the test measures 65", holgura)
+	slack := logColTime + 4*logColSep + logColKind + logColRepo + logColOutcome + logColVerdict
+	if slack != 65 {
+		t.Fatalf("precondition: the slack width is %d, the test measures 65", slack)
 	}
 
-	justo := holgura + logMinArgv
+	fit := slack + logMinArgv
 	t.Run("exact fit, nothing degrades", func(t *testing.T) {
-		c := computeLogColumns(justo)
+		c := computeLogColumns(fit)
 		if c.kind != logColKind || c.repo != logColRepo || c.outcome != logColOutcome || c.verdict != logColVerdict {
-			t.Errorf("inner=%d: a column that fit got degraded: %+v", justo, c)
+			t.Errorf("inner=%d: a column that fit got degraded: %+v", fit, c)
 		}
 		if c.argv != logMinArgv {
-			t.Errorf("inner=%d: argv = %d, want %d", justo, c.argv, logMinArgv)
+			t.Errorf("inner=%d: argv = %d, want %d", fit, c.argv, logMinArgv)
 		}
 	})
 
 	t.Run("one cell less and the verdict drops", func(t *testing.T) {
-		c := computeLogColumns(justo - 1)
+		c := computeLogColumns(fit - 1)
 		if c.verdict != 0 {
-			t.Errorf("inner=%d: verdict = %d, want 0 (it is worth the least)", justo-1, c.verdict)
+			t.Errorf("inner=%d: verdict = %d, want 0 (it is worth the least)", fit-1, c.verdict)
 		}
 		for _, c2 := range []struct {
 			name string
@@ -462,13 +462,13 @@ func TestLogColumnsInTheFitExact(t *testing.T) {
 			want int
 		}{{"kind", c.kind, logColKind}, {"repo", c.repo, logColRepo}, {"outcome", c.outcome, logColOutcome}} {
 			if c2.got != c2.want {
-				t.Errorf("inner=%d: %s = %d, want %d (it should not drop yet)", justo-1, c2.name, c2.got, c2.want)
+				t.Errorf("inner=%d: %s = %d, want %d (it should not drop yet)", fit-1, c2.name, c2.got, c2.want)
 			}
 		}
 	})
 
 	t.Run("argv goes to the floor, never below", func(t *testing.T) {
-		for inner := justo - 1; inner >= logColTime+logColSep+logMinArgv; inner-- {
+		for inner := fit - 1; inner >= logColTime+logColSep+logMinArgv; inner-- {
 			c := computeLogColumns(inner)
 			if c.argv < logMinArgv {
 				t.Errorf("inner=%d: argv = %d, want >= %d", inner, c.argv, logMinArgv)
@@ -490,7 +490,7 @@ func TestLogColumnsInTheFitExact(t *testing.T) {
 // If the guard were `>=` instead of `>`, a narrow terminal would show headers for columns that no longer exist (and the split would show up broken in the header itself).
 func TestPanelTheColumnsDegradesNotIsPaint(t *testing.T) {
 	m, rec := logModel(t)
-	sembrar(rec, execEntry("api", "pull", "git pull", "fast-forward", 0))
+	seed(rec, execEntry("api", "pull", "git pull", "fast-forward", 0))
 	m.logOpen = true
 
 	t.Run("wide width, all the columns", func(t *testing.T) {
@@ -559,7 +559,7 @@ func TestPanelTheColumnsDegradesNotIsPaint(t *testing.T) {
 func TestPanelOffsetInTheEdges(t *testing.T) {
 	m, rec := logModel(t)
 	for i := 0; i < 6; i++ {
-		sembrar(rec, execEntry("repo"+string(rune('a'+i)), "pull", "git pull", "fast-forward", 0))
+		seed(rec, execEntry("repo"+string(rune('a'+i)), "pull", "git pull", "fast-forward", 0))
 	}
 	m.logOpen = true
 
@@ -605,12 +605,12 @@ func TestPanelOffsetInTheEdges(t *testing.T) {
 			for off := 0; off <= 8; off++ {
 				m.logOffset = off
 				out := m.logSection(bodyLines)
-				plano := stripANSI(out)
+				flat := stripANSI(out)
 				want := bodyLines + 2 // 1 header + (bodyLines-1) rows + 2 borders
-				if got := strings.Count(plano, "\n") + 1; got != want {
+				if got := strings.Count(flat, "\n") + 1; got != want {
 					t.Fatalf("bodyLines=%d offset=%d: box of %d lines, want %d", bodyLines, off, got, want)
 				}
-				for i, l := range strings.Split(plano, "\n") {
+				for i, l := range strings.Split(flat, "\n") {
 					if w := ansi.StringWidth(l); w > m.width {
 						t.Errorf("bodyLines=%d offset=%d line %d width = %d > %d", bodyLines, off, i, w, m.width)
 					}
@@ -625,13 +625,13 @@ func TestSanitizeLogTextKeepsUTF8Valid(t *testing.T) {
 	for _, tc := range []struct {
 		name, in, want string
 	}{
-		{"emoji de 4 bytes", "a👍b", "a👍b"},
-		{"acentos", "Ω action", "Ω action"},
+		{"4-byte emoji", "a👍b", "a👍b"},
+		{"accents", "Ω action", "Ω action"},
 		{"emoji at the start", "🚀 go", "🚀 go"},
 		{"emoji at the end", "go 🚀", "go 🚀"},
-		{"dos emojis", "🚀🎯 fin", "🚀🎯 fin"},
+		{"two emojis", "🚀🎯 fin", "🚀🎯 fin"},
 		{"emoji with control around it", "a\x1b[31m👍\x1b[0mb", "a👍b"},
-		{"multibyte y RuneError juntos", "👍\xffn", "👍n"},
+		{"multibyte and RuneError together", "👍\xffn", "👍n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sanitizeLogText(tc.in); got != tc.want {
@@ -642,7 +642,7 @@ func TestSanitizeLogTextKeepsUTF8Valid(t *testing.T) {
 }
 
 func TestSanitizeLogTextNotResellsWithSequencesWithoutClose(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name, in string
 		want     string
 	}{
@@ -652,7 +652,7 @@ func TestSanitizeLogTextNotResellsWithSequencesWithoutClose(t *testing.T) {
 		// The payload is ONE byte and the scan has to start at it, not after: skipping further would lose "tail" and the argv of the marker prompt would swallow legitimate text.
 		{"one-byte OSC with BEL", "x\x1b]\x07tail", "xtail"},
 		{"one-byte OSC with ST", "x\x1b]\x1b\\tail", "xtail"},
-		{"OSC de dos bytes", "x\x1b]a\x07tail", "xtail"},
+		{"2-byte OSC", "x\x1b]a\x07tail", "xtail"},
 		{"OSC with a full ST", "\x1b]0;abc\x1b\\tail", "tail"},
 		{"unterminated CSI", "\x1b[38;5", ""},
 		{"CSI closed at @", "\x1b[@tail", "tail"},
@@ -660,9 +660,9 @@ func TestSanitizeLogTextNotResellsWithSequencesWithoutClose(t *testing.T) {
 		{"stray ESC", "\x1btail", "ail"},
 		{"ESC at the end", "tail\x1b", "tail"},
 		{"empty ESC", "\x1b", ""},
-		{"varios seguidos", "\x1b[\x1b]\x1b\\tail", "tail"},
+		{"several in a row", "\x1b[\x1b]\x1b\\tail", "tail"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := sanitizeLogText(c.in); got != c.want {
 			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.name, c.in, got, c.want)
 		}
@@ -671,7 +671,7 @@ func TestSanitizeLogTextNotResellsWithSequencesWithoutClose(t *testing.T) {
 
 func TestPanelVerdictColoredForTheExit(t *testing.T) {
 	m, rec := logModel(t)
-	sembrar(rec,
+	seed(rec,
 		execEntry("ok", "pull", "git pull", "fast-forward", 0),
 		execEntry("ko", "pull", "git pull", "diverged", 1),
 	)
@@ -686,7 +686,7 @@ func TestPanelVerdictColoredForTheExit(t *testing.T) {
 		{"no exit (-1) is an error", cmdlog.Entry{Exit: -1}, styleError},
 	} {
 		if got, want := m.logVerdictStyle(c.e).Render("x"), c.want.Render("x"); got != want {
-			t.Errorf("%s: estilo = %q, want %q", c.name, got, want)
+			t.Errorf("%s: style = %q, want %q", c.name, got, want)
 		}
 	}
 }
@@ -698,8 +698,8 @@ func TestLogVerdict(t *testing.T) {
 		want string
 	}{
 		{"ok with a duration", cmdlog.Entry{Exit: 0, Dur: 146 * time.Millisecond}, "146ms"},
-		{"fallido", cmdlog.Entry{Exit: 128, Dur: 20 * time.Millisecond}, "exit 128"},
-		{"lento", cmdlog.Entry{Exit: 0, Dur: 2500 * time.Millisecond}, "2.5s"},
+		{"failed", cmdlog.Entry{Exit: 128, Dur: 20 * time.Millisecond}, "exit 128"},
+		{"slow", cmdlog.Entry{Exit: 0, Dur: 2500 * time.Millisecond}, "2.5s"},
 		// With a `>` instead of a `>=`, a command of exactly 1.000 s would fall into the end case and print "1000ms" next to a "2.5s".
 		{"exactly one second", cmdlog.Entry{Exit: 0, Dur: time.Second}, "1.0s"},
 		{"milliseconds below the second, in ms", cmdlog.Entry{Exit: 0, Dur: 999 * time.Millisecond}, "999ms"},
@@ -828,9 +828,9 @@ func TestSanitizeLogTextRemovesControlAndCollapsesLines(t *testing.T) {
 		name, in, want string
 	}{
 		{"osc52", "x\x1b]52;c;cGF3bmVk\x07y", "xy"},
-		{"csi", "a\x1b[31mrojo\x1b[0mb", "arojob"},
-		{"multilinea", "line1\nline2\r\nline3", "line1 line2 line3"},
-		{"tabulador", "a\tb", "a b"},
+		{"csi", "a\x1b[31mred\x1b[0mb", "aredb"},
+		{"multiline", "line1\nline2\r\nline3", "line1 line2 line3"},
+		{"tab", "a\tb", "a b"},
 		{"c0", "a\x01b\x7fc", "abc"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -860,18 +860,18 @@ func TestSanitizeLogTextRemovesFormatAndZeroWidth(t *testing.T) {
 
 // "The index AFTER the escape sequence" is the whole contract, and every +1/+2 is a mutant that eats a byte of text; the cases put a PRINTABLE character after the terminator so the extra or missing byte is visible.
 func TestSkipEscapeConsumesTheSequenceAndNothingMore(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name    string
 		in      string
 		want    string
 		wantIdx int
 	}{
-		{"BEL seguido de letra", "\x1b]0;t\x07tail", "tail", 6},
-		{"ST seguido de letra", "\x1b]0;t\x1b\\tail", "tail", 7},
+		{"BEL followed by a letter", "\x1b]0;t\x07tail", "tail", 6},
+		{"ST followed by a letter", "\x1b]0;t\x1b\\tail", "tail", 7},
 		{"CSI closed at a letter", "\x1b[31mX", "X", 5},
 		{"stray ESC", "\x1btail", "ail", 2},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := skipEscape(c.in, 0); got != c.wantIdx {
 				t.Errorf("skipEscape(%q, 0) = %d, want %d", c.in, got, c.wantIdx)
@@ -890,7 +890,7 @@ func TestPanelSanitizesTheArgvOfAInput(t *testing.T) {
 		"x\u202ey\u200bz",
 	} {
 		m, rec := logModel(t)
-		sembrar(rec, cmdlog.Entry{
+		seed(rec, cmdlog.Entry{
 			Repo: "dirty-api", Class: cmdlog.ClassAction, Action: "pull_ai",
 			Argv: []string{"jcode", "-run", prompt}, Exit: 0,
 		})
@@ -904,11 +904,11 @@ func TestPanelSanitizesTheArgvOfAInput(t *testing.T) {
 		if strings.ContainsRune(raw, '\u202e') || strings.ContainsRune(raw, '\u200b') {
 			t.Errorf("prompt %q: format/zero-width reached the panel", prompt)
 		}
-		plano := stripANSI(raw)
-		if lines := strings.Split(plano, "\n"); len(lines) != 30 {
+		flat := stripANSI(raw)
+		if lines := strings.Split(flat, "\n"); len(lines) != 30 {
 			t.Errorf("prompt %q: lines = %d, want 30 (a multiline prompt must not break the height)", prompt, len(lines))
 		}
-		if log := sectionContent(t, plano, "log"); !strings.Contains(log, "jcode") {
+		if log := sectionContent(t, flat, "log"); !strings.Contains(log, "jcode") {
 			t.Errorf("prompt %q: the sanitised argv was not painted:\n%s", prompt, log)
 		}
 	}
@@ -916,17 +916,17 @@ func TestPanelSanitizesTheArgvOfAInput(t *testing.T) {
 
 // That branch was exercised by no test, and `size <= 1` is exactly what tells a badly decoded rune from a legitimate RuneError (a real U+FFFD comes with size == 3 and MUST survive).
 func TestSanitizeLogTextDiscardsBytesThatAreNotUTF8(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name, in, want string
 	}{
-		{"byte suelto", "go\xfftest", "gotest"},
+		{"loose byte", "go\xfftest", "gotest"},
 		{"stray byte between letters", "a\xffb", "ab"},
-		{"secuencia truncada", "\xe4\xb8", ""},
-		{"byte valido conako", "ca\xfe", "ca"},
+		{"truncated sequence", "\xe4\xb8", ""},
+		{"valid bytes", "ca\xfe", "ca"},
 		{"U+FFFD legitimo", "a\uFFFDb", "a\uFFFDb"},
-		{"mixto", "x\xffy\uFFFDz", "xy\uFFFDz"},
+		{"mixed", "x\xffy\uFFFDz", "xy\uFFFDz"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		if got := sanitizeLogText(c.in); got != c.want {
 			t.Errorf("%s: sanitizeLogText(%q) = %q, want %q", c.name, c.in, got, c.want)
 		}

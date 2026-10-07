@@ -407,7 +407,7 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 			go func(p string) {
 				defer wg.Done()
 				sendEvent(ctx, events, fetchStateMsg{path: p, state: "fetching"})
-				if !adquirirSlot(ctx, sem) {
+				if !acquireSlot(ctx, sem) {
 					return
 				}
 				defer func() { <-sem }()
@@ -435,7 +435,7 @@ func (m *Model) fetchBatchCmd(paths []string, class cmdlog.Class) tea.Cmd {
 }
 
 // Split out from the inline select because the "cancelled while waiting for a slot" branch is only reachable with more repos than slots (provoking it needed a Peterson race), and with a free function the test fills the semaphore and cancels deterministically.
-func adquirirSlot(ctx context.Context, sem chan struct{}) bool {
+func acquireSlot(ctx context.Context, sem chan struct{}) bool {
 	select {
 	case sem <- struct{}{}:
 		return true

@@ -94,7 +94,7 @@ func TestRelativeTimePrint(t *testing.T) {
 		want  string
 	}{
 		{"no epoch", 0, 0, "-"},
-		{"epoch negativo", 0, -5, "-"},
+		{"negative epoch", 0, -5, "-"},
 		{"now", 0, now.Unix(), "now"},
 		{"minutes", 7 * time.Minute, 0, "7m ago"},
 		{"hours", 5 * time.Hour, 0, "5h ago"},
@@ -162,8 +162,8 @@ func TestSortPrintRows(t *testing.T) {
 	}{
 		{
 			"the score wins over the date",
-			[]printRow{row("clean-reciente", 1, 200), row("dirty-old", 5, 100)},
-			[]string{"dirty-old", "clean-reciente"},
+			[]printRow{row("clean-recent", 1, 200), row("dirty-old", 5, 100)},
+			[]string{"dirty-old", "clean-recent"},
 		},
 		{
 			"with the same score, the more recent commit",
@@ -172,13 +172,13 @@ func TestSortPrintRows(t *testing.T) {
 		},
 		{
 			"with the same score and date, the name",
-			[]printRow{row("zeta", 5, 200), row("alfa", 5, 200)},
-			[]string{"alfa", "zeta"},
+			[]printRow{row("zeta", 5, 200), row("alpha", 5, 200)},
+			[]string{"alpha", "zeta"},
 		},
 		{
 			"the name ignores case",
-			[]printRow{row("Zeta", 5, 200), row("alfa", 5, 200)},
-			[]string{"alfa", "Zeta"},
+			[]printRow{row("Zeta", 5, 200), row("alpha", 5, 200)},
+			[]string{"alpha", "Zeta"},
 		},
 	} {
 		rows := append([]printRow(nil), c.rows...)
@@ -188,7 +188,7 @@ func TestSortPrintRows(t *testing.T) {
 			got = append(got, r.name)
 		}
 		if !equalStrings(got, c.want) {
-			t.Errorf("%s: orden = %v, want %v", c.name, got, c.want)
+			t.Errorf("%s: order = %v, want %v", c.name, got, c.want)
 		}
 		// Careful: the order of two rows tying on all THREE keys is not a contract (sort.Slice is not stable), so neither the original code nor a mutation of the comparator can promise anything there.
 	}
@@ -221,21 +221,21 @@ func TestPrintTableHeaderAndCells(t *testing.T) {
 	testutil.WriteUncommitted(t, dirty, map[string]string{"new.txt": "x"})
 
 	out := captureStdout(t, func() { runPrint(printConfig(root)) })
-	plano := strings.Join(strings.Fields(out), " ")
+	flat := strings.Join(strings.Fields(out), " ")
 	for _, header := range []string{"NAME", "GROUP", "BRANCH", "WT", "↑↓up", "SYNC", "WTS", "ACTIVITY", "PATH"} {
-		if !strings.Contains(plano, header) {
-			t.Errorf("the column %q is missing from the header:\n%s", header, plano)
+		if !strings.Contains(flat, header) {
+			t.Errorf("the column %q is missing from the header:\n%s", header, flat)
 		}
 	}
-	if !strings.Contains(plano, "?1") {
-		t.Errorf("the untracked does not appear:\n%s", plano)
+	if !strings.Contains(flat, "?1") {
+		t.Errorf("the untracked does not appear:\n%s", flat)
 	}
-	if strings.Contains(plano, "0 ?1") {
-		t.Errorf("the WT cell printed a tracked 0 that does not exist:\n%s", plano)
+	if strings.Contains(flat, "0 ?1") {
+		t.Errorf("the WT cell printed a tracked 0 that does not exist:\n%s", flat)
 	}
 	for _, name := range []string{"dirty", "clean"} {
-		if !strings.Contains(plano, name) {
-			t.Errorf("the repo %q is missing from the output:\n%s", name, plano)
+		if !strings.Contains(flat, name) {
+			t.Errorf("the repo %q is missing from the output:\n%s", name, flat)
 		}
 	}
 }
@@ -278,22 +278,22 @@ func captureStdout(t *testing.T, fn func()) string {
 // The worktree carries its own marker on purpose (that is what makes the walk discover it) and without `.git` it would not be a worktree: what triggers the folding is `.git` being a `gitdir:` FILE.
 func TestPrintFoldsTheWorktreeUnderItsRepoMain(t *testing.T) {
 	root := t.TempDir()
-	principal := filepath.Join(root, "principal")
-	testutil.Init(t, principal)
-	testutil.Marker(t, principal, "principal", "", "", false)
-	testutil.CommitFiles(t, principal, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
+	mainRepo := filepath.Join(root, "main")
+	testutil.Init(t, mainRepo)
+	testutil.Marker(t, mainRepo, "main", "", "", false)
+	testutil.CommitFiles(t, mainRepo, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
 
 	wt := filepath.Join(root, "feature")
-	testutil.MakeWorktree(t, principal, wt, "feature")
+	testutil.MakeWorktree(t, mainRepo, wt, "feature")
 	// The worktree's marker is committed WITH its content: the worktree is born from HEAD, which already carries the main repo's `.gitdash.toml`, and rewriting it without committing would leave it modified forever.
 	testutil.CommitFiles(t, wt, map[string]string{".gitdash.toml": "name = \"feature\"\n"}, "worktree marker")
 
 	out := captureStdout(t, func() { runPrint(printConfig(root)) })
-	plano := strings.Join(strings.Fields(out), " ")
-	if !strings.Contains(plano, "principal") {
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "main") {
 		t.Fatalf("the main repo does not appear:\n%s", out)
 	}
-	if strings.Contains(plano, "feature") {
+	if strings.Contains(flat, "feature") {
 		t.Errorf("the worktree was printed as if it were one more repo:\n%s", out)
 	}
 }
@@ -302,18 +302,18 @@ func TestPrintFoldsTheWorktreeUnderItsRepoMain(t *testing.T) {
 func TestPrintNotFoldsTheWorktreeWithoutMainDiscovered(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	principal := filepath.Join(outside, "hidden")
-	testutil.Init(t, principal)
-	testutil.Marker(t, principal, "hidden", "", "", false)
-	testutil.CommitFiles(t, principal, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
+	mainRepo := filepath.Join(outside, "hidden")
+	testutil.Init(t, mainRepo)
+	testutil.Marker(t, mainRepo, "hidden", "", "", false)
+	testutil.CommitFiles(t, mainRepo, map[string]string{"base.txt": "base", ".gitdash.toml": ""}, "base")
 
-	wt := filepath.Join(root, "suelto")
-	testutil.MakeWorktree(t, principal, wt, "suelto")
-	testutil.CommitFiles(t, wt, map[string]string{".gitdash.toml": "name = \"suelto\"\n"}, "worktree marker")
+	wt := filepath.Join(root, "loose")
+	testutil.MakeWorktree(t, mainRepo, wt, "loose")
+	testutil.CommitFiles(t, wt, map[string]string{".gitdash.toml": "name = \"loose\"\n"}, "worktree marker")
 
 	out := captureStdout(t, func() { runPrint(printConfig(root)) })
-	plano := strings.Join(strings.Fields(out), " ")
-	if !strings.Contains(plano, "suelto") {
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "loose") {
 		t.Errorf("the worktree with no discovered main repo does not appear:\n%s", out)
 	}
 }

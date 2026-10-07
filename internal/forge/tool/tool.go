@@ -63,12 +63,12 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		cerr := &Error{Bin: r.Bin, Args: args, Msg: msg, Err: err}
+		terr := &Error{Bin: r.Bin, Args: args, Msg: msg, Err: err}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			cerr.ExitCode = exit.ExitCode()
+			terr.ExitCode = exit.ExitCode()
 		}
-		return out.String(), cerr
+		return out.String(), terr
 	}
 	return out.String(), nil
 }
@@ -93,9 +93,9 @@ func Env(extra ...string) []string {
 }
 
 func ExitCode(err error) int {
-	var cerr *Error
-	if errors.As(err, &cerr) {
-		return cerr.ExitCode
+	var terr *Error
+	if errors.As(err, &terr) {
+		return terr.ExitCode
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {

@@ -120,9 +120,9 @@ func prNote(repo string, msg prResultMsg) (toastLevel, string) {
 }
 
 func prFailureReason(err error) string {
-	var cerr *tool.Error
-	if errors.As(err, &cerr) {
-		return cerr.Msg
+	var terr *tool.Error
+	if errors.As(err, &terr) {
+		return terr.Msg
 	}
 	return err.Error()
 }

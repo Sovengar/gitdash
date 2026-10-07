@@ -27,7 +27,7 @@ func TestToastStack(t *testing.T) {
 	tm.showWarning("b")
 	tm.showError("c")
 	if got := len(tm.blocks()); got != 3 {
-		t.Fatalf("bloques = %d, want 3 apiladas", got)
+		t.Fatalf("blocks = %d, want 3 stacked", got)
 	}
 	if got := len(tm.lines()); got != 3 {
 		t.Fatalf("lines = %d, want 3 (one per short toast)", got)
@@ -43,12 +43,12 @@ func TestToastWrapShowsHintComplete(t *testing.T) {
 	if len(block) < 2 {
 		t.Fatalf("expected word-wrap across several lines, got %d", len(block))
 	}
-	plano := collapse(strings.Join(block, "\n"))
-	if !strings.Contains(plano, "pull --rebase manual") {
-		t.Errorf("the actionable hint is not visible:\n%s", plano)
+	flat := collapse(strings.Join(block, "\n"))
+	if !strings.Contains(flat, "pull --rebase manual") {
+		t.Errorf("the actionable hint is not visible:\n%s", flat)
 	}
-	if !strings.Contains(plano, "Not possible to fast-forward") {
-		t.Errorf("the reason was lost:\n%s", plano)
+	if !strings.Contains(flat, "Not possible to fast-forward") {
+		t.Errorf("the reason was lost:\n%s", flat)
 	}
 	for i, l := range block {
 		if w := ansi.StringWidth(l); w > toastMaxWidth {
@@ -113,15 +113,15 @@ func TestOverlayANSISafe(t *testing.T) {
 		}
 	}
 	spliced := lines[2]
-	plano := ansi.Strip(spliced)
-	if !strings.Contains(plano, "OK") {
-		t.Errorf("toast missing at the bottom right corner: %q", plano)
+	flat := ansi.Strip(spliced)
+	if !strings.Contains(flat, "OK") {
+		t.Errorf("toast missing at the bottom right corner: %q", flat)
 	}
-	if !strings.Contains(plano, "line2") {
-		t.Errorf("the left text was lost: %q", plano)
+	if !strings.Contains(flat, "line2") {
+		t.Errorf("the left text was lost: %q", flat)
 	}
-	if !strings.HasSuffix(plano, "Z") {
-		t.Errorf("the text right of the toast was not preserved: %q", plano)
+	if !strings.HasSuffix(flat, "Z") {
+		t.Errorf("the text right of the toast was not preserved: %q", flat)
 	}
 	if !strings.Contains(spliced, "\x1b[31m") {
 		t.Errorf("the colour of the line below was lost: %q", spliced)
@@ -134,7 +134,7 @@ func TestOverlayANSISafe(t *testing.T) {
 func TestOverlayClampsWidthTerminal(t *testing.T) {
 	base := strings.Join(sliceOf(pad("content", 20), 20), "\n")
 	var tm toastManager
-	tm.showError(strings.Repeat("palabra ", 30)) // long message -> 60-cell toast
+	tm.showError(strings.Repeat("word ", 30)) // long message -> 60-cell toast
 	blocks := tm.blocks()
 	if blockWidth(blocks[0]) <= 20 {
 		t.Fatalf("precondition: the toast should exceed the terminal width")
@@ -145,7 +145,7 @@ func TestOverlayClampsWidthTerminal(t *testing.T) {
 			t.Errorf("line %d width = %d > 20: %q", i, w, ansi.Strip(l))
 		}
 	}
-	if !strings.Contains(ansi.Strip(out), "palabra") {
+	if !strings.Contains(ansi.Strip(out), "word") {
 		t.Errorf("the toast was not drawn:\n%s", ansi.Strip(out))
 	}
 }
@@ -166,9 +166,9 @@ func TestOverlayWithoutSpacePrioritisesRecent(t *testing.T) {
 	base := strings.Join([]string{"l0", "l1", "l2"}, "\n")
 	out := overlayToasts(base, [][]string{{"old"}, {"new"}}, 20, 3, 2)
 	lines := strings.Split(out, "\n")
-	plano := ansi.Strip(lines[0])
-	if !strings.Contains(plano, "new") {
-		t.Errorf("the more recent toast is not shown: %q", plano)
+	flat := ansi.Strip(lines[0])
+	if !strings.Contains(flat, "new") {
+		t.Errorf("the more recent toast is not shown: %q", flat)
 	}
 	if strings.Contains(stripANSI(out), "old") {
 		t.Errorf("the old toast should not fit:\n%s", out)
@@ -202,9 +202,9 @@ func TestToastReWrapsInWidthNarrow(t *testing.T) {
 			t.Errorf("line %d width = %d > 40", i, w)
 		}
 	}
-	plano := collapse(strings.Join(blocks[0], "\n"))
-	if !strings.Contains(plano, "pull --rebase manual") {
-		t.Errorf("the actionable hint was lost when re-wrapping:\n%s", plano)
+	flat := collapse(strings.Join(blocks[0], "\n"))
+	if !strings.Contains(flat, "pull --rebase manual") {
+		t.Errorf("the actionable hint was lost when re-wrapping:\n%s", flat)
 	}
 }
 
@@ -213,9 +213,9 @@ func TestOverlayBlockTallerThanTheGap(t *testing.T) {
 	block := []string{"t0", "t1", "t2", "t3", "t4"}
 	out := overlayToasts(base, [][]string{block}, 20, 3, 0)
 	lines := strings.Split(out, "\n")
-	plano := ansi.Strip(strings.Join(lines, "\n"))
-	if !strings.Contains(plano, "t4") {
-		t.Errorf("the toast's closing line was not drawn:\n%s", plano)
+	flat := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(flat, "t4") {
+		t.Errorf("the toast's closing line was not drawn:\n%s", flat)
 	}
 	for i, l := range lines {
 		if w := ansi.StringWidth(l); w > 20 {
@@ -244,17 +244,17 @@ func TestToastWithBreaksOfLineNotBreaksSplice(t *testing.T) {
 			t.Errorf("line %d width = %d, want 60", i, w)
 		}
 	}
-	plano := collapse(out)
-	if !strings.Contains(plano, "first") || !strings.Contains(plano, "second") {
-		t.Errorf("the multiline message text was lost:\n%s", plano)
+	flat := collapse(out)
+	if !strings.Contains(flat, "first") || !strings.Contains(flat, "second") {
+		t.Errorf("the multiline message text was lost:\n%s", flat)
 	}
 }
 
 func TestToastDurationZeroExpiresAlready(t *testing.T) {
 	var tm toastManager
-	tm.showInfo("vivo")
-	tm.toasts = append(tm.toasts, toast{text: "instantaneo", level: toastInfo, created: time.Now(), duration: 0})
-	tm.toasts = append(tm.toasts, toast{text: "caducado", level: toastInfo, created: time.Now().Add(-time.Minute), duration: -time.Second})
+	tm.showInfo("live")
+	tm.toasts = append(tm.toasts, toast{text: "instant", level: toastInfo, created: time.Now(), duration: 0})
+	tm.toasts = append(tm.toasts, toast{text: "expired", level: toastInfo, created: time.Now().Add(-time.Minute), duration: -time.Second})
 
 	tm.update()
 	for _, to := range tm.toasts {
@@ -278,7 +278,7 @@ func TestToastWidthIsTextMoreChrome(t *testing.T) {
 		{"short text, at the floor", "ok", toastMaxWidth, toastMinWidth},
 		{"half text, chrome included", strings.Repeat("x", 30), toastMaxWidth, 34},
 		{"long text, at the ceiling", strings.Repeat("x", 200), toastMaxWidth, toastMaxWidth},
-		{"terminal estrecho", strings.Repeat("x", 200), 20, 20},
+		{"narrow terminal", strings.Repeat("x", 200), 20, 20},
 		{"terminal narrower than the floor", "ok", 10, 10},
 		{"no width", "ok", 0, 0},
 	} {
@@ -291,8 +291,8 @@ func TestToastWidthIsTextMoreChrome(t *testing.T) {
 
 func TestWrapTextWithoutWidthReturnsTheTextInteger(t *testing.T) {
 	for _, w := range []int{0, -1, -100} {
-		got := wrapText("hola mundo entero", w)
-		if len(got) != 1 || got[0] != "hola mundo entero" {
+		got := wrapText("text world whole", w)
+		if len(got) != 1 || got[0] != "text world whole" {
 			t.Errorf("wrapText(_, %d) = %q, want the whole text on one line", w, got)
 		}
 	}
@@ -304,11 +304,11 @@ func TestWrapTextSplitsOnlyTheWordThatDoesNotFitFairly(t *testing.T) {
 		w          int
 		want       []string
 	}{
-		{"one word of exactly the width", "hola", 4, []string{"hola"}},
+		{"one word of exactly the width", "text", 4, []string{"text"}},
 		{"two words that just fit", "a b", 3, []string{"a b"}},
-		{"the two words fill the exact width", "hola mundo", 10, []string{"hola mundo"}},
+		{"the two words fill the exact width", "text world", 10, []string{"text world"}},
 		{"one more of those that fit", "a b", 2, []string{"a", "b"}},
-		{"the second does not fit even split into words", "hola mundo", 4, []string{"hola", "mund", "o"}},
+		{"the second does not fit even split into words", "text world", 4, []string{"text", "worl", "d"}},
 	} {
 		got := wrapText(c.text, c.w)
 		if !equalStrings(got, c.want) {
@@ -318,13 +318,13 @@ func TestWrapTextSplitsOnlyTheWordThatDoesNotFitFairly(t *testing.T) {
 }
 
 func TestWrapTextClosesTheLineBeforeOfSplitTheLong(t *testing.T) {
-	larga := strings.Repeat("z", 25)
-	got := wrapText("clips "+larga, 10)
-	plano := collapse(strings.Join(got, " "))
-	if !strings.Contains(plano, "clips") {
+	longStr := strings.Repeat("z", 25)
+	got := wrapText("clips "+longStr, 10)
+	flat := collapse(strings.Join(got, " "))
+	if !strings.Contains(flat, "clips") {
 		t.Errorf("the short word was lost while splitting the long one: %q", got)
 	}
-	if !strings.Contains(plano, "zzz") {
+	if !strings.Contains(flat, "zzz") {
 		t.Errorf("the long word was not split: %q", got)
 	}
 	for i, l := range got {
@@ -347,7 +347,7 @@ func TestSplitWidth(t *testing.T) {
 		{"fits whole", "abc", 3, "abc", ""},
 		{"it fits with room to spare", "abc", 5, "abc", ""},
 		{"it clips at the end", "abcd", 2, "ab", "cd"},
-		{"runa ancha with room 1", "日本", 3, "日", "本"},
+		{"wide rune with room 1", "日本", 3, "日", "本"},
 		{"a rune wider than the width", "日", 1, "日", ""},
 		{"width 0, one rune", "ab", 0, "a", "b"},
 		{"empty", "", 3, "", ""},
@@ -371,10 +371,10 @@ func TestSplitWidth(t *testing.T) {
 func TestOverlayBlockThatFitsIsClippedFromAbove(t *testing.T) {
 	base := strings.Join([]string{"l0", "l1", "l2", "l3"}, "\n")
 	block := []string{"t0", "t1", "t2"} // 3 block rows and 3 free ones: top == 0 exactly
-	plano := stripANSI(overlayToasts(base, [][]string{block}, 20, 4, 1))
+	flat := stripANSI(overlayToasts(base, [][]string{block}, 20, 4, 1))
 	for _, want := range []string{"t0", "t1", "t2"} {
-		if !strings.Contains(plano, want) {
-			t.Errorf("the block that just fit was not painted whole, %q is missing:\n%s", want, plano)
+		if !strings.Contains(flat, want) {
+			t.Errorf("the block that just fit was not painted whole, %q is missing:\n%s", want, flat)
 		}
 	}
 	outPoco := stripANSI(overlayToasts(base, [][]string{block}, 20, 4, 2))
@@ -441,7 +441,7 @@ func TestToastEmptyNotIsQueues(t *testing.T) {
 		}
 		tm.toasts = nil
 	}
-	tm.show("hola", toastInfo)
+	tm.show("hello", toastInfo)
 	if len(tm.toasts) != 1 {
 		t.Errorf("toasts = %d, want 1", len(tm.toasts))
 	}
@@ -485,30 +485,30 @@ func TestToastExpiresInTheInstantExact(t *testing.T) {
 	const d = 3 * time.Second
 	now := time.Now()
 	for _, c := range []struct {
-		name string
-		edad time.Duration
-		vive bool
+		name  string
+		age   time.Duration
+		alive bool
 	}{
-		{"1ns antes de expirar", d - time.Nanosecond, true},
+		{"1ns before expiring", d - time.Nanosecond, true},
 		{"right as it expired", d, false},
-		{"despues de expirar", d + time.Nanosecond, false},
+		{"after expiring", d + time.Nanosecond, false},
 	} {
 		var tm toastManager
-		tm.show("hola", toastInfo)
+		tm.show("hello", toastInfo)
 		tm.toasts[0].duration = d
-		tm.toasts[0].created = now.Add(-c.edad)
+		tm.toasts[0].created = now.Add(-c.age)
 
 		tm.updateAt(now)
 
-		if got := len(tm.toasts) == 1; got != c.vive {
-			t.Errorf("%s: updateAt deja %d toasts, want vivo=%v", c.name, len(tm.toasts), c.vive)
+		if got := len(tm.toasts) == 1; got != c.alive {
+			t.Errorf("%s: updateAt leaves %d toasts, want alive=%v", c.name, len(tm.toasts), c.alive)
 		}
 	}
 }
 
 func TestToastUpdateUsesTheClockReal(t *testing.T) {
 	var tm toastManager
-	tm.show("hola", toastInfo)
+	tm.show("hello", toastInfo)
 	tm.toasts[0].duration = time.Millisecond
 	tm.toasts[0].created = time.Now().Add(-time.Hour) // long expired
 

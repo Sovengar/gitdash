@@ -37,7 +37,7 @@ func asOrDash(s string) string {
 const cmdInputLines = 2
 
 // The input is ALWAYS painted at the end, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top; without input there is no footer, the keys are already in keybinds.
-func (m *Model) fichaTail(body string, rows int) string {
+func (m *Model) cardTail(body string, rows int) string {
 	if !m.cmdOpen {
 		return body
 	}
@@ -98,7 +98,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 
 	avail := max(0, rows-detailHeadLines)
 	// The three lists COMPETE for the same space: without deducting, each would believe it has the whole budget and the card would overflow the box (which fitLines then crops from the top without warning, exactly what the "… N more" line avoids).
-	consumido := func(shown int, rest bool) int {
+	used := func(shown int, rest bool) int {
 		n := minListBlockLines + shown
 		if rest {
 			n++
@@ -121,7 +121,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
 		}
-		avail -= consumido(shown, rest)
+		avail -= used(shown, rest)
 	}
 
 	if p.MarkerErr != "" {
@@ -140,7 +140,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
 		}
-		avail -= consumido(shown, rest)
+		avail -= used(shown, rest)
 	}
 
 	if n := len(r.snap.Commits); n > 0 && avail >= minListBlockLines {
@@ -181,7 +181,7 @@ func (m *Model) renderDetail(r row, rows int) string {
 		}
 	}
 
-	return m.fichaTail(b.String(), rows)
+	return m.cardTail(b.String(), rows)
 }
 
 // A worktree discovered with a marker and a live snapshot delegates to the full card; without one, a minimal panel with what `worktree list` gives (path/branch/head) and NO invented derived git state.
@@ -211,7 +211,7 @@ func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows
 		b.WriteString(key("repo    ") + filepath.Base(parent) + "\n")
 	}
 
-	return m.fichaTail(b.String(), rows)
+	return m.cardTail(b.String(), rows)
 }
 
 func actionTail(out string, n int) string {

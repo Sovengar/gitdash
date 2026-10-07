@@ -143,7 +143,7 @@ func TestBuildCreateArgv(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "ref cero",
+			name: "ref zero",
 			ref:  RepoRef{},
 			p:    Params{Title: "T", Body: "C"},
 			want: nil,
@@ -249,7 +249,7 @@ func TestBuildCreateArgvNotPassesHostnameATheCli(t *testing.T) {
 			argv := BuildCreateArgv(tc.ref, Params{Title: "T", Body: "C", Base: "main", Head: "h"})
 			for _, bad := range []string{"--hostname", "--api-host", "--yes-and-no"} {
 				if slices.Contains(argv, bad) {
-					t.Errorf("argv %q contiene %q", argv, bad)
+					t.Errorf("argv %q contains %q", argv, bad)
 				}
 			}
 		})

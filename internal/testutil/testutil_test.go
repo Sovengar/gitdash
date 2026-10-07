@@ -77,7 +77,7 @@ func TestMarkerMalformedIsTOMLInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the marker was not written: %v", err)
 	}
-	if !strings.Contains(string(raw), "[roto") {
+	if !strings.Contains(string(raw), "[broken") {
 		t.Errorf("the malformed marker does not look malformed:\n%s", raw)
 	}
 }

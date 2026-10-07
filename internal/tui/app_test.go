@@ -173,7 +173,7 @@ func TestSortActivityTie(t *testing.T) {
 	m := newTestModel(t, projects, states)
 	rows := m.rows()
 	if rows[0].project.Name != "bbb" {
-		t.Errorf("rows[0] = %s, want bbb (more reciente)", rows[0].project.Name)
+		t.Errorf("rows[0] = %s, want bbb (more recent)", rows[0].project.Name)
 	}
 }
 
@@ -214,12 +214,12 @@ func TestSearch(t *testing.T) {
 	}
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].project.Name != "dirty-api" {
-		t.Errorf("en vivo: rows = %v", rowNames(rows))
+		t.Errorf("live: rows = %v", rowNames(rows))
 	}
 
 	m, _ = press(m, "enter")
 	if m.searchActive || m.search != "api" {
-		t.Errorf("confirmar: active=%v search=%q", m.searchActive, m.search)
+		t.Errorf("confirm: active=%v search=%q", m.searchActive, m.search)
 	}
 
 	m, _ = press(m, "/")
@@ -256,7 +256,7 @@ func TestSearchImmediateFeedback(t *testing.T) {
 func TestSearchMatchesGroup(t *testing.T) {
 	projects := []discovery.Project{
 		{Path: "/x", Name: "api", PrimaryGroup: "vsocial", SecondaryGroup: "backend", HasRepo: true},
-		{Path: "/y", Name: "cli", PrimaryGroup: "otros", HasRepo: true},
+		{Path: "/y", Name: "cli", PrimaryGroup: "other", HasRepo: true},
 	}
 	states := map[string]gitstatus.Snapshot{"/x": snapClean(), "/y": snapClean()}
 	m := newTestModel(t, projects, states)
@@ -484,7 +484,7 @@ func TestTheEndOfTheScanGuardTheCache(t *testing.T) {
 	m.Update(collectDoneMsg{})
 
 	path := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "gitdash", "repos.json")
-	esperaFichero(t, path)
+	waitForFile(t, path)
 
 	var c cache.File
 	if err := json.Unmarshal(readFile(t, path), &c); err != nil {
@@ -497,7 +497,7 @@ func TestTheEndOfTheScanGuardTheCache(t *testing.T) {
 
 // The event is looked at, not the return value, because `fetchBatchCmd` publishes through the channel and always returns nil.
 func TestTheEndOfTheScanLaunchesTheFetchAutomatic(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name      string
 		fetchAuto bool
 		snap      gitstatus.Snapshot
@@ -507,7 +507,7 @@ func TestTheEndOfTheScanLaunchesTheFetchAutomatic(t *testing.T) {
 		{"no automatic fetch", false, snapClean(), false},
 		{"repo no upstream", true, gitstatus.Snapshot{}, false},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("XDG_CACHE_HOME", t.TempDir())
 			m := newTestModel(t,
@@ -518,25 +518,25 @@ func TestTheEndOfTheScanLaunchesTheFetchAutomatic(t *testing.T) {
 			m.Update(collectDoneMsg{})
 
 			// The deadline is only long for the case that must LAUNCH: in the negative ones the "fetching" event (emitted before touching git) cannot be slow, so waiting longer only lengthens the suite.
-			plazo := 200 * time.Millisecond
+			timeout := 200 * time.Millisecond
 			if c.want {
-				plazo = 5 * time.Second
+				timeout = 5 * time.Second
 			}
-			visto := esperaEvento(t, m, plazo, func(ev event) bool {
+			seen := awaitEvent(t, m, timeout, func(ev event) bool {
 				fs, ok := ev.(fetchStateMsg)
 				return ok && fs.path == "/tmp/api"
 			})
-			if c.want && !visto {
+			if c.want && !seen {
 				t.Error("the automatic fetch did not launch when the scan ended")
 			}
-			if !c.want && visto {
+			if !c.want && seen {
 				t.Error("a fetch that should not fire ran: no automatic fetch or no upstream")
 			}
 		})
 	}
 }
 
-func esperaFichero(t *testing.T, path string) {
+func waitForFile(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -552,12 +552,12 @@ func readFile(t *testing.T, path string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("leyendo %s: %v", path, err)
+		t.Fatalf("reading %s: %v", path, err)
 	}
 	return raw
 }
 
-func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) bool) bool {
+func awaitEvent(t *testing.T, m Model, timeout time.Duration, pred func(event) bool) bool {
 	t.Helper()
 	ch := make(chan bool, 1)
 	go func() {
@@ -575,7 +575,7 @@ func esperaEvento(t *testing.T, m Model, plazo time.Duration, pred func(event) b
 	select {
 	case ok := <-ch:
 		return ok
-	case <-time.After(plazo):
+	case <-time.After(timeout):
 		return false
 	}
 }
@@ -620,17 +620,17 @@ func TestNewSurvivesWithNoStateDirToSaveTheFolded(t *testing.T) {
 }
 
 func TestTheEndOfTheFetchDistinguishesHowManyReposSyncs(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name         string
 		ok, failed   int
-		wantContiene string
+		wantContains string
 	}{
-		{"uno solo", 1, 0, "fetch ok"},
-		{"varios", 3, 0, "fetch ok (3 repos)"},
+		{"only one", 1, 0, "fetch ok"},
+		{"several", 3, 0, "fetch ok (3 repos)"},
 		{"none and all fail", 0, 2, "2 failed"},
-		{"mezcla", 2, 1, "2 ok, 1 failed"},
+		{"mixed", 2, 1, "2 ok, 1 failed"},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)}, nil)
 
@@ -639,9 +639,9 @@ func TestTheEndOfTheFetchDistinguishesHowManyReposSyncs(t *testing.T) {
 			m = mm.(Model)
 
 			got := lastToast(m)
-			if !strings.Contains(got, c.wantContiene) {
+			if !strings.Contains(got, c.wantContains) {
 				t.Errorf("fetch %d ok / %d failed: the notice says %q, want it to contain %q",
-					c.ok, c.failed, got, c.wantContiene)
+					c.ok, c.failed, got, c.wantContains)
 			}
 		})
 	}
@@ -736,14 +736,14 @@ func TestUpdateIgnoresMessagesUnknown(t *testing.T) {
 // tickMsg is what expires toasts, so if it stopped being emitted a warning would stay painted forever and the table would look frozen.
 func TestSpinnerAdvancesWithItsTick(t *testing.T) {
 	m := newTestModel(t, nil, nil)
-	antes := m.spinner.View()
+	before := m.spinner.View()
 	out, cmd := m.Update(spinner.TickMsg{})
 	if cmd == nil {
 		t.Error("the spinner's TickMsg returned no command, want the next tick")
 	}
-	despues := out.(Model).spinner.View()
-	if despues == antes && len(antes) > 0 {
-		t.Errorf("the spinner did not move: %q -> %q", antes, despues)
+	after := out.(Model).spinner.View()
+	if after == before && len(before) > 0 {
+		t.Errorf("the spinner did not move: %q -> %q", before, after)
 	}
 }
 
@@ -813,7 +813,7 @@ func TestRescanWithScanInRunsWarns(t *testing.T) {
 		t.Fatalf("returned %T, want a notice", cmd())
 	}
 	if !strings.Contains(msg.text, "already running") {
-		t.Errorf("aviso = %q, want 'scan already running'", msg.text)
+		t.Errorf("warning = %q, want 'scan already running'", msg.text)
 	}
 }
 
@@ -829,7 +829,7 @@ func TestBusyActionCmd(t *testing.T) {
 		t.Errorf("notice = %q, want it to name the action in progress", msg.text)
 	}
 
-	if cmd := m.busyActionCmd("/tmp/otro"); cmd != nil {
+	if cmd := m.busyActionCmd("/tmp/other"); cmd != nil {
 		t.Errorf("busyActionCmd over a free repo returned %#v, want nil", cmd())
 	}
 }
@@ -876,13 +876,13 @@ func TestNotifyConfigQueuesTheWarning(t *testing.T) {
 	if !strings.Contains(got.text, "could not be read") {
 		t.Errorf("text = %q, want the whole notice", got.text)
 	}
-	bloques := m.toasts.blocks()
-	if len(bloques) != 1 {
-		t.Fatalf("bloques = %d, want 1", len(bloques))
+	blocks := m.toasts.blocks()
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1", len(blocks))
 	}
-	pintado := stripANSI(strings.Join(bloques[0], " "))
-	if !strings.Contains(pintado, "could not be read") {
-		t.Errorf("the painted block = %q, want the notice text", pintado)
+	painted := stripANSI(strings.Join(blocks[0], " "))
+	if !strings.Contains(painted, "could not be read") {
+		t.Errorf("the painted block = %q, want the notice text", painted)
 	}
 }
 
@@ -971,7 +971,7 @@ func TestTheScanEmitsCollectDoneOnTheFinish(t *testing.T) {
 	t.Cleanup(m.cancel)
 
 	m.startScanCmd()
-	if !esperaEvento(t, m, 20*time.Second, func(ev event) bool {
+	if !awaitEvent(t, m, 20*time.Second, func(ev event) bool {
 		_, ok := ev.(collectDoneMsg)
 		return ok
 	}) {
@@ -981,38 +981,38 @@ func TestTheScanEmitsCollectDoneOnTheFinish(t *testing.T) {
 
 // The three filters are the reason the automatic fetch does not hit repos with no upstream, with no repo, or one already in flight: the first two are noise in the git log and the third would mean two `git fetch` in parallel on the same repo.
 func TestFetchTargetsOnlyTheReposItShouldFetch(t *testing.T) {
-	conRepo := "/tmp/with-repo"
-	sinRepo := "/tmp/no-repo"
-	enCurso := "/tmp/en-curso"
+	withRepo := "/tmp/with-repo"
+	withoutRepo := "/tmp/no-repo"
+	inFlight := "/tmp/in-flight"
 	m := newTestModel(t, []discovery.Project{
-		proj("with-repo", conRepo, true),
-		proj("no-repo", sinRepo, false),
-		proj("en-curso", enCurso, true),
+		proj("with-repo", withRepo, true),
+		proj("no-repo", withoutRepo, false),
+		proj("in-flight", inFlight, true),
 	}, map[string]gitstatus.Snapshot{
-		conRepo: snapClean(),
-		sinRepo: snapClean(),
-		enCurso: snapClean(),
+		withRepo:    snapClean(),
+		withoutRepo: snapClean(),
+		inFlight:    snapClean(),
 	})
-	m.fetchStates[enCurso] = "fetching"
+	m.fetchStates[inFlight] = "fetching"
 
 	got := m.fetchTargets()
-	if len(got) != 1 || got[0] != conRepo {
-		t.Errorf("fetchTargets = %v, want solo [%s]", got, conRepo)
+	if len(got) != 1 || got[0] != withRepo {
+		t.Errorf("fetchTargets = %v, want only [%s]", got, withRepo)
 	}
 }
 
 func TestFetchTargetsJumpsTheRepoWithError(t *testing.T) {
-	roto := "/tmp/roto"
+	broken := "/tmp/broken"
 	good := "/tmp/good"
 	m := newTestModel(t, []discovery.Project{
-		proj("roto", roto, true), proj("good", good, true),
+		proj("broken", broken, true), proj("good", good, true),
 	}, map[string]gitstatus.Snapshot{
-		roto: {Err: "no such repository"},
-		good: snapClean(),
+		broken: {Err: "no such repository"},
+		good:   snapClean(),
 	})
 	got := m.fetchTargets()
 	if len(got) != 1 || got[0] != good {
-		t.Errorf("fetchTargets = %v, want solo [%s]", got, good)
+		t.Errorf("fetchTargets = %v, want only [%s]", got, good)
 	}
 }
 
@@ -1031,8 +1031,8 @@ func TestRescanWhenNotThereScanInCourse(t *testing.T) {
 func TestAcquireSlot(t *testing.T) {
 	t.Run("with room it takes it", func(t *testing.T) {
 		sem := make(chan struct{}, 2)
-		if !adquirirSlot(context.Background(), sem) {
-			t.Error("adquirirSlot = false with a free slot, want true")
+		if !acquireSlot(context.Background(), sem) {
+			t.Error("acquireSlot = false with a free slot, want true")
 		}
 		if len(sem) != 1 {
 			t.Errorf("the slot was not taken: len(sem) = %d, want 1", len(sem))
@@ -1044,8 +1044,8 @@ func TestAcquireSlot(t *testing.T) {
 		sem <- struct{}{} // taken: the next one has to wait
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if adquirirSlot(ctx, sem) {
-			t.Error("adquirirSlot = true with the semaphore full and the context cancelled, want false")
+		if acquireSlot(ctx, sem) {
+			t.Error("acquireSlot = true with the semaphore full and the context cancelled, want false")
 		}
 		if len(sem) != 1 {
 			t.Errorf("it took a slot that was not its own: len(sem) = %d, want 1", len(sem))
@@ -1061,14 +1061,14 @@ func TestAcquireSlot(t *testing.T) {
 		go func() {
 			<-sem // released the way the previous fetch would
 		}()
-		if !adquirirSlot(ctx, sem) {
-			t.Error("adquirirSlot = false while waiting for a slot that was freeing, want true")
+		if !acquireSlot(ctx, sem) {
+			t.Error("acquireSlot = false while waiting for a slot that was freeing, want true")
 		}
 	})
 }
 
-// With concurrency=1 the first fetch holds the only slot for 30s; `exec` and not `sleep & wait` because a grandchild keeps stdout's pipe and Output() never returns (measured), and `marcar` is the shim's only signal that the slot is taken since recordExec runs when the process ENDS.
-func gitLentoEspera(t *testing.T, marcar string) {
+// With concurrency=1 the first fetch holds the only slot for 30s; `exec` and not `sleep & wait` because a grandchild keeps stdout's pipe and Output() never returns (measured), and `shimFlag` is the shim's only signal that the slot is taken since recordExec runs when the process ENDS.
+func waitForSlowGit(t *testing.T, shimFlag string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
 	if err != nil {
@@ -1076,7 +1076,7 @@ func gitLentoEspera(t *testing.T, marcar string) {
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"fetch\" ]; then touch \"" + marcar + "\"; exec sleep 30; fi\n" +
+		"if [ \"$1\" = \"fetch\" ]; then touch \"" + shimFlag + "\"; exec sleep 30; fi\n" +
 		"exec " + real + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -1084,28 +1084,28 @@ func gitLentoEspera(t *testing.T, marcar string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func esperaDentroDelShim(t *testing.T, marcar string, plazo time.Duration) {
+func awaitInShim(t *testing.T, shimFlag string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(plazo)
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(marcar); err == nil {
+		if _, err := os.Stat(shimFlag); err == nil {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("no fetch got to start in %s", plazo)
+	t.Fatalf("no fetch got to start in %s", timeout)
 }
 
-const fetchEnCola = 12
+const queuedFetches = 12
 
 // Only the command log is watched: with the context already cancelled the shim writes whether or not the guard works, and the fetchState/fetchDone events deliver half the time (981/2000), a 50% false negative worse than no test; rec.Entries() works because recordExec runs from runGit either way.
 func TestFetchBatchTheCancelledInWaitsNotRunGit(t *testing.T) {
-	marcar := filepath.Join(t.TempDir(), "inside")
-	gitLentoEspera(t, marcar)
+	shimFlag := filepath.Join(t.TempDir(), "inside")
+	waitForSlowGit(t, shimFlag)
 
-	paths := make([]string, fetchEnCola)
-	projects := make([]discovery.Project, fetchEnCola)
-	states := make(map[string]gitstatus.Snapshot, fetchEnCola)
+	paths := make([]string, queuedFetches)
+	projects := make([]discovery.Project, queuedFetches)
+	states := make(map[string]gitstatus.Snapshot, queuedFetches)
 	for i := range paths {
 		// The dirs have to EXIST: with a missing `cmd.Dir` Start fails before running the shim and the test would wait for an entry that never comes.
 		paths[i] = t.TempDir()
@@ -1119,21 +1119,21 @@ func TestFetchBatchTheCancelledInWaitsNotRunGit(t *testing.T) {
 
 	m.fetchBatchCmd(paths, cmdlog.ClassAction)
 
-	esperaDentroDelShim(t, marcar, 10*time.Second)
+	awaitInShim(t, shimFlag, 10*time.Second)
 
 	m.cancel()
 
 	time.Sleep(time.Second)
 
-	var ejecutados []string
+	var ran []string
 	for _, e := range rec.Entries() {
 		if e.Intent || e.Action != "fetch" {
 			continue
 		}
-		ejecutados = append(ejecutados, e.Dir)
+		ran = append(ran, e.Dir)
 	}
-	if len(ejecutados) > 1 {
+	if len(ran) > 1 {
 		t.Errorf("fetches that went out to a subprocess = %v, want only the first: %d of %d queued got to run despite the cancellation",
-			ejecutados, len(ejecutados)-1, fetchEnCola-1)
+			ran, len(ran)-1, queuedFetches-1)
 	}
 }

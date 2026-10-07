@@ -239,7 +239,7 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		output: "fatal: contiene archivos modificados", err: "fatal: contiene archivos modificados",
+		output: "fatal: contains files modified", err: "fatal: contains files modified",
 		gen: 7,
 	})
 	m = updated.(Model)
@@ -257,7 +257,7 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 		t.Errorf("the token must be consumed: %v", m.removeTokens)
 	}
 	last := m.toasts.toasts[len(m.toasts.toasts)-1]
-	if last.level != toastError || !strings.Contains(last.text, "archivos modificados") {
+	if last.level != toastError || !strings.Contains(last.text, "files modified") {
 		t.Errorf("toast = %+v, want an error with the real reason", last)
 	}
 	if act := m.lastAction[p.Path]; act.kind != "worktree_remove" || act.err == "" {
@@ -440,7 +440,7 @@ func TestRemoveWorktreePromptRender(t *testing.T) {
 	m = armedOver(t, m, e, true)
 	out = stripANSI(m.View().Content)
 	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? has changes — D to force, esc to cancel") {
-		t.Errorf("aviso forzado ausente de keybinds:\n%s", out)
+		t.Errorf("forced warning missing from keybinds:\n%s", out)
 	}
 
 	m, _ = press(m, "esc")
@@ -492,7 +492,7 @@ func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 	}
 	msg, ok := cmd().(notifyMsg)
 	if !ok || msg.level != toastWarning {
-		t.Errorf("aviso = %+v, want warning", msg)
+		t.Errorf("warning = %+v, want warning", msg)
 	}
 }
 
@@ -559,7 +559,7 @@ func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{"/s": snapClean()})
 	m.cursor = 1
 	if e, _ := m.selectedEntry(); e.kind != kindSecondary {
-		t.Fatalf("precondition: entry = %+v, want a header secundario", e)
+		t.Fatalf("precondition: entry = %+v, want a secondary header", e)
 	}
 
 	m, cmd := press(m, "D")
@@ -592,7 +592,7 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	wtDir := filepath.Join(t.TempDir(), "wt-dirty")
 	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty")
-	testutil.WriteUntracked(t, wtDir, map[string]string{"pendiente.txt": "x"})
+	testutil.WriteUntracked(t, wtDir, map[string]string{"untracked.txt": "x"})
 	snap := gitstatus.Collect(t.Context(), dir, "main", false)
 	if len(snap.Worktrees) != 1 {
 		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
@@ -678,7 +678,7 @@ func TestRemoveWorktreeConcurrentParentsNotLeak(t *testing.T) {
 	m = updated.(Model)
 
 	if m.running["/tmp/pa"] != "" {
-		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
+		t.Errorf("running leak in A: %q", m.running["/tmp/pa"])
 	}
 	if m.running["/tmp/pb"] != "worktree_remove" {
 		t.Errorf("B's attempt was altered: %q", m.running["/tmp/pb"])
@@ -687,7 +687,7 @@ func TestRemoveWorktreeConcurrentParentsNotLeak(t *testing.T) {
 		t.Errorf("A's token not consumed: %v", m.removeTokens)
 	}
 	if m.removeTokens["/tmp/pb"] != tokB {
-		t.Errorf("token de B alterado: %v", m.removeTokens)
+		t.Errorf("altered token of B: %v", m.removeTokens)
 	}
 	if m.armed == nil || !m.armed.force || m.armed.name != "pa-wt" {
 		t.Errorf("A's outcome not applied: %+v", m.armed)
@@ -736,13 +736,13 @@ func TestRemoveWorktreeEscThenOtherParentNotLeak(t *testing.T) {
 	m = updated.(Model)
 
 	if m.running["/tmp/pa"] != "" {
-		t.Errorf("fuga de running en A: %q", m.running["/tmp/pa"])
+		t.Errorf("running leak in A: %q", m.running["/tmp/pa"])
 	}
 	if m.running["/tmp/pb"] != "worktree_remove" {
 		t.Errorf("B's attempt was altered: %q", m.running["/tmp/pb"])
 	}
 	if m.removeTokens["/tmp/pb"] != tokB {
-		t.Errorf("token de B alterado: %v", m.removeTokens)
+		t.Errorf("altered token of B: %v", m.removeTokens)
 	}
 	if m.armed != nil {
 		t.Errorf("a cancelled result must not arm: %+v", m.armed)
@@ -760,7 +760,7 @@ func TestRemoveWorktreeArmedMatchesNormalization(t *testing.T) {
 		{"/tmp/p/.", "/tmp/p/./wt", true},
 		{"/tmp/p", "/tmp/p//wt", true},
 		{"/tmp/other", "/tmp/p/wt", false},
-		{"/tmp/p", "/tmp/p/otro", false},
+		{"/tmp/p", "/tmp/p/other", false},
 	}
 	for _, tc := range cases {
 		if got := a.matches(tc.parent, tc.wtPath); got != tc.want {

@@ -206,7 +206,7 @@ func TestPullAIAiVarsWorktreeWithoutSnapshot(t *testing.T) {
 		t.Errorf("state = %q, want empty (no state is invented)", vars["state"])
 	}
 	if vars["upstream"] != "" || vars["ahead"] != "" || vars["behind"] != "" {
-		t.Errorf("placeholders inventados: %+v", vars)
+		t.Errorf("invented placeholders: %+v", vars)
 	}
 	if got := m.aiVars("/tmp/wt-d")["branch"]; got != "(detached) abc1234" {
 		t.Errorf("branch detached = %q, want \"(detached) abc1234\"", got)
@@ -216,7 +216,7 @@ func TestPullAIAiVarsWorktreeWithoutSnapshot(t *testing.T) {
 func TestPullAIArgvFromTheMarkerReal(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Init(t, dir)
-	content := "[ai.pull]\nprompt = \"line1\\nlinea2 \\\"with quotes\\\" and $VAR; rm -rf /\"\n"
+	content := "[ai.pull]\nprompt = \"line1\\nline2 \\\"with quotes\\\" and $VAR; rm -rf /\"\n"
 	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestPullAIArgvFromTheMarkerReal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarkerPrompt: %v", err)
 	}
-	want := "line1\nlinea2 \"with quotes\" and $VAR; rm -rf /"
+	want := "line1\nline2 \"with quotes\" and $VAR; rm -rf /"
 	if prompt != want {
 		t.Fatalf("marker prompt = %q, want %q", prompt, want)
 	}
@@ -316,7 +316,7 @@ func TestExecDoneRecordsPullAI(t *testing.T) {
 		t.Errorf("Exit = %d, want 0", got.Exit)
 	}
 	if got.Class != cmdlog.ClassAction || got.Dir != path {
-		t.Errorf("clase/dir = %v/%q", got.Class, got.Dir)
+		t.Errorf("class/dir = %v/%q", got.Class, got.Dir)
 	}
 }
 

@@ -50,7 +50,7 @@ func TestWorktreeHidden(t *testing.T) {
 	r := m2.rows()[0]
 	text, _ := m2.nameCell(r)
 	if !strings.Contains(text, "(2 wt)") {
-		t.Errorf("indicador = %q, want '(2 wt)'", text)
+		t.Errorf("indicator = %q, want '(2 wt)'", text)
 	}
 }
 
@@ -220,17 +220,17 @@ func TestWorktreeToggleOnSubrow(t *testing.T) {
 func TestWorktreeCoverageAndDedupe(t *testing.T) {
 	main := proj("multi", "/tmp/multi", true)
 	disc := discovery.Project{
-		Path: "/tmp/wt-marcado", Name: "wt-marcado", HasRepo: true,
+		Path: "/tmp/wt-marked", Name: "wt-marked", HasRepo: true,
 		IsWorktree: true, MainRepo: "/tmp/multi",
 	}
 	mainSnap := snapClean()
 	mainSnap.Worktrees = []gitstatus.Worktree{
-		wt("/tmp/wt-marcado", "feat/marcado"),
+		wt("/tmp/wt-marked", "feat/marked"),
 		wt("/tmp/wt-root", "feat/root"),
 		wt("/outside/wt-outside", "feat/outside"),
 	}
 	m := newTestModel(t, []discovery.Project{main, disc},
-		map[string]gitstatus.Snapshot{"/tmp/multi": mainSnap, "/tmp/wt-marcado": snapClean()})
+		map[string]gitstatus.Snapshot{"/tmp/multi": mainSnap, "/tmp/wt-marked": snapClean()})
 
 	m, _ = press(m, "enter")
 	got := worktreeNames(m.entries())
@@ -243,13 +243,13 @@ func TestWorktreeCoverageAndDedupe(t *testing.T) {
 		}
 	}
 	for _, e := range m.entries() {
-		if e.kind == kindRepo && e.r.project.Path == "/tmp/wt-marcado" {
+		if e.kind == kindRepo && e.r.project.Path == "/tmp/wt-marked" {
 			t.Error("the discovered worktree appears as a repo row")
 		}
 	}
 	n := 0
 	for _, name := range got {
-		if name == "wt-marcado" {
+		if name == "wt-marked" {
 			n++
 		}
 	}
@@ -439,18 +439,18 @@ func TestWorktreeFetchPath(t *testing.T) {
 
 	m, _ = press(m, "f")
 	deadline := time.After(30 * time.Second)
-	visto := false
+	seen := false
 	for {
 		select {
 		case ev := <-m.events:
 			switch e := ev.(type) {
 			case fetchStateMsg:
-				if filepath.Clean(e.path) == "/tmp/wt-a" && e.state == "fetching" && !visto {
-					visto = true
+				if filepath.Clean(e.path) == "/tmp/wt-a" && e.state == "fetching" && !seen {
+					seen = true
 				}
 			case fetchDoneMsg:
 				// The batch ends here: without waiting for fetchDoneMsg the test leaves the goroutine alive and its git reads land in the NEXT test's GLOBAL recorder, failing it for what this one did.
-				if !visto {
+				if !seen {
 					t.Error("no fetchStateMsg fetching observed for /tmp/wt-a")
 				}
 				return
@@ -534,19 +534,19 @@ func TestWorktreeDetail(t *testing.T) {
 }
 
 func TestWorktreeDetailDiscovered(t *testing.T) {
-	main, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-marcado", "feat"))
+	main, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-marked", "feat"))
 	disc := discovery.Project{
-		Path: "/tmp/wt-marcado", Name: "wt-marcado", HasRepo: true,
+		Path: "/tmp/wt-marked", Name: "wt-marked", HasRepo: true,
 		IsWorktree: true, MainRepo: "/tmp/multi",
 	}
-	st["/tmp/wt-marcado"] = snapDirty(2, 1)
+	st["/tmp/wt-marked"] = snapDirty(2, 1)
 	m := newTestModel(t, []discovery.Project{main, disc}, st)
 	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
 
 	e, _ := m.selectedEntry()
 	out := stripANSI(m.renderWorktreeDetail(e, m.height))
-	if !strings.Contains(out, "wt-marcado") || !strings.Contains(out, "state") {
+	if !strings.Contains(out, "wt-marked") || !strings.Contains(out, "state") {
 		t.Errorf("detail of worktree with incomplete discovery:\n%s", out)
 	}
 	if !strings.Contains(out, "2 ?1") {

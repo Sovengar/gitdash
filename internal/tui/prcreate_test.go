@@ -680,8 +680,8 @@ func TestPRURLYNoteOfTheOutcome(t *testing.T) {
 	if level, msg := prNote("widget", prResultMsg{out: "done"}); level != toastSuccess || strings.Contains(msg, "http") || strings.Contains(msg, "—") {
 		t.Errorf("output with no URL: (%v, %q), want a success toast with no link", level, msg)
 	}
-	cerr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "secret title", "-b", "long body"}, ExitCode: 1, Msg: "no commits between main and feat"}
-	level, msg = prNote("widget", prResultMsg{err: cerr})
+	terr := &tool.Error{Bin: "gh", Args: []string{"pr", "create", "-t", "secret title", "-b", "long body"}, ExitCode: 1, Msg: "no commits between main and feat"}
+	level, msg = prNote("widget", prResultMsg{err: terr})
 	if level != toastError {
 		t.Errorf("failure: level = %v, want error", level)
 	}

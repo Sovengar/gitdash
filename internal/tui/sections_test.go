@@ -31,14 +31,14 @@ func TestDashboardSectionsBordered(t *testing.T) {
 			t.Errorf("line %d width = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
 		}
 	}
-	plano := stripANSI(out)
+	flat := stripANSI(out)
 	for _, title := range []string{"╭ gitdash ", "╭ repos ", "╭ keybinds "} {
-		if !strings.Contains(plano, title) {
-			t.Errorf("the section %q is missing:\n%s", title, plano)
+		if !strings.Contains(flat, title) {
+			t.Errorf("the section %q is missing:\n%s", title, flat)
 		}
 	}
 	for _, glyph := range []string{"╭", "╮", "╰", "╯"} {
-		if !strings.Contains(plano, glyph) {
+		if !strings.Contains(flat, glyph) {
 			t.Errorf("the rounded glyph %q is missing", glyph)
 		}
 	}
@@ -168,13 +168,13 @@ func TestLayoutHeightExactInAllTheHeights(t *testing.T) {
 			keep      bool
 		}{
 			{"dashboard", false, defaultHintLines, false},
-			{"filtro", true, defaultHintLines, false},
+			{"filter", true, defaultHintLines, false},
 			{"armed", false, 1, true},
 			{"armed+filter", true, 1, true},
 			{"no hints", false, 0, false},
 		} {
 			l := layoutTest(h, tc.hasFilter, tc.keybinds, tc.keep)
-			total := l.altoTotal(tc.hasFilter)
+			total := l.totalHeight(tc.hasFilter)
 			if l.bodyLines < 1 {
 				t.Errorf("%s h=%d: bodyLines = %d, want >= 1", tc.name, h, l.bodyLines)
 			}
@@ -201,7 +201,7 @@ func minPanelHeight(t *testing.T) int {
 	return 0
 }
 
-func (l layout) altoTotal(hasFilter bool) int {
+func (l layout) totalHeight(hasFilter bool) int {
 	n := tableChrome
 	if hasFilter {
 		n += filterSectionLines
@@ -235,7 +235,7 @@ func TestLayoutInTheFitExact(t *testing.T) {
 	}
 	l := layoutTest(h, false, defaultHintLines, false)
 	if l.previewLines != free*previewShare/5 {
-		t.Errorf("h=%d: previewLines = %d, want %d (2/5 de %d libres)", h, l.previewLines, free*previewShare/5, free)
+		t.Errorf("h=%d: previewLines = %d, want %d (2/5 of %d free)", h, l.previewLines, free*previewShare/5, free)
 	}
 	if want := h - (tableChrome + statsSectionLines + keybindsChrome + defaultHintLines + previewChrome + l.previewLines); l.bodyLines != want {
 		t.Errorf("h=%d: bodyLines = %d, want %d", h, l.bodyLines, want)
@@ -472,7 +472,7 @@ func TestToastsNotCoverKeybinds(t *testing.T) {
 func TestToastsExpireWithTheTick(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
-	m.toasts.showInfo("hola")
+	m.toasts.showInfo("hello")
 
 	updated, cmd := m.Update(tickMsg{})
 	m = updated.(Model)
@@ -538,8 +538,8 @@ func TestPromptArmedReplacesTheHints(t *testing.T) {
 		}
 	}
 
-	plano := stripANSI(out)
-	kb := sectionContent(t, plano, "keybinds")
+	flat := stripANSI(out)
+	kb := sectionContent(t, flat, "keybinds")
 	if !strings.Contains(kb, "p default") {
 		t.Errorf("the prompt is not in keybinds:\n%s", kb)
 	}
@@ -660,9 +660,9 @@ func TestSummaryOfGroupOnlyPaintsWhatIsThere(t *testing.T) {
 		if !strings.Contains(out, "repos    2") {
 			t.Errorf("the repo total is missing:\n%s", out)
 		}
-		for _, cero := range []string{"errors", "dirty", "ahead", "behind", "wt "} {
-			if strings.Contains(out, cero) {
-				t.Errorf("paints %q at zero:\n%s", cero, out)
+		for _, zero := range []string{"errors", "dirty", "ahead", "behind", "wt "} {
+			if strings.Contains(out, zero) {
+				t.Errorf("paints %q at zero:\n%s", zero, out)
 			}
 		}
 	})
@@ -693,7 +693,7 @@ func TestSummaryOfGroupOnlyPaintsWhatIsThere(t *testing.T) {
 	})
 
 	// The previous case loads the four states a repo can have without failing but misses the two the summary also paints from a different source (`errors` from StateError, `wt` from Worktrees), so those lines never ran and their ARITHMETIC_BASE mutants were NOT COVERED with no real gap behind: the branch existed and simply nobody looked at it.
-	t.Run("with an errores y worktrees", func(t *testing.T) {
+	t.Run("with errors and worktrees", func(t *testing.T) {
 		states := map[string]gitstatus.Snapshot{
 			"/a": func() gitstatus.Snapshot {
 				s := snapClean()
@@ -731,9 +731,9 @@ func TestPreviewWithoutHeightNotDrawsBox(t *testing.T) {
 	if got := m.previewSection(lay, m.entries()); got != "" {
 		t.Errorf("previewSection with 0 lines = %q, want empty", got)
 	}
-	plano := stripANSI(m.renderDashboard())
-	if strings.Contains(plano, "╭ ") && strings.Count(plano, "╭ ") != 3 {
-		t.Errorf("a \"more\" section was drawn with no panel:\n%s", plano)
+	flat := stripANSI(m.renderDashboard())
+	if strings.Contains(flat, "╭ ") && strings.Count(flat, "╭ ") != 3 {
+		t.Errorf("a \"more\" section was drawn with no panel:\n%s", flat)
 	}
 }
 
@@ -762,18 +762,18 @@ func TestCursorMarksAOnlyRow(t *testing.T) {
 	m.cursor = 1
 	out := stripANSI(m.tableSection(len(entries), entries))
 	lines := strings.Split(out, "\n")
-	var marcadas []string
+	var marked []string
 	for i, l := range lines {
 		if strings.Contains(l, "▸") {
-			marcadas = append(marcadas, strings.TrimSpace(l))
+			marked = append(marked, strings.TrimSpace(l))
 		}
 		_ = i
 	}
-	if len(marcadas) != 1 {
-		t.Fatalf("marked rows = %d, want 1:\n%s", len(marcadas), out)
+	if len(marked) != 1 {
+		t.Fatalf("marked rows = %d, want 1:\n%s", len(marked), out)
 	}
-	if want := stripANSI(m.renderEntry(entries[1], true)); !strings.Contains(marcadas[0], strings.TrimSpace(want)) {
-		t.Errorf("the marked row = %q, want the cursor's %q", marcadas[0], strings.TrimSpace(want))
+	if want := stripANSI(m.renderEntry(entries[1], true)); !strings.Contains(marked[0], strings.TrimSpace(want)) {
+		t.Errorf("the marked row = %q, want the cursor's %q", marked[0], strings.TrimSpace(want))
 	}
 }
 
@@ -788,7 +788,7 @@ func nonEmptyLines(lines []string) []string {
 }
 
 func TestSyncOffsetBorders(t *testing.T) {
-	casos := []struct {
+	cases := []struct {
 		name               string
 		total, window      int
 		cursor, offsetPrev int
@@ -801,10 +801,10 @@ func TestSyncOffsetBorders(t *testing.T) {
 		{"one below the last", 10, 5, 8, 3, 4},
 		{"cursor above the window", 10, 5, 1, 4, 1},
 		{"scrolled to the bottom, cursor at the start", 10, 5, 0, 5, 0},
-		{"ventana de 1", 10, 1, 4, 3, 4},
+		{"window of 1", 10, 1, 4, 3, 4},
 		{"no rows", 0, 5, 0, 2, 0},
 	}
-	for _, c := range casos {
+	for _, c := range cases {
 		m := newTestModel(t, nil, nil)
 		m.cursor, m.offset = c.cursor, c.offsetPrev
 		m.syncOffset(c.total, c.window)
@@ -850,14 +850,14 @@ func TestTokenOfDeletedExitsOfACounterMonotonic(t *testing.T) {
 	m, _ = press(m, "enter")
 	m, _ = press(m, "down") // worktree sub-row
 
-	antes := m.removeGen
+	before := m.removeGen
 	m, _ = press(m, "D")
 	if m.armed == nil {
 		t.Fatal("D did not arm the deletion")
 	}
 	m, _ = press(m, "D")
-	if m.removeGen <= antes {
-		t.Errorf("removeGen = %d, want > %d (monotonic counter)", m.removeGen, antes)
+	if m.removeGen <= before {
+		t.Errorf("removeGen = %d, want > %d (monotonic counter)", m.removeGen, before)
 	}
 	if tok := m.removeTokens["/tmp/multi"]; tok != m.removeGen {
 		t.Errorf("token = %d, want the counter %d", tok, m.removeGen)
@@ -865,7 +865,7 @@ func TestTokenOfDeletedExitsOfACounterMonotonic(t *testing.T) {
 }
 
 func TestEscCleansTheFilterOnlyWithTheInputEmpty(t *testing.T) {
-	nuevoModelo := func() (Model, discovery.Project, map[string]gitstatus.Snapshot) {
+	newModel := func() (Model, discovery.Project, map[string]gitstatus.Snapshot) {
 		projects, states := fixtureProjects()
 		m := newTestModel(t, projects, states)
 		m.search = "old"
@@ -873,7 +873,7 @@ func TestEscCleansTheFilterOnlyWithTheInputEmpty(t *testing.T) {
 	}
 
 	t.Run("empty input, esc clears the filter", func(t *testing.T) {
-		m, _, _ := nuevoModelo()
+		m, _, _ := newModel()
 		m, _ = press(m, "/")
 		for range len("old") {
 			m, _ = press(m, "backspace")
@@ -885,7 +885,7 @@ func TestEscCleansTheFilterOnlyWithTheInputEmpty(t *testing.T) {
 	})
 
 	t.Run("input with text, esc keeps the filter", func(t *testing.T) {
-		m, _, _ := nuevoModelo()
+		m, _, _ := newModel()
 		m, _ = press(m, "/")
 		if m.search != "old" {
 			t.Fatalf("the input was not seeded with the current filter: %q", m.search)
@@ -903,17 +903,17 @@ func TestEscCleansTheFilterOnlyWithTheInputEmpty(t *testing.T) {
 // Opening the editor does not fix an invalid TOML and the user would lose what they were about to change.
 func TestEditorWithMarkerBrokenWarns(t *testing.T) {
 	good := proj("ok", "/tmp/ok", true)
-	roto := proj("roto", "/tmp/roto", true)
-	roto.MarkerErr = "line 3: invalid value"
-	states := map[string]gitstatus.Snapshot{"/tmp/ok": snapClean(), "/tmp/roto": snapClean()}
-	m := newTestModel(t, []discovery.Project{good, roto}, states)
+	broken := proj("broken", "/tmp/broken", true)
+	broken.MarkerErr = "line 3: invalid value"
+	states := map[string]gitstatus.Snapshot{"/tmp/ok": snapClean(), "/tmp/broken": snapClean()}
+	m := newTestModel(t, []discovery.Project{good, broken}, states)
 
 	m = cursorOn(t, m, "/tmp/ok")
 	if _, cmd := press(m, "e"); cmd == nil {
 		t.Error("e on a healthy repo did not launch the editor")
 	}
 
-	m = cursorOn(t, m, "/tmp/roto")
+	m = cursorOn(t, m, "/tmp/broken")
 	_, cmd := press(m, "e")
 	if cmd == nil {
 		t.Fatal("e with a broken marker returned no command (it should be the toast)")
@@ -930,8 +930,8 @@ func TestFetchStateForItsValue(t *testing.T) {
 
 	for _, c := range []struct {
 		state        string
-		quiereGiro   bool
-		quiereFallo  bool
+		wantSpin     bool
+		wantFail     bool
 		quiereQuieto bool
 	}{
 		{"fetching", true, false, false},
@@ -940,15 +940,15 @@ func TestFetchStateForItsValue(t *testing.T) {
 	} {
 		m := newTestModel(t, projects, states)
 		out, _ := m.Update(fetchStateMsg{path: path, state: c.state, err: "no network"})
-		plano := stripANSI(out.(Model).renderDashboard())
-		if got := strings.Contains(plano, "fetching"); got != c.quiereGiro {
-			t.Errorf("%s: 'fetching' presente = %v, want %v", c.state, got, c.quiereGiro)
+		flat := stripANSI(out.(Model).renderDashboard())
+		if got := strings.Contains(flat, "fetching"); got != c.wantSpin {
+			t.Errorf("%s: 'fetching' presente = %v, want %v", c.state, got, c.wantSpin)
 		}
-		if got := strings.Contains(plano, "✗ fetch"); got != c.quiereFallo {
-			t.Errorf("%s: failure present = %v, want %v", c.state, got, c.quiereFallo)
+		if got := strings.Contains(flat, "✗ fetch"); got != c.wantFail {
+			t.Errorf("%s: failure present = %v, want %v", c.state, got, c.wantFail)
 		}
-		if got := strings.Contains(plano, "⟳ fetch"); got != c.quiereGiro {
-			t.Errorf("%s: giro presente = %v, want %v", c.state, got, c.quiereGiro)
+		if got := strings.Contains(flat, "⟳ fetch"); got != c.wantSpin {
+			t.Errorf("%s: spin present = %v, want %v", c.state, got, c.wantSpin)
 		}
 		_ = c.quiereQuieto
 	}
@@ -958,12 +958,12 @@ func TestFetchStateForItsValue(t *testing.T) {
 func TestPreviewWithFilterRespectsTheShareOfTheGap(t *testing.T) {
 	for _, h := range []int{24, 30, 40, 50, 60, 80, 100, 140} {
 		lay := computeLayout(h, true, defaultHintLines, false, 0)
-		libre := h - (tableChrome + filterSectionLines + statsSectionLines +
+		free := h - (tableChrome + filterSectionLines + statsSectionLines +
 			keybindsChrome + defaultHintLines + previewChrome)
-		if libre < 1 {
+		if free < 1 {
 			t.Fatalf("h=%d: the gap with a filter is negative", h)
 		}
-		share := min(max(minPreviewLines, libre*previewShare/5), libre)
+		share := min(max(minPreviewLines, free*previewShare/5), free)
 
 		if lay.previewLines > share {
 			t.Errorf("h=%d with a filter: the panel measures %d and the gap's share is %d",
