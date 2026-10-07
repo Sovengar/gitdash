@@ -22,7 +22,7 @@ func TestPrintSync(t *testing.T) {
 	}{
 		{"no sync branch", gitstatus.Snapshot{}, "—"},
 		{"a ref that does not exist", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: false}, "main —"},
-		{"up to date: la rama y nada more", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true}, "main"},
+		{"up to date: the branch and nothing more", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true}, "main"},
 		{"behind", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: true, SyncBehind: 3}, "main ↓3"},
 		{"only syncKnown false behind (unknown rules)", gitstatus.Snapshot{SyncBranch: "main", SyncKnown: false, SyncBehind: 3}, "main —"},
 	}
@@ -68,7 +68,7 @@ func TestPrintUpDown(t *testing.T) {
 		{"no repo", gitstatus.StateNoRepo, true, 3, 3, "", ""},
 		{"with an error", gitstatus.StateError, true, 3, 3, "fatal", ""},
 		{"no upstream", gitstatus.StateClean, false, 0, 0, "", "no-up"},
-		{"en sync", gitstatus.StateClean, true, 0, 0, "", ""},
+		{"in sync", gitstatus.StateClean, true, 0, 0, "", ""},
 		{"solo ahead", gitstatus.StateAhead, true, 2, 0, "", "↑2"},
 		{"solo behind", gitstatus.StateBehind, true, 0, 3, "", "↓3"},
 		{"divergido", gitstatus.StateDiverged, true, 1, 2, "", "↑1↓2"},
@@ -128,7 +128,7 @@ func TestGroupLabelPrint(t *testing.T) {
 	}{
 		{"both levels", discovery.Project{PrimaryGroup: "vsocial", SecondaryGroup: "backend"}, "vsocial/backend"},
 		{"solo primario", discovery.Project{PrimaryGroup: "vsocial"}, "vsocial"},
-		{"ninguno", discovery.Project{}, ""},
+		{"none", discovery.Project{}, ""},
 		{"secondary only (it is not shown alone)", discovery.Project{SecondaryGroup: "backend"}, ""},
 	}
 	for _, c := range casos {

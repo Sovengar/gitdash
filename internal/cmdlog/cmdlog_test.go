@@ -52,7 +52,7 @@ func TestRingStepsItOld(t *testing.T) {
 		}
 	}
 	if entries[0].Seq != 3 {
-		t.Errorf("Seq de la primera viva = %d, want 3", entries[0].Seq)
+		t.Errorf("Seq of the first live one = %d, want 3", entries[0].Seq)
 	}
 }
 

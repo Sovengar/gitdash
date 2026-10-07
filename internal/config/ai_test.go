@@ -14,7 +14,7 @@ command = "jcode -run {prompt}"
 		t.Fatalf("warn inesperado: %q", warn)
 	}
 	if got := cfg.AICommand("pull"); got != "jcode -run {prompt}" {
-		t.Errorf("AICommand(pull) = %q, want la plantilla", got)
+		t.Errorf("AICommand(pull) = %q, want the template", got)
 	}
 	if got := cfg.AICommand("commit"); got != "" {
 		t.Errorf("AICommand(commit) = %q, want empty (not configured)", got)

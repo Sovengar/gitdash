@@ -93,7 +93,7 @@ func gitLocal(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v en %s: %v\n%s", args, dir, err, out)
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestSyncFallbackAMaster(t *testing.T) {
 		t.Fatalf("comparison against master unknown: %+v", snap)
 	}
 	if snap.SyncBehind != 1 {
-		t.Errorf("behind = %d, want 1 (m1 ausente en feat)", snap.SyncBehind)
+		t.Errorf("behind = %d, want 1 (m1 missing on feat)", snap.SyncBehind)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestSyncFallbackWithoutNoneOfTheTwo(t *testing.T) {
 
 	snap := Collect(t.Context(), dir, "main", true)
 	if snap.SyncBranch != "main" {
-		t.Errorf("SyncBranch = %q, want main (la original)", snap.SyncBranch)
+		t.Errorf("SyncBranch = %q, want main (the original)", snap.SyncBranch)
 	}
 	if snap.SyncKnown || snap.SyncBehind != 0 {
 		t.Errorf("sync = %v/%d, want unknown with nothing behind it", snap.SyncKnown, snap.SyncBehind)

@@ -147,7 +147,7 @@ func TestParseRemoteURLStripsClonePrefix(t *testing.T) {
 		{"with prefix", "https://gitlab.example.com/git/grupo/sub/proy.git"},
 		{"with prefix y barra final", "https://gitlab.example.com/git/grupo/sub/proy/"},
 		{"scp with prefix", "git@gitlab.example.com:git/grupo/sub/proy.git"},
-		{"scp with prefix and no .git", "git@gitlab.example.com:git/grupo/sub/proy"},
+		{"scp with prefix and no .git", "git@gitlab.example.com:git/group/sub/proj"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

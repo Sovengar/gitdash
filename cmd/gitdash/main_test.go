@@ -154,7 +154,7 @@ func TestPrintRowOfEachShapeOfRepo(t *testing.T) {
 		want map[string]string
 	}{
 		{
-			name: "detached conserva la rama",
+			name: "detached keeps the branch",
 			proj: discovery.Project{Path: "/api", Name: "api", HasRepo: true},
 			snap: gitstatus.Snapshot{Status: gitstatus.Status{
 				Branch: "feat/x", Detached: true, HasUpstream: true,

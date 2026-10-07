@@ -77,7 +77,7 @@ func prConfig(t *testing.T, toml string) config.Config {
 	return cfg
 }
 
-func prEnvíaPR(t *testing.T, m Model, title string) (Model, tea.Cmd) {
+func prSubmitsPR(t *testing.T, m Model, title string) (Model, tea.Cmd) {
 	t.Helper()
 	m = openPROverlay(t, m)
 	m = typeText(m, title)
@@ -142,7 +142,7 @@ func TestPRCreationCompletesRecordsTheArgvResolved(t *testing.T) {
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/42")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "Add the sync branch base")
+	m, _ = prSubmitsPR(t, m, "Add the sync branch base")
 	if m.running[dir] != "pr" {
 		t.Fatalf("running = %q, want pr (the creation blocks the second press)", m.running[dir])
 	}
@@ -202,7 +202,7 @@ func TestPRLeavesIntentInTheLog(t *testing.T) {
 	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	awaitPR(t, &m)
 
 	var intent *cmdlog.Entry
@@ -251,7 +251,7 @@ func TestPRTheHeadExitsOfTheSnapshot(t *testing.T) {
 	snap.Status.Branch = "feat/pr"
 	m.states[dir] = snap
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	awaitPR(t, &m)
 
 	e := prExec(rec)
@@ -332,7 +332,7 @@ func TestPRWithoutRemoteNotRunsNothing(t *testing.T) {
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.reject == "" {
@@ -360,7 +360,7 @@ func TestPRForgeUnknownNotRunsNothing(t *testing.T) {
 	argvFile := forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.reject == "" {
@@ -384,7 +384,7 @@ func TestPRWithoutBinaryNotRunsNothing(t *testing.T) {
 	sinBinario(t)
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if !strings.Contains(res.reject, "gh not installed") {
@@ -404,7 +404,7 @@ func TestPRNotRelaunchWithTheRepoBusy(t *testing.T) {
 	m, rec := prModel(t, dir)
 	m.running[dir] = "lazygit"
 
-	m, cmd := prEnvíaPR(t, m, "a title")
+	m, cmd := prSubmitsPR(t, m, "a title")
 	m = applyNotify(m, cmd)
 
 	if m.running[dir] != "lazygit" {
@@ -432,7 +432,7 @@ host = "git.example.com"
 api_base = "/git/api/v4/"
 `).Forges
 
-	m, _ = prEnvíaPR(t, m, "Fix the subfolder")
+	m, _ = prSubmitsPR(t, m, "Fix the subfolder")
 
 	res := awaitPR(t, &m)
 	if res.reject != "" {
@@ -471,7 +471,7 @@ func TestPRFailureOfTheCLIToastWithTheReason(t *testing.T) {
 	forgeStub(t, "gh", "echo 'could not create PR: head branch already exists' >&2\nexit 1")
 	m, rec := prModel(t, dir)
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if res.err == nil {
@@ -508,7 +508,7 @@ func TestPRTheWarningOfTheOutcomeCarriesItsLevel(t *testing.T) {
 			forgeStub(t, "gh", c.stub)
 			m, _ := prModel(t, dir)
 
-			m, _ = prEnvíaPR(t, m, "a title")
+			m, _ = prSubmitsPR(t, m, "a title")
 			res := awaitPR(t, &m)
 			if res.reject != "" {
 				t.Fatalf("the creation was rejected: %s", res.reject)
@@ -714,7 +714,7 @@ func TestPRForgeInTheMapWithoutDoorNotRunsNothing(t *testing.T) {
 		"bitbucket": {Enabled: true, Host: "bit.example.com"},
 	}
 
-	m, _ = prEnvíaPR(t, m, "a title")
+	m, _ = prSubmitsPR(t, m, "a title")
 	res := awaitPR(t, &m)
 
 	if !strings.Contains(res.reject, "has no PR support in gitdash") {

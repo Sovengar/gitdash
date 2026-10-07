@@ -246,7 +246,7 @@ func TestFoldKeybinding(t *testing.T) {
 		t.Errorf("default fold = %q, want enter", cfg.KeyFor("fold"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "enter fold") {
-		t.Errorf("hint de plegado ausente: %v", cfg.HintBarLines())
+		t.Errorf("fold hint missing: %v", cfg.HintBarLines())
 	}
 
 	path := write(t, `
@@ -275,7 +275,7 @@ func TestDefaultKeybindingsWorktreeRemove(t *testing.T) {
 		t.Errorf("default worktree_remove = %q, want D", cfg.KeyFor("worktree_remove"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "D remove wt") {
-		t.Errorf("hint de borrado ausente: %v", cfg.HintBarLines())
+		t.Errorf("delete hint missing: %v", cfg.HintBarLines())
 	}
 
 	path := write(t, `
@@ -300,7 +300,7 @@ func TestDefaultKeybindingsVisual(t *testing.T) {
 		t.Errorf("default visual = %q, want v", cfg.KeyFor("visual"))
 	}
 	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "v visual") {
-		t.Errorf("hint de visual ausente: %v", cfg.HintBarLines())
+		t.Errorf("visual hint missing: %v", cfg.HintBarLines())
 	}
 
 	path := write(t, `
@@ -518,7 +518,7 @@ func TestKeyByActionInvertsTheMap(t *testing.T) {
 func TestKeyForAndCmdArgsFallsOnTheDefault(t *testing.T) {
 	cfg := Defaults()
 	if got := cfg.KeyFor("invented_action"); got != "" {
-		t.Errorf("KeyFor(inventada) = %q, want empty (there is no default for it)", got)
+		t.Errorf("KeyFor(invented) = %q, want empty (there is no default for it)", got)
 	}
 	if got := cfg.CmdArgs("invented_action"); len(got) != 0 {
 		t.Errorf("CmdArgs(inventada) = %q, want an empty slice", got)

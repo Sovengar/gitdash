@@ -265,7 +265,7 @@ func TestBuildCreateArgvGlabJumpsTheConfirmation(t *testing.T) {
 
 // The test is end-to-end on purpose: it passes the argv through a real process and reads what the kernel delivered, instead of checking that a string looks right in a diff; a title with quotes or $(...) that got split would be an injection into the CLI.
 func TestBuildCreateArgvAValueIsAOnlyElement(t *testing.T) {
-	nastyTitle := "fix el \"pull\" & $(whoami) `id` ; rm -rf / | tee $(pwd) && echo \"end\""
+	nastyTitle := "fix the \"pull\" & $(whoami) `id` ; rm -rf / | tee $(pwd) && echo \"end\""
 	nastyBody := "line 1\nline 2\twith a tab, \"quotes\" and $HOME"
 
 	for _, tc := range []struct {

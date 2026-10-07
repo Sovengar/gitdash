@@ -125,7 +125,7 @@ func TestWorktreeNamespaceCoexists(t *testing.T) {
 	combined := map[string]bool{
 		"backend":                     true,  // collapsed group
 		WorktreePrefix + "/tmp/multi": true,  // expanded worktree
-		WorktreePrefix + "/tmp/otro":  false, // expanded and then folded
+		WorktreePrefix + "/tmp/other": false, // expanded and then folded
 	}
 	if err := store.SaveCollapsed(combined); err != nil {
 		t.Fatal(err)
@@ -137,8 +137,8 @@ func TestWorktreeNamespaceCoexists(t *testing.T) {
 	if !loaded[WorktreePrefix+"/tmp/multi"] {
 		t.Error("expansion key lost")
 	}
-	if loaded[WorktreePrefix+"/tmp/otro"] {
-		t.Error("polaridad invertida mal persistida")
+	if loaded[WorktreePrefix+"/tmp/other"] {
+		t.Error("inverted polarity persisted wrong")
 	}
 	if _, ok := loaded["/tmp/multi"]; ok {
 		t.Error("the key was stored without namespace")

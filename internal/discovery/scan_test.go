@@ -378,11 +378,11 @@ func TestScanJumpsDirectoryUnreadable(t *testing.T) {
 	testutil.Init(t, good)
 	testutil.Marker(t, good, "", "", "", false)
 
-	bloqueado := filepath.Join(root, "no-access")
-	if err := os.MkdirAll(bloqueado, 0o000); err != nil {
+	blocked := filepath.Join(root, "no-access")
+	if err := os.MkdirAll(blocked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(bloqueado, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
 	projects, err := Scan(cfgRoots(root))
 	if len(projects) != 1 || projects[0].Path != good {
@@ -455,7 +455,7 @@ func TestScanWithCwdDeletedReportsTheRoot(t *testing.T) {
 		t.Fatalf("Scan with the cwd deleted = nil, want an error (0 projects and no notice looks like an empty root): %+v", projects)
 	}
 	if len(projects) != 0 {
-		t.Errorf("projects = %+v, want ninguno", projects)
+		t.Errorf("projects = %+v, want none", projects)
 	}
 	if !strings.Contains(err.Error(), ".") {
 		t.Errorf("error = %q, want it to name the root it could not resolve", err)

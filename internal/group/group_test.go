@@ -46,9 +46,9 @@ func TestArrangeNestedBlocks(t *testing.T) {
 
 func TestArrangePrimaryPosition(t *testing.T) {
 	in := []Entry{
-		entry("/x", "otros", ""),
+		entry("/x", "others", ""),
 		entry("/y", "vsocial", "backend"),
-		entry("/z", "otros", ""),
+		entry("/z", "others", ""),
 	}
 	got := Arrange(in)
 	want := []string{"/x", "/z", "/y"}
@@ -96,7 +96,7 @@ func TestArrangeFlat(t *testing.T) {
 	}
 	for i := range got {
 		if IsPrimaryHeader(got, i) || IsSecondaryHeader(got, i) {
-			t.Errorf("flat: header en %d", i)
+			t.Errorf("flat: header at %d", i)
 		}
 	}
 }
@@ -117,7 +117,7 @@ func TestIsPrimaryHeader(t *testing.T) {
 		entry("/a", "vsocial", "backend"),
 		entry("/c", "vsocial", "backend"),
 		entry("/d", "vsocial", "frontend"),
-		entry("/e", "otros", ""),
+		entry("/e", "others", ""),
 	})
 	want := []bool{true, false, false, true}
 	for i, w := range want {
@@ -132,7 +132,7 @@ func TestIsSecondaryHeader(t *testing.T) {
 		entry("/a", "vsocial", "backend"),
 		entry("/c", "vsocial", "backend"),
 		entry("/d", "vsocial", "frontend"),
-		entry("/e", "otros", ""), // primary with no secondary: never a level-2 header
+		entry("/e", "others", ""), // primary with no secondary: never a level-2 header
 	})
 	want := []bool{true, false, true, false}
 	for i, w := range want {

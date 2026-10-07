@@ -979,10 +979,10 @@ func TestPROverlayTheMinimumOfHeightNotIsAFloorOfParty(t *testing.T) {
 
 // The minimums are tested against the pieces they are made of, because that is the contract the comments write: a test comparing against the constant itself does not pin it (if prMinBodyLines became +3 the test would move with it and the mutant would survive).
 func TestPROverlayTheBudgetIsTheOneTheCommentStates(t *testing.T) {
-	const camposYRótulos = 6
-	if prFixedLines != camposYRótulos {
+	const fieldsAndLabels = 6
+	if prFixedLines != fieldsAndLabels {
 		t.Errorf("prFixedLines = %d, want %d (4 fields + notice + body label)",
-			prFixedLines, camposYRótulos)
+			prFixedLines, fieldsAndLabels)
 	}
 	if prMinBodyLines() != prFixedLines+2 {
 		t.Errorf("prMinBodyLines() = %d, want %d (the %d fixed + 2 of body)",

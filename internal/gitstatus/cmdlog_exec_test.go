@@ -122,7 +122,7 @@ func TestCollectRecordsTheReadsAsRead(t *testing.T) {
 	}
 	for _, e := range entries {
 		if e.Outcome != "" {
-			t.Errorf("Outcome = %q en la lectura %q, want \"\"", e.Outcome, e.Command())
+			t.Errorf("Outcome = %q in read %q, want \"\"", e.Outcome, e.Command())
 		}
 	}
 	var sawStatus bool

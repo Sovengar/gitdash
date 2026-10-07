@@ -70,7 +70,7 @@ func TestUpDown(t *testing.T) {
 	}{
 		{"diverged", snapDiverged(2, 3), "↑2↓3"},
 		{"no-up", snapNoUpstream(), "no-up"},
-		{"en sync", snapClean(), ""},
+		{"in sync", snapClean(), ""},
 		{"solo ahead", snapAhead(1), "↑1"},
 		{"solo behind", snapBehind(4), "↓4"},
 	}

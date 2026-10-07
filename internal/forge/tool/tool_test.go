@@ -184,13 +184,13 @@ func TestRunWithBinaryNonexistent(t *testing.T) {
 
 func TestExitCode(t *testing.T) {
 	if got := ExitCode(nil); got != 0 {
-		t.Errorf("ExitCode(nil) = %d, quiero 0", got)
+		t.Errorf("ExitCode(nil) = %d, want 0", got)
 	}
-	if got := ExitCode(errors.New("otro")); got != 0 {
-		t.Errorf("ExitCode(otro) = %d, quiero 0", got)
+	if got := ExitCode(errors.New("other")); got != 0 {
+		t.Errorf("ExitCode(other) = %d, want 0", got)
 	}
 	if got := ExitCode(&Error{ExitCode: 42}); got != 42 {
-		t.Errorf("ExitCode(*Error) = %d, quiero 42", got)
+		t.Errorf("ExitCode(*Error) = %d, want 42", got)
 	}
 	if got := ExitCode(errWrap{&Error{ExitCode: 9}}); got != 9 {
 		t.Errorf("ExitCode(envuelto) = %d, quiero 9", got)

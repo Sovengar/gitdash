@@ -19,7 +19,7 @@ func git(t TB, dir string, args ...string) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v en %s: %v\n%s", args, dir, err, out)
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 }
 
@@ -146,7 +146,7 @@ func WriteUntracked(t TB, dir string, files map[string]string) {
 
 func BreakGit(t TB, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("basura"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("garbage"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

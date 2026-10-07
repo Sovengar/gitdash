@@ -422,7 +422,7 @@ func TestWorktreeActionsPathS3324(t *testing.T) {
 			m, _ = press(m, k)
 		}
 		if m.running["/tmp/wt-a"] != tc.kind {
-			t.Errorf("%v en running = %q, want %q", tc.keys, m.running["/tmp/wt-a"], tc.kind)
+			t.Errorf("%v in running = %q, want %q", tc.keys, m.running["/tmp/wt-a"], tc.kind)
 		}
 	}
 }
@@ -547,7 +547,7 @@ func TestWorktreeDetailDiscovered(t *testing.T) {
 	e, _ := m.selectedEntry()
 	out := stripANSI(m.renderWorktreeDetail(e, m.height))
 	if !strings.Contains(out, "wt-marcado") || !strings.Contains(out, "state") {
-		t.Errorf("detalle de worktree descubierto incompleto:\n%s", out)
+		t.Errorf("detail of worktree with incomplete discovery:\n%s", out)
 	}
 	if !strings.Contains(out, "2 ?1") {
 		t.Errorf("the detail does not reflect the live snapshot:\n%s", out)
@@ -761,7 +761,7 @@ func TestWorktreeKeybindingS3712(t *testing.T) {
 func TestWorktreeHint(t *testing.T) {
 	hints := strings.Join(config.Defaults().HintBarLines(), "\n")
 	if !strings.Contains(hints, "enter fold") {
-		t.Errorf("hint de plegado ausente: %v", hints)
+		t.Errorf("fold hint missing: %v", hints)
 	}
 	if strings.Contains(hints, "detail") || strings.Contains(hints, "expand") {
 		t.Errorf("hints of what no longer exists are left: %v", hints)
@@ -855,7 +855,7 @@ func TestWorktreeExpandRealFixture(t *testing.T) {
 	wtFeat := filepath.Join(t.TempDir(), "wt-feat")
 	testutil.MakeWorktree(t, dir, wtFeat, "feat/x")
 	wtDetached := filepath.Join(t.TempDir(), "wt-detached")
-	testutil.MakeWorktree(t, dir, wtDetached, "otra")
+	testutil.MakeWorktree(t, dir, wtDetached, "other")
 	testutil.Detach(t, wtDetached)
 
 	snap := gitstatus.Collect(t.Context(), dir, "main", false)

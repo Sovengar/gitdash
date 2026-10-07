@@ -44,7 +44,7 @@ func TestForgeDefaults(t *testing.T) {
 		t.Error("gitlab.com entered ForgePrefixes with the host root")
 	}
 	if got := cfg.Forges["gitlab"].ClonePrefix(); got != "" {
-		t.Errorf("ClonePrefix() de gitlab.com = %q, want \"\"", got)
+		t.Errorf("ClonePrefix() for gitlab.com = %q, want \"\"", got)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestForgeSelfManagedInSubfolder(t *testing.T) {
 		t.Errorf("ForgePrefixes() = %v, want only the host with a prefix", prefixes)
 	}
 	if got := prefixes["umane.emeal.nttdata.com"]; got != "git" {
-		t.Errorf("prefix = %q, want \"git\" (derivado de /git/api/v4/)", got)
+		t.Errorf("prefix = %q, want \"git\" (derived from /git/api/v4/)", got)
 	}
 }
 
@@ -127,7 +127,7 @@ func TestForgeCloneBaseIsOverrideOfThePrefix(t *testing.T) {
 		{
 			name: "clone_base wins over an api_base with another subfolder",
 			toml: "[forge.gitlab]\nhost = \"a.example.com\"\napi_base = \"/git/api/v4/\"\nclone_base = \"otro\"\n",
-			want: "otro",
+			want: "other",
 		},
 		{
 			name: "clone_base with slashes is normalised",
@@ -257,7 +257,7 @@ func TestDefaultKeybindingsPR(t *testing.T) {
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
 	if !strings.Contains(hints, "O open PR") {
-		t.Errorf("hint de PR ausente: %v", cfg.HintBarLines())
+		t.Errorf("PR hint missing: %v", cfg.HintBarLines())
 	}
 	if strings.Contains(hints, "new PR") {
 		t.Errorf("the hints should not say \"new PR\": %v", cfg.HintBarLines())

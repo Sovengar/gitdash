@@ -56,8 +56,8 @@ func TestCommitFilesFailsWithPathImpossible(t *testing.T) {
 	if tb3.Failed() {
 		t.Fatalf("the base repo could not be created: %v", tb3.Failures)
 	}
-	destino := filepath.Join(dir, "sub", "file.txt")
-	if err := os.MkdirAll(destino, 0o755); err != nil {
+	destination := filepath.Join(dir, "sub", "file.txt")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	tb4 := &MockTB{Temp: tptr(t)}
@@ -116,7 +116,7 @@ func TestMockTBRespectsTheContract(t *testing.T) {
 		t.Error("a freshly created double has failures, want none")
 	}
 
-	empty.Fatalf("failure %d de %d", 3, 7)
+	empty.Fatalf("failure %d of %d", 3, 7)
 	if len(empty.Failures) != 1 {
 		t.Fatalf("fallos = %d, want 1", len(empty.Failures))
 	}
