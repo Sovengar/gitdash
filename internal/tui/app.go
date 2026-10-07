@@ -455,6 +455,10 @@ func (m *Model) startSyncCmd(path string) tea.Cmd {
 	if syncBranch == "" {
 		return m.toastCmd(toastWarning, "no sync branch configured")
 	}
+	// The marker can declare the ref and it becomes the pull's tail argv, where a leading dash is parsed by git as an option (`git pull` re-spawns fetch, so `--` does not neutralise it); refuse it before anything runs.
+	if strings.HasPrefix(syncBranch, "-") {
+		return m.toastCmd(toastWarning, fmt.Sprintf("invalid sync branch %q", syncBranch))
+	}
 	// On the sync branch there is no other branch to catch up to; pulling it onto its own remote-tracking is not what `s` means, so it is refused before anything runs.
 	if cur := m.states[path].Status.Branch; cur == syncBranch {
 		return m.toastCmd(toastInfo, fmt.Sprintf("%s is the sync branch — nothing to sync", syncBranch))

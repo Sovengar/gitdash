@@ -47,8 +47,8 @@ resolved sync branch. Confirmed decisions:
    outcome is appended.
 7. **A finished sync clears any pre-existing card action block for that repo**, on
    success and on failure.
-8. **`l` keeps the full audit**: the argv and output remain visible in the command
-   log panel.
+8. **`l` keeps the audit**: the argv and the classified result remain visible in the
+   command log panel.
 
 Mechanics that follow the existing patterns: `s` executes directly (no selector,
 unlike `p`); the running-lock is respected; `IsPullKind`'s rebase/mid-rebase

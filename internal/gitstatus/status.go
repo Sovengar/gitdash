@@ -204,9 +204,12 @@ func RemoveWorktree(ctx context.Context, repoDir, wtPath string, withForce bool)
 	return runGitCombined(ctx, repoDir, cmdlog.ClassAction, RemoveWorktreeArgv(wtPath, withForce)...)
 }
 
-// SyncArgv is the single source of the sync argv: the base comes from `commands.sync` and the ref is appended from the repo's resolved sync branch. The base is copied so a shared default is never mutated, and the remote is explicit because `git pull <branch>` without one treats the branch as a remote.
+// SyncArgv is the single source of the sync argv: the base comes from `commands.sync`
+// and the ref from the repo's resolved sync branch.
+// The base is copied so a shared default is never mutated, and the remote is explicit
+// because `git pull <branch>` without one treats the branch as a remote.
 func SyncArgv(base []string, remote, sync string) []string {
-	args := append(make([]string, 0, len(base)+2), base...)
+	args := append(make([]string, 0, len(base)), base...)
 	return append(args, remote, sync)
 }
 

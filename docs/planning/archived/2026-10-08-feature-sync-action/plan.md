@@ -19,7 +19,7 @@ a layout-ownership decision of a different weight).
 `git fetch origin`, then the configured `[commands] sync` base with `origin <resolved
 sync>` appended, refused when the snapshot says the branch already IS the sync branch,
 reported as a toast carrying the classified outcome, never as a card action block,
-while `l` keeps the full argv+output audit. Documented in README and AGENTS.md; gates
+while `l` keeps the argv and classified result. Documented in README and AGENTS.md; gates
 green; the branch ready to merge through the usual PR path.
 
 ## Approach

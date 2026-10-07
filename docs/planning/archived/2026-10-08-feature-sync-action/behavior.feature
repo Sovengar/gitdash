@@ -8,8 +8,8 @@
 # repo's resolved sync branch appended. The resolved branch is the marker's
 # `sync_branch` over the global default — NOT the SYNC column's legacy-`master`
 # fallback probe (that probe is display-only). The result reports as a toast; the
-# preview card's action block is unused and cleared; `l` keeps the full argv+output
-# audit. Nothing is ever pushed.
+# preview card's action block is unused and cleared; `l` keeps the argv and the
+# classified result. Nothing is ever pushed.
 
 Feature: `s sync` updates the current branch with the repo's sync branch
 
@@ -35,7 +35,7 @@ Feature: `s sync` updates the current branch with the repo's sync branch
     Given the repo's card is showing a previous action block
     When a sync of that repo finishes
     Then the card's action block for that repo is gone, on success and on failure
-    And the command log keeps the audit: one "sync" intent plus both execs, in order, with their argv and output
+    And the command log keeps the audit: one "sync" intent plus both execs, in order, with their argv and classified result
 
   Scenario: An unclassifiable success has no dangling separator
     Given the pull's output matches no known outcome
@@ -119,6 +119,7 @@ Feature: `s sync` updates the current branch with the repo's sync branch
     When the user presses "s"
     Then the sync runs in the worktree directory
     And the sync branch is the global default: the parent repo's marker override is not consulted
-    And the same-branch refusal cannot fire, because a worktree sub-row has no snapshot of its own
+    And when the worktree path is not itself a discovered project the refusal cannot fire, because that sub-row has no snapshot of its own
+    # a worktree path that IS discovered (its own marker) has its own snapshot and can refuse
     # current prototype behavior; flagged at the behavior checkpoint as the one
     # point to accept consciously or change in a follow-up
