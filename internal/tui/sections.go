@@ -131,7 +131,7 @@ func (m Model) activityIndicator() string {
 func (m Model) runningActions() []string {
 	paths := make([]string, 0, len(m.running))
 	for path, kind := range m.running {
-		if IsPullKind(kind) || kind == "push" || kind == "worktree_remove" {
+		if isRebaseKind(kind) || kind == "push" || kind == "worktree_remove" {
 			paths = append(paths, path)
 		}
 	}

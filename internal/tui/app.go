@@ -48,11 +48,12 @@ type fetchStateMsg struct {
 
 type fetchDoneMsg struct{ ok, failed int }
 
-// cmd is the resolved argv (the pull policy can come from the gitconfig, so the UI cannot assume flags) and rebaseInProgress means the pull --rebase left the repo mid-rebase instead of failing clean.
+// cmd is the resolved argv (the pull policy can come from the gitconfig, so the UI cannot assume flags), rebaseInProgress means the pull --rebase left the repo mid-rebase instead of failing clean, and outcome is the classified verdict of the last command (what git really did), computed where the argv still is.
 type actionMsg struct {
 	path, kind, cmd  string
 	output           string
 	err              string
+	outcome          string
 	rebaseInProgress bool
 }
 
@@ -445,26 +446,68 @@ func acquireSlot(ctx context.Context, sem chan struct{}) bool {
 }
 
 func (m *Model) startActionCmd(path, kind string) tea.Cmd {
+	return m.startActionArgs(path, kind, [][]string{m.cfg.CmdArgs(kind)})
+}
+
+// Sync runs two commands in order (an explicit fetch, then the configured pull) so the SYNC comparison it reconciles against is fresh; the ref comes from the repo, not from a static command string.
+func (m *Model) startSyncCmd(path string) tea.Cmd {
+	syncBranch, _ := m.syncOf(path)
+	if syncBranch == "" {
+		return m.toastCmd(toastWarning, "no sync branch configured")
+	}
+	// On the sync branch there is no other branch to catch up to; pulling it onto its own remote-tracking is not what `s` means, so it is refused before anything runs.
+	if cur := m.states[path].Status.Branch; cur == syncBranch {
+		return m.toastCmd(toastInfo, fmt.Sprintf("%s is the sync branch — nothing to sync", syncBranch))
+	}
+	base := m.cfg.CmdArgs("sync")
+	if len(base) == 0 {
+		return m.toastCmd(toastWarning, "empty sync command")
+	}
+	return m.startActionArgs(path, "sync", [][]string{
+		{"fetch", "origin"},
+		gitstatus.SyncArgv(base, "origin", syncBranch),
+	})
+}
+
+// cmds is a sequence so sync's fetch+pull share this one executor instead of duplicating the lock, the log and the recollect; any failure short-circuits, so a failed fetch never reaches the pull.
+func (m *Model) startActionArgs(path, kind string, cmds [][]string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
 	m.running[path] = kind
 	appCtx := m.ctx
 	events := m.events
-	args := m.cfg.CmdArgs(kind)
 	// The resolved argv is composed on the main goroutine (reading cfg) so the message is deterministic with respect to the key that triggered it.
-	resolved := "git " + strings.Join(args, " ")
+	parts := make([]string, 0, len(cmds))
+	for _, argv := range cmds {
+		parts = append(parts, "git "+strings.Join(argv, " "))
+	}
+	resolved := strings.Join(parts, " && ")
 	go func() {
 		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
 		defer cancel()
-		out, err := gitstatus.Run(ctx, path, args...)
+		var out string
+		var err error
+		var last []string
+		for _, argv := range cmds {
+			last = argv
+			out, err = gitstatus.Run(ctx, path, argv...)
+			if err != nil {
+				break
+			}
+		}
 		errStr := ""
 		if err != nil {
 			// The process error is always "exit status 1"; the real reason is in git's combined output.
 			errStr = gitstatus.FailureReason(out, err)
 		}
-		msg := actionMsg{path: path, kind: kind, cmd: resolved, output: out, err: errStr}
-		if errStr != "" && IsPullKind(kind) {
+		// Only a success reports its outcome: a failure already carries git's reason and the mid-rebase warning.
+		outcome := ""
+		if err == nil {
+			outcome = gitstatus.Classify(last, out, 0)
+		}
+		msg := actionMsg{path: path, kind: kind, cmd: resolved, output: out, err: errStr, outcome: outcome}
+		if errStr != "" && isRebaseKind(kind) {
 			msg.rebaseInProgress = gitstatus.RebaseInProgress(ctx, path)
 		}
 		sendEvent(appCtx, events, msg)
@@ -475,6 +518,9 @@ func (m *Model) startActionCmd(path, kind string) tea.Cmd {
 	}()
 	return nil
 }
+
+// sync rebases with autostash exactly like the git pull variants, so it shares the mid-rebase detection and the conflict warning; it is not in PullKinds because that feeds the selector, which sync has no business being in.
+func isRebaseKind(kind string) bool { return IsPullKind(kind) || kind == "sync" }
 
 func (m *Model) busyActionCmd(path string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {

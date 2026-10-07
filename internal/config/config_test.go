@@ -597,3 +597,17 @@ func TestHintActionsAllHaveLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultKeybindingsSync(t *testing.T) {
+	cfg := Defaults()
+	if got := cfg.KeyFor("sync"); got != "s" {
+		t.Errorf("default sync = %q, want s", got)
+	}
+	if label, ok := hintLabels["sync"]; !ok || label != "sync" {
+		t.Errorf("hintLabels[sync] = %q (%v), want \"sync\"", label, ok)
+	}
+	hints := strings.Join(cfg.HintBarLines(), "\n")
+	if !strings.Contains(hints, "s sync") {
+		t.Errorf("sync hint missing: %v", cfg.HintBarLines())
+	}
+}

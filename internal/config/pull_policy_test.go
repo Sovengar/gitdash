@@ -47,15 +47,27 @@ func TestVariantsPullWithFlagsOwn(t *testing.T) {
 	}
 }
 
+// `update` (u) stays removed; `sync` (s) came back with sync-branch semantics. Its `commands` base is only the policy — the builder appends `origin <resolved sync>`, so the entry is configurable without carrying the ref.
 func TestActionsRemoved(t *testing.T) {
-	kb := DefaultKeybindings()
-	for _, gone := range []string{"sync", "update"} {
-		if _, ok := kb[gone]; ok {
-			t.Errorf("keybindings[%s] still present", gone)
-		}
+	if _, ok := DefaultKeybindings()["update"]; ok {
+		t.Error("keybindings[update] still present")
 	}
-	if _, ok := DefaultCommands()["sync"]; ok {
-		t.Error("commands.sync still present")
+	if _, ok := DefaultKeybindings()["sync"]; !ok {
+		t.Error("keybindings[sync] is missing: sync came back")
+	}
+	if got := DefaultCommands()["sync"]; got != "pull --rebase --autostash" {
+		t.Errorf("commands.sync = %q, want the default %q", got, "pull --rebase --autostash")
+	}
+}
+
+func TestCmdArgsSyncIsConfigurable(t *testing.T) {
+	if got := strings.Join(Defaults().CmdArgs("sync"), " "); got != "pull --rebase --autostash" {
+		t.Errorf("CmdArgs(sync) = %q, want the default", got)
+	}
+	cfg := Defaults()
+	cfg.Commands["sync"] = "pull --rebase"
+	if got := strings.Join(cfg.CmdArgs("sync"), " "); got != "pull --rebase" {
+		t.Errorf("CmdArgs(sync) with an override = %q, want the override", got)
 	}
 }
 

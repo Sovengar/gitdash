@@ -77,8 +77,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionMsg:
 		delete(m.running, msg.path)
-		m.lastAction[msg.path] = actionResult{kind: msg.kind, cmd: msg.cmd, output: msg.output, err: msg.err}
+		// sync's git output (rebase/applied/dropping lines) is transient and the argv is already audited in the `l` panel, so it reports through its toast only and drops any action block the card was holding for this repo.
+		if toastOnlyActions[msg.kind] {
+			delete(m.lastAction, msg.path)
+		} else {
+			m.lastAction[msg.path] = actionResult{kind: msg.kind, cmd: msg.cmd, output: msg.output, err: msg.err}
+		}
 		note := actionNote(msg.kind, m.nameOf(msg.path), msg.cmd, msg.output, msg.err, msg.rebaseInProgress)
+		// The toast-only actions drop the argv, so on success the classified verdict is what tells the user what the sync actually did.
+		if msg.err == "" && toastOnlyActions[msg.kind] && msg.outcome != "" {
+			note += " — " + msg.outcome
+		}
 		if msg.err != "" {
 			m.toasts.showError(note)
 		} else {
@@ -192,6 +201,10 @@ func (m Model) withPump(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 
 // On failure it adds git's real reason and an actionable hint, and rebaseInProgress wins over the others: a clashing pull --rebase left half-rewritten history, and saying only "failed" invites a retry that is worse than nothing.
 func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) string {
+	// The toast-only actions keep their verdict short: the argv stays in the `l` panel, so repeating it in the toast only adds noise.
+	if toastOnlyActions[kind] {
+		cmd = ""
+	}
 	if errStr == "" {
 		if cmd == "" {
 			return fmt.Sprintf("%s ok %s", kind, name)
@@ -203,7 +216,7 @@ func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) s
 		note += " — " + cmd
 	}
 	switch {
-	case rebaseInProgress && IsPullKind(kind):
+	case rebaseInProgress && isRebaseKind(kind):
 		note += " — mid-rebase: resolve the conflicts and `git rebase --continue` (or `--abort`)"
 	case IsPullKind(kind):
 		switch {
@@ -453,6 +466,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pr":
 		// Like `pull` and `visual` it does not execute: the key only collects the parameters and the form's submit launches gh/glab.
 		return m.openPR()
+	case "sync":
+		// Sync executes directly (no selector): it always reconciles with the repo's sync branch, unlike `pull`, whose variant is a choice.
+		if r, ok := m.selected(); ok && !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
+		} else if ok {
+			return m, m.startSyncCmd(r.project.Path)
+		}
 	case "push":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
@@ -524,6 +544,7 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 // Recording "I pressed enter to fold" says nothing about which commands ran, so pure view actions (filter, search, fold, the log panel, quit) leave no entry.
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true, "push": true,
+	"sync":    true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
 	"command": true, "worktree_remove": true, "visual": true, "pr": true,
 }
@@ -533,8 +554,14 @@ func launchesCommand(action string) bool { return commandActions[action] }
 // Pressing `p` on a group header is not a command anybody would want audited, so actions needing a row leave no intent without one.
 var rowActions = map[string]bool{
 	"fetch": true, "pull": true, "push": true, "lazygit": true,
+	"sync":   true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
 	"visual": true, "pr": true,
+}
+
+// Outcomes that belong in a toast instead of the card's last-action block: sync prints git's rebase/apply/drop lines, which the transient toast summarizes while `l` keeps the whole audit.
+var toastOnlyActions = map[string]bool{
+	"sync": true,
 }
 
 func actionNeedsRow(action string) bool { return rowActions[action] }
