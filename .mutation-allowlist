@@ -240,6 +240,17 @@ CONDITIONALS_BOUNDARY internal/forge/parse.go:28
 #   the "" key, the invariant would break and the NOT COVERED would give it away
 #   the moment this entry disappeared.
 
+# --- internal/sim/keep.go ------------------------------------------------
+CONDITIONALS_BOUNDARY internal/sim/keep.go:50
+#   The Prune comparator: `renders[i].seq > renders[j].seq`. With `>=` the only
+#   difference is among EQUAL sequences, and there the order is unobservable twice
+#   over: Keep stamps every render with time.Now().UnixNano(), so two cache files
+#   cannot share a seq in the flow that produces them, and among equal keys
+#   sort.Slice's order is unspecified either way (a cut through a tie block deletes
+#   interchangeable files). Same demonstration as table.go's two comparator
+#   boundaries: a total-order comparison always has the ==-tie mutant, and no test
+#   can ever tell the two apart.
+
 # ---------------------------------------------------------------------------
 # Real backlog, still untested: none. The 215 NOT COVERED mutants of the first run
 # were almost all the copy of the repo inside .worktrees/ (Worktrunk), which

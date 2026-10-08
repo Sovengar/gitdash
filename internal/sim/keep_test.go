@@ -112,6 +112,8 @@ func TestPruneKeepsTheNewest(t *testing.T) {
 	writeImage(t, dir, "demo-100.jpg")
 	writeImage(t, dir, "demo-200.jpg")
 	writeImage(t, dir, "demo-300.jpg")
+	// A leading dash does not exempt the name: the sequence is read from the LAST one, so "-5.jpg" is an old render and goes.
+	writeImage(t, dir, "-5.jpg")
 	if err := os.MkdirAll(filepath.Join(dir, subtree), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +129,7 @@ func TestPruneKeepsTheNewest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "demo-300.jpg")); err != nil {
 		t.Errorf("the newest render was deleted: %v", err)
 	}
-	for _, gone := range []string{"demo-100.jpg", "demo-200.jpg"} {
+	for _, gone := range []string{"demo-100.jpg", "demo-200.jpg", "-5.jpg"} {
 		if _, err := os.Stat(filepath.Join(dir, gone)); !os.IsNotExist(err) {
 			t.Errorf("%s survived the prune: err=%v", gone, err)
 		}

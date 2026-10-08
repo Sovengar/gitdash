@@ -91,6 +91,24 @@ func TestRenderTimeoutKillsTheHang(t *testing.T) {
 	}
 }
 
+// The deadline is 60 SECONDS written as a product, so the ARITHMETIC_BASE mutant makes it 60ms and every real render dies; the assertion is in units, because comparing against DefaultTimeout itself cannot fail (same error on both sides).
+func TestDefaultTimeoutIsSixtySeconds(t *testing.T) {
+	if DefaultTimeout() != 60*time.Second {
+		t.Errorf("DefaultTimeout() = %v, want 60s (a %v kills any real git-sim render)",
+			DefaultTimeout(), DefaultTimeout())
+	}
+	if New().Timeout != DefaultTimeout() {
+		t.Errorf("New().Timeout = %v, want the default %v", New().Timeout, DefaultTimeout())
+	}
+}
+
+// Same reasoning as TestDefaultTimeoutIsSixtySeconds: the grace is a product too, and its mutant (a grace of ~0 makes Render kill the wait of a well-behaved child, a huge one delays every hung render) is only observable as its own value.
+func TestPipeCloseGraceIs250Millis(t *testing.T) {
+	if pipeCloseGrace() != 250*time.Millisecond {
+		t.Errorf("pipeCloseGrace() = %v, want 250ms", pipeCloseGrace())
+	}
+}
+
 func TestAvailableFollowsThePATH(t *testing.T) {
 	if !Available("git") {
 		t.Error("git is not Available: the fixtures need it, so the PATH is broken")
