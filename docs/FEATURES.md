@@ -122,8 +122,9 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 ## Commits panel
 
 - **Top-right band** — shows the cursor's row's commits (current branch + sync branch as labelled groups); same height as the table.
-- **Up to 15 commits per side** — both lists are fetched at 15 and the panel paints only what fits in the shared height; the divergence counts are not capped.
-- **Colours** — commits only the sync branch has paint blue (↓) and only the current branch green (↑), the table's palette; shared commits stay neutral.
+- **Up to 15 commits per side** — both lists are fetched at 15 and the panel paints only what fits in the shared height.
+- **Colours** — commits only the sync branch has paint blue (↓) and only the current branch green (↑), the table's palette; shared commits stay neutral. Decided per commit (same sha in both), so merges cannot mislead it.
+- **Untrusted subjects** — the subject text is sanitised before painting (control/escape sequences stripped), like the command log.
 - **Additive on width** — the lists column's share of the card plus the files box's borders, capped so the table keeps its 5 columns; dropped entirely below the boundary (the table takes the full width and the detail/files band keeps its share).
 
 ## Filter & dirty toggle
