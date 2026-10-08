@@ -12,8 +12,8 @@ import (
 
 const detailHeadLines = 6
 
-// The worktrees list lives in the card's right column (24 cells at its floor): the branch takes a
-// fixed slice and the relative path gets whatever is left.
+// The worktrees list lives in the card's right column: the branch takes a fixed slice and the
+// relative path gets whatever is left.
 const wtBranchWidth = 10
 
 const minListBlockLines = 2
@@ -55,31 +55,28 @@ func (m *Model) cardTail(body string, rows int) string {
 // the layout cannot disagree on where the two-column card begins.
 func (m *Model) renderDetail(r row, rows, width int, split bool) string {
 	rows = max(1, rows)
+	tail := m.detailTail(r, rows, width)
 	var body string
 	if split {
 		left, right := cardColumns(width - 2)
 		rightCol := m.detailRightColumn(r, rows, right)
-		// With nothing to separate (no worktrees, no files) the separator is not painted and the
-		// fields take the whole card: a lone gray line is noise the user reads as a bug.
 		if rightCol == "" {
 			body = m.detailFields(r, width-2)
 		} else {
-			body = joinCardColumns(m.detailFields(r, left), rightCol, left, right)
+			// The separator runs to the card's bottom (or to the full-width tail), not to the last list item.
+			body = joinCardColumns(m.detailFields(r, left), rightCol, left, right, rows-strings.Count(tail, "\n"))
 		}
 	} else {
 		body = m.detailCollapsed(r, m.detailFields(r, cardLeftWidth), rows)
 	}
-	// The diagnostics and the action/command tails span the full card width: they carry argv and
-	// output, which the fields column would clip to nothing useful.
-	if tail := m.detailTail(r, rows, width); tail != "" {
+	if tail != "" {
 		body += "\n" + tail
 	}
 	// Drop the builders' trailing newline so the box measures exactly the layout's height.
 	return m.cardTail(strings.TrimRight(body, "\n"), rows)
 }
 
-// Fields first (the 6-line head). `left` is either cardLeftWidth (collapsed card) or a split
-// width that never drops below it, so the clip needs no floor.
+// Fields first (the 6-line head). `left` never drops below cardLeftWidth, so the clip needs no floor.
 func (m *Model) detailFields(r row, left int) string {
 	var b strings.Builder
 	p := r.project
@@ -131,8 +128,7 @@ func (m *Model) detailFields(r row, left int) string {
 }
 
 // The right column owns the two lists with their own budget: an oversized worktrees list does not
-// starve the files list of its own "… N more" warning. `right` comes from cardColumns, so its
-// floor is cardRightWidth.
+// starve the files list of its own "… N more" warning.
 func (m *Model) detailRightColumn(r row, rows, right int) string {
 	var b strings.Builder
 	key := styleDetailKey.Render
@@ -262,12 +258,12 @@ func (m *Model) detailCollapsed(r row, left string, rows int) string {
 	return b.String()
 }
 
-// Rune-clip then pad each column to its exact width (ANSI-aware) so the separator lands on the same
-// column in every row and the joined card keeps the terminal's inner width.
-func joinCardColumns(left, right string, leftW, rightW int) string {
+// Rune-clip then pad each line to its column width (ANSI-aware) so the separator never shifts;
+// minLines stretches the join to the card's bottom when the columns are shorter.
+func joinCardColumns(left, right string, leftW, rightW, minLines int) string {
 	ll := strings.Split(strings.TrimRight(left, "\n"), "\n")
 	rl := strings.Split(strings.TrimRight(right, "\n"), "\n")
-	n := max(len(ll), len(rl))
+	n := max(max(len(ll), len(rl)), minLines)
 	ll = rellenaHasta(ll, n)
 	rl = rellenaHasta(rl, n)
 	sep := styleDim.Render("│")

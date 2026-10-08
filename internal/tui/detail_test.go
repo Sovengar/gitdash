@@ -270,7 +270,7 @@ func TestCardColumns(t *testing.T) {
 }
 
 // The separator was glued to the left while the right half of the card stayed empty: its column
-// has to move with the terminal. (The right column needs content, or there is nothing to separate.)
+// has to move with the terminal.
 func TestCardSeparatorFollowsTheWidth(t *testing.T) {
 	long := strings.Repeat("p", 100)
 	for _, c := range []struct {
@@ -314,6 +314,39 @@ func TestCardCleanRepoPaintsNoSeparator(t *testing.T) {
 	out2 := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
 	if want := truncate(over, 110); !strings.Contains(out2, want) {
 		t.Errorf("with no lists the path is not clipped at the full 110 cells (want %q):\n%s", truncate(want, 20), out2)
+	}
+}
+
+// With the right column present the separator runs down to the card's bottom, not only to the last
+// list item.
+func TestCardSeparatorReachesTheBottom(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, r := detailRowWith(t, "/tmp/api", snap)
+	m.width = 120
+	const rows = 12
+	out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
+	lines := strings.Split(out, "\n")
+	if len(lines) != rows {
+		t.Fatalf("the card paints %d lines, want %d:\n%s", len(lines), rows, out)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "│") {
+		t.Errorf("the separator stops before the bottom: %q", last)
+	}
+
+	// The full-width tail takes the last 4 lines (blank, header, 2 output): the separator must
+	// reach the tail (index 7) and the tail must stay whole at the bottom.
+	m.lastCmd["/tmp/api"] = cmdResult{command: "ls", output: "one\ntwo", exit: "0"}
+	out = stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
+	lines = strings.Split(out, "\n")
+	if len(lines) != rows {
+		t.Fatalf("with the tail the card paints %d lines, want %d:\n%s", len(lines), rows, out)
+	}
+	if !strings.Contains(lines[7], "│") {
+		t.Errorf("the separator does not reach the tail: %q", lines[7])
+	}
+	if last := lines[len(lines)-1]; last != "  two" {
+		t.Errorf("the tail lost its last line at the bottom: %q", last)
 	}
 }
 
