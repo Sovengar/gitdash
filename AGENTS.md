@@ -164,7 +164,7 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 |---|---|
 | `internal/config` | XDG TOML. `Load()` never fails: defaults + a warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. The marker's folder IS the repo (there is no search for `.git` upwards). Prunes hidden dirs + `exclude`. `MainRepo` links worktree→main repo |
-| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
+| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`), its commits (`SyncCommits`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
 | `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
 | `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
 | `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
@@ -304,18 +304,21 @@ evident:
   box crops them without warning.
 - **The card is two columns when the inner width is at least 61** (terminal width
   >= 63): `m.layout()` sets `cardSplit` and `renderDetail` consumes it, so the
-  decision has a single source. The left 36 cells are the fields
-  (`path`/`branch`/`upstream`/`state`/`sync`/`activity`); the right 24 are the
-  worktrees and files lists, each with its own budget so an oversized worktrees
-  list does not starve the files list of its `… N more`. `renderDetail` pads both
-  columns to the same height and joins them with a dim separator before the box
-  styles anything, or ANSI breaks the width. `activity` (the last-commit age) is
-  what raised the head from 5 to `detailHeadLines` = 6 lines.
+  decision has a single source. The columns are NOT fixed: `cardColumns(inner)`
+  gives the lists 2/5 of the inner width with `cardRightWidth` (24) as floor and
+  the fields the rest with `cardLeftWidth` (36) as floor. A fixed 36-cell left
+  clipped `path`/`upstream` while the unused rest of a wide card stayed empty. The
+  right column owns the worktrees and files lists, each with its own budget so an
+  oversized worktrees list does not starve the files list of its `… N more`.
+  `renderDetail` pads both columns to the same height and joins them with a dim
+  separator before the box styles anything, or ANSI breaks the width. `activity`
+  (the last-commit age) is what raised the head from 5 to `detailHeadLines` = 6
+  lines.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
 - **The diagnostics and the action/command tails span the full card width**,
   appended below the two columns: the argv and the command output need more than
-  36 cells to be readable.
+  the fields column to be readable.
 - **The path is a field, not a loose line**: `path` goes in the same key/value
   column as `branch`/`upstream`/`state`/`sync`/`activity`, and its value is dimmed
   (it is context, not state).
@@ -351,11 +354,20 @@ cursor. Decisions that are not evident:
 - **The title carries the "commits · " prefix** because the card is already
   titled with the repo/group/worktree name; without the prefix two boxes shared
   the same title.
-- **Dispatch by row kind**: repo → `Snap.Commits`; worktree subrow → its own
-  snapshot's commits when the path is discovered and live, a dim placeholder
-  otherwise (never the parent's); group header → the aggregate text shared with
-  the card (`groupSummaryText`, without `cardTail`); no row → the same empty hint
-  as the table and card.
+- **Dispatch by row kind**: repo → `Snap.Commits` and, when the repo declares a
+  DIFFERENT sync ref with commits, `Snap.SyncCommits` as a second group; worktree
+  subrow → its own snapshot's commits (and its own sync group) when the path is
+  discovered and live, a dim placeholder otherwise (never the parent's); group
+  header → the aggregate text shared with the card (`groupSummaryText`, without
+  `cardTail`); no row → the same empty hint as the table and card.
+- **Two labelled groups share the height**: `<branch> (current)` on top and
+  `<sync> (sync)` below, each with `(rows - headers)/groups` lines and at least
+  one commit, so the second group is not clipped away by the first. The sync
+  commits come from a second `git log -5` on the SAME ref the divergence counts
+  (`SyncFor`/fallback resolved, never a `git config` probe), so what is compared
+  and what is shown cannot disagree; the group is skipped when the sync IS the
+  current branch (the lists would duplicate) or when the log failed (no ref).
+  `Collect` pays that read only where a sync branch is declared.
 - **Rendered with the same `sha / age / subject` line as the old card block**,
   newest first, subject truncated to the panel's inner width (never wrapped).
 
