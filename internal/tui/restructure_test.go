@@ -554,24 +554,26 @@ func cardModel(t *testing.T) (Model, row) {
 	return m, r
 }
 
-func TestCardIsTwoColumns(t *testing.T) {
+func TestCardIsTwoBoxes(t *testing.T) {
 	m, _ := cardModel(t)
 	m = cursorOn(t, m, "/tmp/api")
 	lay := m.layout()
 	if !lay.cardSplit {
-		t.Fatalf("width 80: the card did not split: %+v", lay)
+		t.Fatalf("width 80: the band did not split: %+v", lay)
 	}
-	box := sectionContent(t, stripANSI(m.View().Content), "api")
+	out := stripANSI(m.View().Content)
+	detail := sectionContent(t, out, "api")
 	for _, field := range []string{"path", "branch", "upstream", "state", "sync", "activity"} {
-		if !strings.Contains(box, field) {
-			t.Errorf("the left column misses the field %q:\n%s", field, box)
+		if !strings.Contains(detail, field) {
+			t.Errorf("the detail box misses the field %q:\n%s", field, detail)
 		}
 	}
-	if !strings.Contains(box, "files (1)") || !strings.Contains(box, "main.go") {
-		t.Errorf("the right column misses the files list:\n%s", box)
+	if !strings.Contains(detail, "worktrees (1)") {
+		t.Errorf("the detail box misses the worktrees list:\n%s", detail)
 	}
-	if !strings.Contains(box, "worktrees (1)") {
-		t.Errorf("the right column misses the worktrees list:\n%s", box)
+	files := sectionContent(t, out, "files (1)")
+	if !strings.Contains(files, "main.go") {
+		t.Errorf("the files box misses the file list:\n%s", files)
 	}
 }
 
@@ -579,20 +581,20 @@ func TestCardCollapsesWhenNarrow(t *testing.T) {
 	m, r := cardModel(t)
 	m.width = 63
 	if !m.layout().cardSplit {
-		t.Error("width 63: the card should split")
+		t.Error("width 63: the band should split")
 	}
 	m.width = 62
 	if m.layout().cardSplit {
-		t.Error("width 62: the card should collapse")
+		t.Error("width 62: the band should collapse")
 	}
 
-	split := lineWith(m.renderDetail(r, 40, 63, true), "path")
-	if !strings.Contains(split, "│") {
-		t.Errorf("at width 63 the card is not split (no column separator): %q", split)
+	split := stripANSI(m.renderDetail(r, 40, 63, true))
+	if strings.Contains(split, "main.go") {
+		t.Errorf("at width 63 the split detail box still stacks the files:\n%s", split)
 	}
-	collapsed := lineWith(m.renderDetail(r, 40, 62, false), "path")
-	if strings.Contains(collapsed, "│") {
-		t.Errorf("at width 62 the card still shows the separator: %q", collapsed)
+	collapsed := stripANSI(m.renderDetail(r, 40, 62, false))
+	if !strings.Contains(collapsed, "files (1)") || !strings.Contains(collapsed, "worktrees (1)") {
+		t.Errorf("at width 62 the collapsed box does not stack both lists:\n%s", collapsed)
 	}
 }
 
@@ -725,7 +727,8 @@ func TestCardCollapsedStacksListsWithTheirWarnings(t *testing.T) {
 	})
 }
 
-// The right column paints a list header exactly when its budget reaches minListBlockLines.
+// The detail box paints the worktrees header exactly when its budget reaches minListBlockLines; the
+// files box paints its first line only when the budget leaves room for one item.
 func TestCardSplitListBudgetBoundary(t *testing.T) {
 	only := func(mutate func(*gitstatus.Snapshot)) (Model, row) {
 		snap := snapClean()
@@ -735,20 +738,20 @@ func TestCardSplitListBudgetBoundary(t *testing.T) {
 	mw, rw := only(func(s *gitstatus.Snapshot) {
 		s.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt", Branch: "feat", Head: "abc1234"}}
 	})
-	if !strings.Contains(stripANSI(mw.renderDetail(rw, minListBlockLines, 120, true)), "worktrees (1)") {
-		t.Error("at rows=minListBlockLines the worktrees header is missing")
+	if !strings.Contains(stripANSI(mw.detailWorktrees(rw, minListBlockLines, 60)), "worktrees (1)") {
+		t.Error("at avail=minListBlockLines the worktrees header is missing")
 	}
-	if strings.Contains(stripANSI(mw.renderDetail(rw, minListBlockLines-1, 120, true)), "worktrees (1)") {
+	if strings.Contains(stripANSI(mw.detailWorktrees(rw, minListBlockLines-1, 60)), "worktrees (1)") {
 		t.Error("below minListBlockLines the worktrees header is painted anyway")
 	}
 	mf, rf := only(func(s *gitstatus.Snapshot) {
 		s.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	})
-	if !strings.Contains(stripANSI(mf.renderDetail(rf, minListBlockLines, 120, true)), "files (1)") {
-		t.Error("at rows=minListBlockLines the files header is missing")
+	if !strings.Contains(stripANSI(mf.filesSection(rf, minListBlockLines+1, 60)), "main.go") {
+		t.Error("with room for one item the files line is missing")
 	}
-	if strings.Contains(stripANSI(mf.renderDetail(rf, minListBlockLines-1, 120, true)), "files (1)") {
-		t.Error("below minListBlockLines the files header is painted anyway")
+	if strings.Contains(stripANSI(mf.filesSection(rf, minListBlockLines, 60)), "main.go") {
+		t.Error("without room for an item the files line is painted anyway")
 	}
 }
 
@@ -824,4 +827,198 @@ func TestTinyTerminalDoesNotPanic(t *testing.T) {
 			t.Errorf("%dx%d: the card splits with no room", c.w, c.h)
 		}
 	}
+}
+
+// ── Bottom band split ────────────────────────────────────────────────────────
+
+// The commits box and the files box share the same divider: both right boxes are one width.
+func TestFilesBoxSharesTheDividerWithCommits(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.panelWidth != 60 || lay.filesWidth != 60 || lay.tableWidth != 89 || lay.cardWidth != 89 {
+		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 60/60/89/89",
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.cardWidth)
+	}
+	out := m.renderDashboard()
+	if a, b := boxLeftColumn(t, out, "commits · api"), boxLeftColumn(t, out, "files (1)"); a != b {
+		t.Errorf("the commits box starts at column %d and the files box at %d, want the same", a, b)
+	}
+}
+
+// Past the floor and up to the cap both right boxes shrink together.
+func TestFilesBoxSharesTheCapWithCommits(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 120, 40
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.panelWidth != 31 || lay.filesWidth != 31 || lay.tableWidth != 88 || lay.cardWidth != 88 {
+		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 31/31/88/88",
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.cardWidth)
+	}
+}
+
+// Below the panel floor the commits box drops and the table takes the full width, but the bottom
+// band keeps its two-box share.
+func TestNoCommitsPanelButFilesBoxKeepsTheShare(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 118, 40
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.showPanel {
+		t.Fatalf("the commits panel is drawn at width 118: %+v", lay)
+	}
+	if lay.tableWidth != 118 {
+		t.Errorf("repos box = %d, want the full 118", lay.tableWidth)
+	}
+	if lay.filesWidth != 48 || lay.cardWidth != 69 {
+		t.Errorf("files/detail = %d/%d, want 48/69", lay.filesWidth, lay.cardWidth)
+	}
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ commits ") {
+		t.Errorf("a commits box is painted at 118:\n%s", out)
+	}
+	if !strings.Contains(out, "╭ files (1) ") {
+		t.Errorf("the files box is not painted at 118:\n%s", out)
+	}
+}
+
+// The file list lives in its own bordered box: the count is the title, the lines are the files.
+func TestFilesBoxTitleAndLines(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{
+		{Code: ".M", Path: "a.go"},
+		{Code: "??", Path: "b.go"},
+		{Code: "A ", Path: "c.go"},
+	}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	files := boxColumns(t, out, "files (3)", m.layout().filesWidth-2)
+	for _, want := range []string{"  .M a.go", "  ?? b.go", "  A  c.go"} {
+		if !strings.Contains(files, want) {
+			t.Errorf("the files box does not paint %q:\n%s", want, files)
+		}
+	}
+	detail := boxColumns(t, out, "api", m.layout().cardWidth-2)
+	if !strings.Contains(detail, "path") || !strings.Contains(detail, "activity") {
+		t.Errorf("the detail box does not paint the fields head:\n%s", detail)
+	}
+}
+
+// Worktrees moved out of the files box into the detail box.
+func TestWorktreesLiveInTheDetailBoxOnly(t *testing.T) {
+	snap := snapClean()
+	snap.Worktrees = []gitstatus.Worktree{
+		{Path: "/tmp/api/wt-a", Branch: "feat/x", Head: "abc1234"},
+		{Path: "/tmp/api/wt-b", Branch: "feat/y", Head: "abc1234"},
+	}
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	detail := boxColumns(t, out, "api", m.layout().cardWidth-2)
+	if !strings.Contains(detail, "worktrees (2)") || !strings.Contains(detail, "feat/x") {
+		t.Errorf("the detail box does not list the worktrees:\n%s", detail)
+	}
+	files := boxColumns(t, out, "files (1)", m.layout().filesWidth-2)
+	if !strings.Contains(files, "main.go") {
+		t.Errorf("the files box does not list the file:\n%s", files)
+	}
+	if strings.Contains(files, "worktrees") || strings.Contains(files, "feat/x") || strings.Contains(files, "feat/y") {
+		t.Errorf("a worktree leaked into the files box:\n%s", files)
+	}
+}
+
+// With no files there is no files box: the detail box takes the whole band.
+func TestNoFilesBoxTakesTheWholeBand(t *testing.T) {
+	m, _ := detailRowWith(t, "/tmp/api", snapClean())
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ files ") {
+		t.Errorf("a files box is painted with no files:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "╭ api ") {
+			if w := ansi.StringWidth(l); w != m.width {
+				t.Errorf("the detail box spans %d cells, want the full %d", w, m.width)
+			}
+			return
+		}
+	}
+	t.Fatalf("the detail box is not painted:\n%s", out)
+}
+
+// Below the split floor the band is a single box: with room it stacks fields, worktrees and files.
+func TestNarrowBandCollapses(t *testing.T) {
+	snap := snapClean()
+	snap.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt-a", Branch: "feat/x", Head: "abc1234"}}
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 60, 30
+	m = cursorOn(t, m, "/tmp/api")
+	if m.layout().cardSplit {
+		t.Fatal("width 60: the band should be collapsed")
+	}
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ files ") {
+		t.Errorf("a separate files box is painted in the collapsed band:\n%s", out)
+	}
+	box := sectionContent(t, out, "api")
+	for _, want := range []string{"path", "worktrees (1)"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the collapsed box misses %q:\n%s", want, box)
+		}
+	}
+
+	// With room the stack keeps all three blocks inside the single box.
+	m.height = 45
+	box = sectionContent(t, stripANSI(m.View().Content), "api")
+	for _, want := range []string{"path", "worktrees (1)", "files (1)", "main.go"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the collapsed box misses %q:\n%s", want, box)
+		}
+	}
+}
+
+// boxLeftColumn is the rune column where the box titled `title` starts its left border.
+func boxLeftColumn(t *testing.T, view, title string) int {
+	t.Helper()
+	col := -1
+	for _, l := range strings.Split(stripANSI(view), "\n") {
+		if idx := strings.Index(l, "╭ "+title+" "); idx >= 0 {
+			col = len([]rune(l[:idx]))
+			break
+		}
+	}
+	if col < 0 {
+		t.Fatalf("no box titled %q in the view:\n%s", title, stripANSI(view))
+	}
+	return col
+}
+
+// boxColumns extracts the cells of the box titled `title` (inner width), so a test can tell the two
+// side-by-side boxes apart even though they share every line.
+func boxColumns(t *testing.T, view, title string, inner int) string {
+	t.Helper()
+	start := boxLeftColumn(t, view, title) + 1
+	lines := strings.Split(stripANSI(view), "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		r := []rune(l)
+		lo := min(start, len(r))
+		hi := min(start+inner, len(r))
+		out = append(out, string(r[lo:hi]))
+	}
+	return strings.Join(out, "\n")
 }

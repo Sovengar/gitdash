@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"gitdash/internal/gitstatus"
 )
 
@@ -42,30 +40,29 @@ func asOrDash(s string) string {
 
 const cmdInputLines = 2
 
-// The input is ALWAYS painted at the end, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top; without input there is no footer, the keys are already in keybinds.
+// The `!` input is ALWAYS painted on the box's last line, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top and a short body is padded; without input there is no footer, the keys are already in keybinds.
 func (m *Model) cardTail(body string, rows int) string {
 	if !m.cmdOpen {
 		return body
 	}
-	return clipTo(body, max(1, rows-cmdInputLines)) +
-		"\n\n" + styleDetailKey.Render(m.cmdInput.Prompt) + m.cmdInput.View()
+	bodyRows := max(1, rows-cmdInputLines)
+	lines := rellenaHasta(strings.Split(clipTo(body, bodyRows), "\n"), bodyRows)
+	return strings.Join(lines, "\n") + "\n\n" + m.cmdInput.View()
 }
 
-// The card's shape comes from the layout: `split` is lay.cardSplit, so the production render and
-// the layout cannot disagree on where the two-column card begins.
+// The card's shape comes from the layout: `split` is lay.cardSplit. Split, the fields and the
+// worktrees stack in the detail box (files get their own peer box); collapsed, the single box keeps
+// the stacked lists for terminals below the split floor.
 func (m *Model) renderDetail(r row, rows, width int, split bool) string {
 	rows = max(1, rows)
 	tail := m.detailTail(r, rows, width)
 	var body string
 	if split {
-		left, right := cardColumns(width - 2)
-		rightCol := m.detailRightColumn(r, rows, right)
-		if rightCol == "" {
-			body = m.detailFields(r, width-2)
-		} else {
-			// The separator runs to the card's bottom (or to the full-width tail), not to the last list item.
-			body = joinCardColumns(m.detailFields(r, left), rightCol, left, right, rows-strings.Count(tail, "\n"))
-		}
+		inner := max(1, width-2)
+		// The tail keeps its lines at the bottom: the worktrees only get what is left after the head and the tail.
+		avail := rows - detailHeadLines - strings.Count(tail, "\n")
+		body = strings.TrimRight(m.detailFields(r, inner), "\n") +
+			m.detailWorktrees(r, avail, inner)
 	} else {
 		body = m.detailCollapsed(r, m.detailFields(r, cardLeftWidth), rows)
 	}
@@ -127,45 +124,26 @@ func (m *Model) detailFields(r row, left int) string {
 	return b.String()
 }
 
-// The right column owns the two lists with their own budget: an oversized worktrees list does not
-// starve the files list of its own "… N more" warning.
-func (m *Model) detailRightColumn(r row, rows, right int) string {
+// The worktrees list moved out of the old right column into the detail box: the branch takes a
+// fixed slice and the relative path gets whatever is left.
+func (m *Model) detailWorktrees(r row, avail, inner int) string {
+	n := len(r.snap.Worktrees)
+	if n == 0 || avail < minListBlockLines {
+		return ""
+	}
+	shown, rest := listBudget(avail, n)
 	var b strings.Builder
-	key := styleDetailKey.Render
-	nW, nF := len(r.snap.Worktrees), len(r.snap.Files)
-
-	wtRows, fileRows := rows, rows
-	if nW > 0 && nF > 0 {
-		wtRows = rows / 2
-		fileRows = rows - wtRows
+	b.WriteString("\n" + styleDetailKey.Render(fmt.Sprintf("worktrees (%d)", n)) + "\n")
+	for _, wt := range r.snap.Worktrees[:shown] {
+		rel, err := filepath.Rel(r.project.Path, wt.Path)
+		if err != nil {
+			rel = wt.Path
+		}
+		b.WriteString("  " + styleDim.Render(pad(truncate(wt.Branch, wtBranchWidth), wtBranchWidth)) +
+			truncate(rel, max(1, inner-2-wtBranchWidth)) + "\n")
 	}
-
-	if nW > 0 && wtRows >= minListBlockLines {
-		shown, rest := listBudget(wtRows, nW)
-		b.WriteString("\n" + key(fmt.Sprintf("worktrees (%d)", nW)) + "\n")
-		for _, wt := range r.snap.Worktrees[:shown] {
-			rel, err := filepath.Rel(r.project.Path, wt.Path)
-			if err != nil {
-				rel = wt.Path
-			}
-			b.WriteString("  " + styleDim.Render(pad(truncate(wt.Branch, wtBranchWidth), wtBranchWidth)) +
-				truncate(rel, right-2-wtBranchWidth) + "\n")
-		}
-		if rest {
-			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", nW-shown)) + "\n")
-		}
-	}
-
-	if nF > 0 && fileRows >= minListBlockLines {
-		shown, rest := listBudget(fileRows, nF)
-		b.WriteString("\n" + key(fmt.Sprintf("files (%d)", nF)) + "\n")
-		for _, f := range r.snap.Files[:shown] {
-			b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) +
-				truncate(f.Path, right-5) + "\n")
-		}
-		if rest {
-			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", nF-shown)) + "\n")
-		}
+	if rest {
+		b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
 	}
 	return b.String()
 }
@@ -258,35 +236,23 @@ func (m *Model) detailCollapsed(r row, left string, rows int) string {
 	return b.String()
 }
 
-// Rune-clip then pad each line to its column width (ANSI-aware) so the separator never shifts;
-// minLines stretches the join to the card's bottom when the columns are shorter.
-func joinCardColumns(left, right string, leftW, rightW, minLines int) string {
-	ll := strings.Split(strings.TrimRight(left, "\n"), "\n")
-	rl := strings.Split(strings.TrimRight(right, "\n"), "\n")
-	n := max(max(len(ll), len(rl)), minLines)
-	ll = rellenaHasta(ll, n)
-	rl = rellenaHasta(rl, n)
-	sep := styleDim.Render("│")
-	out := make([]string, n)
-	for i := range n {
-		out[i] = fitCell(ll[i], leftW) + sep + fitCell(rl[i], rightW)
-	}
-	return strings.Join(out, "\n")
-}
-
-func fitCell(s string, w int) string {
-	s = ansi.Truncate(s, w, "")
-	return s + strings.Repeat(" ", max(0, w-ansi.StringWidth(s)))
-}
-
 // A worktree discovered with a marker and a live snapshot delegates to the full card; without one, a minimal panel with what `worktree list` gives (path/branch/head) and NO invented derived git state.
 func (m *Model) renderWorktreeDetail(e tableEntry, rows, width int, split bool) string {
-	if p, ok := m.discoveredByPath(e.wt.Path); ok {
-		if snap, ok := m.states[p.Path]; ok {
-			return m.renderDetail(row{project: p, snap: snap, state: snap.State(p.HasRepo)}, rows, width, split)
-		}
+	if r, live := m.liveRowForWorktree(e.wt); live {
+		return m.renderDetail(r, rows, width, split)
 	}
 	return m.renderWorktreeMinimal(e.wt, e.parent, rows, width)
+}
+
+// The live row of a worktree path, when it was discovered and has a snapshot: the minimal panel
+// would otherwise hide the git state and the marker's fields.
+func (m *Model) liveRowForWorktree(wt gitstatus.Worktree) (row, bool) {
+	if p, ok := m.discoveredByPath(wt.Path); ok {
+		if snap, ok := m.states[p.Path]; ok {
+			return row{project: p, snap: snap, state: snap.State(p.HasRepo)}, true
+		}
+	}
+	return row{}, false
 }
 
 func (m *Model) renderWorktreeMinimal(wt gitstatus.Worktree, parent string, rows, width int) string {

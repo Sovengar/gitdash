@@ -45,7 +45,10 @@ type layout struct {
 	showPanel  bool
 	tableWidth int
 	panelWidth int
-	cardWidth  int
+	// cardWidth is the detail box (bottom-left); zero files or a collapsed band make it the full width.
+	cardWidth int
+	// filesWidth is the files box (bottom-right) when the row has files; it mirrors panelWidth.
+	filesWidth int
 	cardSplit  bool
 }
 

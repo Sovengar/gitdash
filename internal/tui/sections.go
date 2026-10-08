@@ -38,16 +38,27 @@ func (m Model) layout() layout {
 	// width from this single value, so a degradation decision cannot disagree with what is painted.
 	lay.cardWidth = m.width
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
-	// The commits box and (below) the files box share one width: the lists column's share plus the
-	// files box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
-	_, right := cardColumns(m.width - 2)
-	right = min(right+2, m.width-1-minTableWidth())
+	// The commits box and the files box share one width: the lists column's share plus the files
+	// box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
+	_, share := cardColumns(m.width - 2)
+	right := min(share+2, m.width-1-minTableWidth())
 	if right >= commitsPanelWidth {
 		lay.showPanel = true
 		lay.panelWidth = right
 		lay.tableWidth = m.width - 1 - right
 	} else {
 		lay.tableWidth = m.width
+	}
+	// The bottom band mirrors the top one: left box == tableWidth and right box == panelWidth when
+	// the panel is on; with the panel off the files box keeps the card's share of the width.
+	if lay.cardSplit {
+		if lay.showPanel {
+			lay.cardWidth = lay.tableWidth
+			lay.filesWidth = lay.panelWidth
+		} else {
+			lay.filesWidth = share + 2
+			lay.cardWidth = m.width - 1 - lay.filesWidth
+		}
 	}
 	return lay
 }
@@ -265,25 +276,70 @@ func (m *Model) worktreeCommitsPanel(e tableEntry, rows, inner int) string {
 	return styleDim.Render("  no commits")
 }
 
-// It paints the same card clipped to its height and padded with empty lines, since the layout owns the height: without padding the box would shrink moving from a clean repo to one with 30 files.
+// It paints the bottom band for the row under the cursor: the detail box, plus the peer files box
+// when the row has files. Both boxes are clipped to their height, since the layout owns it.
 func (m *Model) previewSection(lay layout, entries []tableEntry) string {
 	if lay.previewLines <= 0 {
 		return ""
 	}
 	rows := lay.previewLines
 	e, ok := entryAt(entries, m.cursor)
-	var title, content string
 	switch {
 	case !ok:
-		title, content = "repos", m.previewEmpty()
+		return m.singleBox("repos", m.previewEmpty(), rows)
 	case e.kind == kindRepo:
-		title, content = detailTitle(e.r), m.renderDetail(e.r, rows, lay.cardWidth, lay.cardSplit)
+		return m.detailBand(detailTitle(e.r), e.r, rows, lay)
 	case e.kind == kindWorktree:
-		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, rows, lay.cardWidth, lay.cardSplit)
+		if r, live := m.liveRowForWorktree(e.wt); live {
+			return m.detailBand(worktreeTitle(e), r, rows, lay)
+		}
+		return m.singleBox(worktreeTitle(e), m.renderWorktreeMinimal(e.wt, e.parent, rows, m.width), rows)
 	default:
-		title, content = e.group, m.renderGroupSummary(e, rows)
+		return m.singleBox(e.group, m.renderGroupSummary(e, rows), rows)
 	}
-	return m.section(title, fitLines(content, rows), lay.cardWidth)
+}
+
+// With no files (or below the split floor) the detail box takes the whole band; otherwise the
+// detail box and the files box share the width, side by side.
+func (m *Model) detailBand(title string, r row, rows int, lay layout) string {
+	if !lay.cardSplit || len(r.snap.Files) == 0 {
+		m.fitCmdInput(m.width)
+		return m.section(title, fitLines(m.renderDetail(r, rows, m.width, lay.cardSplit), rows), m.width)
+	}
+	m.fitCmdInput(lay.cardWidth)
+	detail := m.section(title, fitLines(m.renderDetail(r, rows, lay.cardWidth, true), rows), lay.cardWidth)
+	return joinPanes(detail, m.filesSection(r, rows, lay.filesWidth))
+}
+
+// The files live in their own bordered box; the count moves from the old in-body heading to the title.
+func (m *Model) filesSection(r row, rows, width int) string {
+	return m.section(fmt.Sprintf("files (%d)", len(r.snap.Files)),
+		fitLines(m.filesList(r, rows, width-2), rows), width)
+}
+
+func (m *Model) filesList(r row, avail, inner int) string {
+	n := len(r.snap.Files)
+	shown, rest := listBudget(avail, n)
+	var b strings.Builder
+	for _, f := range r.snap.Files[:shown] {
+		b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) +
+			truncate(f.Path, max(1, inner-5)) + "\n")
+	}
+	if rest {
+		b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// The `!` input is painted inside the detail box, so its width is the box minus the borders and the
+// prompt; anything else lets the value run past the border.
+func (m *Model) fitCmdInput(boxWidth int) {
+	m.cmdInput.SetWidth(max(1, boxWidth-4))
+}
+
+func (m *Model) singleBox(title, content string, rows int) string {
+	m.fitCmdInput(m.width)
+	return m.section(title, fitLines(content, rows), m.width)
 }
 
 func (m Model) previewEmpty() string {
@@ -369,7 +425,7 @@ func joinPanes(left, right string) string {
 	lpad := rellenaHasta(ll, n)
 	rpad := rellenaHasta(rl, n)
 	for i := range n {
-		out[i] = lpad[i] + " " + rpad[i]
+		out[i] = lpad[i] + strings.Repeat(" ", commitsPanelGap) + rpad[i]
 	}
 	return strings.Join(out, "\n")
 }
