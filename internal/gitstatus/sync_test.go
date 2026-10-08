@@ -34,6 +34,13 @@ func TestSyncBehind(t *testing.T) {
 	if snap.SyncBehind != 1 {
 		t.Errorf("behind = %d, want 1 (only m1 missing)", snap.SyncBehind)
 	}
+	// The panel's second group comes from the same ref the divergence counts, newest first.
+	if len(snap.SyncCommits) != 2 || snap.SyncCommits[0].Subject != "main 1" {
+		t.Errorf("SyncCommits = %+v, want the sync branch's log newest first", snap.SyncCommits)
+	}
+	if snap.Commits[0].Subject != "feat 1" {
+		t.Errorf("the current branch's commits = %+v, want feat's own", snap.Commits)
+	}
 }
 
 func TestSyncOnBranch(t *testing.T) {
@@ -41,6 +48,10 @@ func TestSyncOnBranch(t *testing.T) {
 	snap := Collect(t.Context(), dir, "feat", false)
 	if !snap.SyncKnown || snap.SyncBehind != 0 {
 		t.Errorf("known=%v behind=%d", snap.SyncKnown, snap.SyncBehind)
+	}
+	// On the sync branch itself the two lists would duplicate: no second log, no second group.
+	if len(snap.SyncCommits) != 0 {
+		t.Errorf("SyncCommits = %+v, want none on the sync branch", snap.SyncCommits)
 	}
 }
 
@@ -52,6 +63,9 @@ func TestSyncMissing(t *testing.T) {
 	}
 	if snap.SyncBranch != "nonexistent" {
 		t.Errorf("SyncBranch = %q, want nonexistent (always filled)", snap.SyncBranch)
+	}
+	if len(snap.SyncCommits) != 0 {
+		t.Errorf("SyncCommits = %+v, want none without a ref to log", snap.SyncCommits)
 	}
 	if snap.Err != "" {
 		t.Errorf("the sync error must not pollute Err: %q", snap.Err)
@@ -125,6 +139,10 @@ func TestSyncFallbackAMaster(t *testing.T) {
 	}
 	if snap.SyncBehind != 1 {
 		t.Errorf("behind = %d, want 1 (m1 missing on feat)", snap.SyncBehind)
+	}
+	// What resolves is also what gets logged: the fallback's commits feed the second group.
+	if len(snap.SyncCommits) == 0 || snap.SyncCommits[0].Subject != "master 1" {
+		t.Errorf("SyncCommits = %+v, want master's log", snap.SyncCommits)
 	}
 }
 

@@ -23,15 +23,16 @@ import (
 const syncFallbackBranch = "master"
 
 type Snapshot struct {
-	Status     Status
-	Files      []FileEntry
-	Commits    []Commit
-	LastCommit int64
-	Worktrees  []Worktree
-	SyncBranch string
-	SyncBehind int
-	SyncKnown  bool
-	Err        string
+	Status      Status
+	Files       []FileEntry
+	Commits     []Commit
+	SyncCommits []Commit
+	LastCommit  int64
+	Worktrees   []Worktree
+	SyncBranch  string
+	SyncBehind  int
+	SyncKnown   bool
+	Err         string
 }
 
 type Worktree struct {
@@ -77,6 +78,14 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 		if ok {
 			snap.SyncBehind = n
 			snap.SyncKnown = true
+		}
+		// The panel's second group: the same ref the divergence counts, so what is compared and
+		// what is shown cannot disagree; skipped on the sync branch itself, where the two lists
+		// would duplicate. A missing ref fails the log and leaves the group empty.
+		if snap.SyncBranch != snap.Status.Branch {
+			if syncOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s", snap.SyncBranch); err == nil {
+				snap.SyncCommits = ParseLog(string(syncOut))
+			}
 		}
 	}
 
