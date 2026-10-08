@@ -536,6 +536,24 @@ func TestOverlayCenteredSplicesAtTheMiddleRows(t *testing.T) {
 	}
 }
 
+// The column pin is the point: with a 20-wide canvas and a 3-wide block the box starts at cell 8 (x = (20-3)/2) and the tail keeps the base's cells 12-20, so a centering with the sign flipped, the division moved or a tail one cell off cannot pass.
+func TestOverlayCenteredPlacesTheBlockAtTheMiddleColumns(t *testing.T) {
+	base := strings.Join([]string{
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+	}, "\n")
+
+	got := strings.Split(overlayCentered(base, []string{"BOX"}, 20, 5), "\n")
+
+	want := strings.Repeat(".", 8) + "BOX" + strings.Repeat(".", 9)
+	if got[2] != want {
+		t.Errorf("row 2 = %q, want the block at the middle columns %q", got[2], want)
+	}
+}
+
 // Every degenerate input is identity: an empty block iterates zero rows and a canvas of zero clips the count to zero, so nothing can be painted where there is no room.
 func TestOverlayCenteredDegenerateIsIdentity(t *testing.T) {
 	base := "l0\nl1\nl2"
