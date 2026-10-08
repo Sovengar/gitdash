@@ -35,15 +35,19 @@ func TestSyncBehind(t *testing.T) {
 	if snap.SyncBehind != 1 {
 		t.Errorf("behind = %d, want 1 (only m1 missing)", snap.SyncBehind)
 	}
-	if snap.SyncAhead != 1 {
-		t.Errorf("ahead = %d, want 1 (feat 1 missing on main)", snap.SyncAhead)
-	}
 	// The panel's second group comes from the same ref the divergence counts, newest first.
 	if len(snap.SyncCommits) != 2 || snap.SyncCommits[0].Subject != "main 1" {
 		t.Errorf("SyncCommits = %+v, want the sync branch's log newest first", snap.SyncCommits)
 	}
 	if snap.Commits[0].Subject != "feat 1" {
 		t.Errorf("the current branch's commits = %+v, want feat's own", snap.Commits)
+	}
+	// The mark follows the sha, so the same commits the count claims are the ones flagged.
+	if !snap.Commits[0].OneSided || snap.Commits[1].OneSided {
+		t.Errorf("current flags = %v/%v, want the feat-only marked and the shared not", snap.Commits[0].OneSided, snap.Commits[1].OneSided)
+	}
+	if !snap.SyncCommits[0].OneSided || snap.SyncCommits[1].OneSided {
+		t.Errorf("sync flags = %v/%v, want the sync-only marked and the shared not", snap.SyncCommits[0].OneSided, snap.SyncCommits[1].OneSided)
 	}
 }
 
@@ -277,12 +281,12 @@ func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	var probadaMain, probadaMaster bool
 	for _, e := range rec.Entries() {
 		switch e.Command() {
-		case "git rev-list --left-right --count HEAD...main":
+		case "git rev-list --count HEAD..main":
 			probadaMain = true
 			if e.Exit == 0 {
 				t.Error("main resolved in a repo that does not have it")
 			}
-		case "git rev-list --left-right --count HEAD...master":
+		case "git rev-list --count HEAD..master":
 			probadaMaster = true
 			if e.Exit != 0 {
 				t.Errorf("Exit = %d, want 0 (master does exist)", e.Exit)
@@ -297,15 +301,23 @@ func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	}
 }
 
-// Ahead is the other half of the same count: commits the branch has and the sync ref does not.
-func TestSyncAhead(t *testing.T) {
+// An ahead-only branch marks its own side and nothing on the sync side.
+func TestSyncOneSidedAheadOnly(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	testutil.NewBranch(t, dir, "feat")
 	testutil.CommitFiles(t, dir, map[string]string{"f.txt": "f"}, "feat 1")
 
 	snap := Collect(t.Context(), dir, "main", false)
-	if !snap.SyncKnown || snap.SyncAhead != 1 || snap.SyncBehind != 0 {
-		t.Errorf("known/ahead/behind = %v/%d/%d, want true/1/0", snap.SyncKnown, snap.SyncAhead, snap.SyncBehind)
+	if !snap.SyncKnown || snap.SyncBehind != 0 {
+		t.Fatalf("known/behind = %v/%d, want true/0", snap.SyncKnown, snap.SyncBehind)
+	}
+	if !snap.Commits[0].OneSided {
+		t.Errorf("the feat-only commit is not marked: %+v", snap.Commits)
+	}
+	for i, c := range snap.SyncCommits {
+		if c.OneSided {
+			t.Errorf("sync commit %d marked with nothing behind it: %+v", i, c)
+		}
 	}
 }
 
@@ -324,7 +336,49 @@ func TestCollectCapsBothLogsAt15(t *testing.T) {
 	if len(snap.Commits) != 15 || len(snap.SyncCommits) != 15 {
 		t.Errorf("current/sync commits = %d/%d, want 15/15", len(snap.Commits), len(snap.SyncCommits))
 	}
-	if snap.SyncAhead != 17 || snap.SyncBehind != 0 {
-		t.Errorf("ahead/behind = %d/%d, want 17/0", snap.SyncAhead, snap.SyncBehind)
+	if snap.SyncBehind != 0 {
+		t.Errorf("behind = %d, want 0", snap.SyncBehind)
+	}
+	// The marks come from the same capped window: the newest current commit is one-sided, the sync side has none.
+	if !snap.Commits[0].OneSided || snap.SyncCommits[0].OneSided {
+		t.Errorf("flags = %v/%v, want the newest current commit marked and none on the sync side", snap.Commits[0].OneSided, snap.SyncCommits[0].OneSided)
+	}
+}
+
+// The merge case that killed the positional rule: the sync tip comes into the current log NEWER than the branch's own commit, and the marks still follow the sha.
+func TestCollectMarksOneSidedCommitsUnderAMerge(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	testutil.NewBranch(t, dir, "feat")
+	testutil.CommitFiles(t, dir, map[string]string{"c4.txt": "c4"}, "c4")
+	testutil.Checkout(t, dir, "main")
+	testutil.CommitFiles(t, dir, map[string]string{"s3.txt": "s3"}, "S3")
+	testutil.Checkout(t, dir, "feat")
+	gitLocal(t, dir, "merge", "--no-edit", "-m", "merged", "main")
+
+	snap := Collect(t.Context(), dir, "main", false)
+	if snap.SyncBehind != 0 {
+		t.Fatalf("behind = %d, want 0 after merging main", snap.SyncBehind)
+	}
+	flags := map[string]bool{}
+	for _, c := range snap.Commits {
+		flags[c.Subject] = c.OneSided
+	}
+	if !flags["c4"] || !flags["merged"] {
+		t.Errorf("the branch's own commits are not marked: %v", flags)
+	}
+	if flags["S3"] {
+		t.Errorf("the merged-in sync tip is marked as one-sided: %v", flags)
+	}
+	for _, c := range snap.SyncCommits {
+		if c.OneSided {
+			t.Errorf("a sync-side commit marked with nothing behind it: %+v", c)
+		}
+	}
+}
+
+func TestOneSidedShasWithAnUnresolvableRange(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	if shas := oneSidedShas(t.Context(), dir, "HEAD..origin/nope"); shas != nil {
+		t.Errorf("oneSidedShas = %v, want nil when rev-list fails", shas)
 	}
 }

@@ -417,42 +417,42 @@ func TestPanelEmptyCommitsPlaceholder(t *testing.T) {
 	}
 }
 
-// Shared commits keep the neutral line; the ones only one branch has take that group's colour.
-// The counts differ on purpose so a swapped pair of accents cannot pass unnoticed.
+// The mark decides, not the position: an accented commit can sit below a neutral one and both accents coexist.
 func TestPanelColoursTheOneSidedCommits(t *testing.T) {
-	snap := committedSnap("c1", "c2")
+	snap := committedSnap("c1", "c2", "c3")
+	snap.Commits[0].OneSided, snap.Commits[2].OneSided = true, true
 	snap.SyncBranch = "master"
 	snap.SyncCommits = []gitstatus.Commit{
 		{Sha: "aaaaaaa", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"},
 		{Sha: "bbbbbbb", When: time.Now().Add(-time.Hour).Unix(), Subject: "s2"},
 		{Sha: "ccccccc", When: time.Now().Add(-time.Hour).Unix(), Subject: "s3"},
 	}
-	snap.SyncAhead, snap.SyncBehind = 1, 2
+	snap.SyncCommits[0].OneSided, snap.SyncCommits[2].OneSided = true, true
 	m := newTestModel(t, nil, nil)
 
 	out := m.commitsPanel(snap, 12, 28)
-	if !strings.Contains(out, styleAhead.Render("c1")) {
-		t.Errorf("the current-only commit is not painted ahead-green:\n%q", out)
+	if !strings.Contains(out, styleAhead.Render("c1")) || !strings.Contains(out, styleAhead.Render("c3")) {
+		t.Errorf("the marked current commits are not painted ahead-green:\n%q", out)
 	}
 	if strings.Contains(out, styleAhead.Render("c2")) {
-		t.Errorf("a shared commit took the current accent:\n%q", out)
+		t.Errorf("an unmarked current commit took the accent:\n%q", out)
 	}
-	if !strings.Contains(out, styleBehind.Render("s1")) || !strings.Contains(out, styleBehind.Render("s2")) {
-		t.Errorf("the sync-only commits are not painted behind-blue:\n%q", out)
+	if !strings.Contains(out, styleBehind.Render("s1")) || !strings.Contains(out, styleBehind.Render("s3")) {
+		t.Errorf("the marked sync commits are not painted behind-blue:\n%q", out)
 	}
-	if strings.Contains(out, styleBehind.Render("s3")) {
-		t.Errorf("a shared commit took the sync accent:\n%q", out)
+	if strings.Contains(out, styleBehind.Render("s2")) {
+		t.Errorf("an unmarked sync commit took the accent:\n%q", out)
 	}
 	if !strings.Contains(out, styleDim.Render(pad("0000000", 8))) {
-		t.Errorf("the shared commits lost their dim sha:\n%q", out)
+		t.Errorf("the unmarked commits lost their dim sha:\n%q", out)
 	}
 }
 
 // Without the sync group the accents are dropped: they would name a comparison that is not on screen.
 func TestPanelWithoutSyncGroupPaintsNoAccents(t *testing.T) {
 	snap := committedSnap("c1")
+	snap.Commits[0].OneSided = true // marked, but no SyncCommits: the second group never exists
 	snap.SyncBranch = "master"
-	snap.SyncAhead, snap.SyncBehind = 3, 2 // no SyncCommits: the second group never exists
 	m := newTestModel(t, nil, nil)
 
 	out := m.commitsPanel(snap, 10, 28)
@@ -464,6 +464,22 @@ func TestPanelWithoutSyncGroupPaintsNoAccents(t *testing.T) {
 	}
 	if strings.Contains(out, "(sync)") {
 		t.Errorf("the fixture painted a sync group:\n%q", out)
+	}
+}
+
+// A subject is untrusted repo text: control and escape sequences do not reach the terminal, the readable text stays.
+func TestPanelSanitisesTheSubjects(t *testing.T) {
+	snap := committedSnap("before \x1b[31mred\x1b[0m after")
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 10, 40)
+	if strings.Contains(out, "\x1b[31m") {
+		t.Errorf("an escape sequence from the subject reached the paint:\n%q", out)
+	}
+	for _, want := range []string{"before", "red", "after"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the readable text %q of the subject was lost:\n%q", want, out)
+		}
 	}
 }
 

@@ -215,37 +215,34 @@ func (m *Model) panelEmpty() string {
 }
 
 type commitGroup struct {
-	label    string
-	commits  []gitstatus.Commit
-	oneSided int
-	accent   lipglossStyle
+	label   string
+	commits []gitstatus.Commit
+	accent  lipglossStyle
 }
 
 // The sync group only exists with a DIFFERENT ref that has commits of its own: on the sync branch
-// itself the two lists would duplicate. Each group carries how many of its newest commits only it
-// has and the colour they get; the counts are the same the SYNC column shows.
+// itself the two lists would duplicate. Each group carries the colour its one-sided commits get;
+// which ones those are is already decided per sha in `Collect`.
 func commitGroups(snap gitstatus.Snapshot) []commitGroup {
 	label := "current"
 	if snap.Status.Branch != "" {
 		label = snap.Status.Branch + " (current)"
 	}
-	groups := []commitGroup{{label: label, commits: snap.Commits, oneSided: snap.SyncAhead, accent: styleAhead}}
+	groups := []commitGroup{{label: label, commits: snap.Commits, accent: styleAhead}}
 	if snap.SyncBranch != "" && snap.SyncBranch != snap.Status.Branch && len(snap.SyncCommits) > 0 {
-		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits, oneSided: snap.SyncBehind, accent: styleBehind})
-	}
-	// One-sided only reads next to the other list: without the sync group the colours would name a comparison that is not on screen.
-	if len(groups) == 1 {
-		groups[0].oneSided = 0
+		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits, accent: styleBehind})
 	}
 	return groups
 }
 
 // Newest first, one line per commit, never wrapped: the subject is cut to whatever the body leaves
 // after the sha/age prefix. The height is shared so the first group does not clip the second away,
-// and the newest commits only that branch has take its accent, leaving shared ones neutral.
+// and the commits only one branch has take its accent, leaving shared ones neutral.
 func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
 	groups := commitGroups(snap)
 	per := max(1, (rows-len(groups))/len(groups))
+	// One-sided only reads next to the other list: without the sync group the colours would name a comparison that is not on screen.
+	coloured := len(groups) > 1
 	var b strings.Builder
 	for _, g := range groups {
 		b.WriteString(styleDetailKey.Render(truncate(g.label, inner)) + "\n")
@@ -253,9 +250,10 @@ func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
 			b.WriteString(styleDim.Render("  no commits") + "\n")
 			continue
 		}
-		for i, c := range g.commits[:min(len(g.commits), per)] {
-			sha, subject := pad(c.Sha, 8), truncate(c.Subject, max(1, inner-18))
-			if i < g.oneSided {
+		for _, c := range g.commits[:min(len(g.commits), per)] {
+			// The subject is untrusted repo text: it goes through the log panel's sanitiser before painting.
+			sha, subject := pad(c.Sha, 8), truncate(sanitizeLogText(c.Subject), max(1, inner-18))
+			if coloured && c.OneSided {
 				sha, subject = g.accent.Render(sha), g.accent.Render(subject)
 			} else {
 				sha = styleDim.Render(sha)

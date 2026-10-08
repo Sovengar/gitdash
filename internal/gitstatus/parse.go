@@ -30,6 +30,8 @@ type Commit struct {
 	Sha     string
 	When    int64
 	Subject string
+	// OneSided is set by Collect when only this branch's side has the commit (the panel paints those).
+	OneSided bool
 }
 
 type State int
@@ -187,20 +189,6 @@ func parseAB(s string) (ahead, behind int) {
 		return 0, 0
 	}
 	return ahead, behind
-}
-
-// rev-list --left-right --count prints "<left>\t<right>": how many commits only the left ref has, then how many only the right one.
-func parseLeftRightCount(s string) (left, right int, ok bool) {
-	fields := strings.Fields(s)
-	if len(fields) != 2 {
-		return 0, 0, false
-	}
-	l, errL := strconv.Atoi(fields[0])
-	r, errR := strconv.Atoi(fields[1])
-	if errL != nil || errR != nil {
-		return 0, 0, false
-	}
-	return l, r, true
 }
 
 func ParseLog(out string) []Commit {

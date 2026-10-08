@@ -550,43 +550,18 @@ func TestStreamPoolWithContextCancelled(t *testing.T) {
 }
 
 // known=false is not the same as a known 0: the first makes the UI say "— (no sync branch)" (data we do not have) while the second paints as "up to date", a false claim about a repo that may have 40 commits.
-func TestSyncCountsWithRefNonexistent(t *testing.T) {
+func TestSyncBehindWithRefNonexistent(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
-	ahead, behind, known := syncCounts(t.Context(), dir, "origin/a-branch-that-does-not-exist")
+	n, known := syncBehind(t.Context(), dir, "origin/a-branch-that-does-not-exist")
 	if known {
-		t.Errorf("syncCounts with a nonexistent ref = %d/%d, known=true; want known=false (it is not that it is up to date)", ahead, behind)
+		t.Errorf("syncBehind with a nonexistent ref = %d, known=true; want known=false (it is not that it is up to date)", n)
 	}
 	testutil.CommitFiles(t, dir, map[string]string{"a.txt": "x\n"}, "commit")
-	ahead, behind, known = syncCounts(t.Context(), dir, "main")
+	n, known = syncBehind(t.Context(), dir, "main")
 	if !known {
-		t.Error("syncCounts against HEAD = known=false, want true (0 commits behind is data)")
+		t.Error("syncBehind against HEAD = known=false, want true (0 commits behind is data)")
 	}
-	if ahead != 0 || behind != 0 {
-		t.Errorf("syncCounts against HEAD = %d/%d, want 0/0", ahead, behind)
-	}
-}
-
-func TestParseLeftRightCount(t *testing.T) {
-	cases := []struct {
-		name              string
-		in                string
-		left, rightWanted int
-		want              bool
-	}{
-		{"the two counts", "2\t3\n", 2, 3, true},
-		{"zeros are data", "0\t0\n", 0, 0, true},
-		{"one field", "2\n", 0, 0, false},
-		{"three fields", "2\t3\t4\n", 0, 0, false},
-		{"empty", "", 0, 0, false},
-		{"a non number on the left", "x\t3\n", 0, 0, false},
-		{"a non number on the right", "2\tx\n", 0, 0, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			left, right, ok := parseLeftRightCount(c.in)
-			if ok != c.want || left != c.left || right != c.rightWanted {
-				t.Errorf("parseLeftRightCount(%q) = %d/%d/%v, want %d/%d/%v", c.in, left, right, ok, c.left, c.rightWanted, c.want)
-			}
-		})
+	if n != 0 {
+		t.Errorf("syncBehind against HEAD = %d, want 0", n)
 	}
 }

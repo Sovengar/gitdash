@@ -33,7 +33,6 @@ type Snapshot struct {
 	LastCommit  int64
 	Worktrees   []Worktree
 	SyncBranch  string
-	SyncAhead   int
 	SyncBehind  int
 	SyncKnown   bool
 	Err         string
@@ -71,16 +70,16 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 	if syncBranch != "" {
 		// Filled even when the comparison fails: the UI still shows the branch name.
 		snap.SyncBranch = syncBranch
-		ahead, behind, ok := syncCounts(ctx, dir, syncBranch)
+		n, ok := syncBehind(ctx, dir, syncBranch)
 		if !ok && allowFallback && syncBranch != syncFallbackBranch {
 			// The fallback probe lives here and not earlier: main resolves in every modern repo, so an extra rev-list per repo per cycle would only be paid where it is needed.
-			ahead, behind, ok = syncCounts(ctx, dir, syncFallbackBranch)
+			n, ok = syncBehind(ctx, dir, syncFallbackBranch)
 			if ok {
 				snap.SyncBranch = syncFallbackBranch
 			}
 		}
 		if ok {
-			snap.SyncAhead, snap.SyncBehind = ahead, behind
+			snap.SyncBehind = n
 			snap.SyncKnown = true
 		}
 		// The panel's second group: the same ref the divergence counts, so what is compared and
@@ -88,6 +87,7 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 		if snap.SyncBranch != snap.Status.Branch {
 			if syncOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-"+strconv.Itoa(commitsLogDepth), "--format=%h%x00%ct%x00%s", snap.SyncBranch); err == nil {
 				snap.SyncCommits = ParseLog(string(syncOut))
+				markOneSided(snap.SyncCommits, oneSidedShas(ctx, dir, "HEAD.."+snap.SyncBranch))
 			}
 		}
 	}
@@ -96,6 +96,9 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
 		snap.LastCommit = lastCommitWhen(snap.Commits)
+		if snap.SyncKnown && snap.SyncBranch != snap.Status.Branch {
+			markOneSided(snap.Commits, oneSidedShas(ctx, dir, snap.SyncBranch+"..HEAD"))
+		}
 	}
 	// A repo with no commits is legitimate, so the log error is ignored.
 
@@ -113,14 +116,38 @@ func lastCommitWhen(commits []Commit) int64 {
 	return commits[0].When
 }
 
-// syncCounts splits the divergence with the sync ref in one rev-list: commits only HEAD has (ahead) and only the sync ref has (behind), the two counts the panel colours with and the SYNC column shows.
-func syncCounts(ctx context.Context, dir, sync string) (ahead, behind int, ok bool) {
-	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--left-right", "--count", "HEAD..."+sync)
+func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--count", "HEAD.."+sync)
 	if err != nil {
-		return 0, 0, false
+		return 0, false
 	}
-	// ok comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to ok=false.
-	return parseLeftRightCount(string(out))
+	// known comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to known=false.
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	return n, err == nil
+}
+
+// oneSidedShas returns the full shas of the (at most commitsLogDepth) commits the range reserves for one side; a sha and never a position is what the panel marks, because `git log` is date-ordered and a merge can put a shared commit above a one-sided one.
+func oneSidedShas(ctx context.Context, dir, rng string) map[string]bool {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--max-count="+strconv.Itoa(commitsLogDepth), rng)
+	if err != nil {
+		return nil
+	}
+	shas := map[string]bool{}
+	for _, sha := range strings.Fields(string(out)) {
+		shas[sha] = true
+	}
+	return shas
+}
+
+// markOneSided matches by prefix: the log writes abbreviated shas, rev-list prints full ones.
+func markOneSided(commits []Commit, shas map[string]bool) {
+	for i := range commits {
+		for sha := range shas {
+			if strings.HasPrefix(sha, commits[i].Sha) {
+				commits[i].OneSided = true
+			}
+		}
+	}
 }
 
 func normalizeBranch(st Status) string {
