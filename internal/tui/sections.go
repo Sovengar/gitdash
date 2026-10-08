@@ -203,26 +203,34 @@ func (m *Model) panelEmpty() string {
 }
 
 type commitGroup struct {
-	label   string
-	commits []gitstatus.Commit
+	label    string
+	commits  []gitstatus.Commit
+	oneSided int
+	accent   lipglossStyle
 }
 
 // The sync group only exists with a DIFFERENT ref that has commits of its own: on the sync branch
-// itself the two lists would duplicate.
+// itself the two lists would duplicate. Each group carries how many of its newest commits only it
+// has and the colour they get; the counts are the same the SYNC column shows.
 func commitGroups(snap gitstatus.Snapshot) []commitGroup {
 	label := "current"
 	if snap.Status.Branch != "" {
 		label = snap.Status.Branch + " (current)"
 	}
-	groups := []commitGroup{{label: label, commits: snap.Commits}}
+	groups := []commitGroup{{label: label, commits: snap.Commits, oneSided: snap.SyncAhead, accent: styleAhead}}
 	if snap.SyncBranch != "" && snap.SyncBranch != snap.Status.Branch && len(snap.SyncCommits) > 0 {
-		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits})
+		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits, oneSided: snap.SyncBehind, accent: styleBehind})
+	}
+	// One-sided only reads next to the other list: without the sync group the colours would name a comparison that is not on screen.
+	if len(groups) == 1 {
+		groups[0].oneSided = 0
 	}
 	return groups
 }
 
 // Newest first, one line per commit, never wrapped: the subject is cut to whatever the body leaves
-// after the sha/age prefix. The height is shared so the first group does not clip the second away.
+// after the sha/age prefix. The height is shared so the first group does not clip the second away,
+// and the newest commits only that branch has take its accent, leaving shared ones neutral.
 func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
 	groups := commitGroups(snap)
 	per := max(1, (rows-len(groups))/len(groups))
@@ -233,12 +241,14 @@ func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
 			b.WriteString(styleDim.Render("  no commits") + "\n")
 			continue
 		}
-		for _, c := range g.commits[:min(len(g.commits), per)] {
-			fmt.Fprintf(&b, "%s %s %s\n",
-				styleDim.Render(pad(c.Sha, 8)),
-				pad(relativeTime(c.When), 6),
-				truncate(c.Subject, max(1, inner-18)),
-			)
+		for i, c := range g.commits[:min(len(g.commits), per)] {
+			sha, subject := pad(c.Sha, 8), truncate(c.Subject, max(1, inner-18))
+			if i < g.oneSided {
+				sha, subject = g.accent.Render(sha), g.accent.Render(subject)
+			} else {
+				sha = styleDim.Render(sha)
+			}
+			fmt.Fprintf(&b, "%s %s %s\n", sha, pad(relativeTime(c.When), 6), subject)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

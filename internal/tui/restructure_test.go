@@ -417,6 +417,56 @@ func TestPanelEmptyCommitsPlaceholder(t *testing.T) {
 	}
 }
 
+// Shared commits keep the neutral line; the ones only one branch has take that group's colour.
+// The counts differ on purpose so a swapped pair of accents cannot pass unnoticed.
+func TestPanelColoursTheOneSidedCommits(t *testing.T) {
+	snap := committedSnap("c1", "c2")
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{
+		{Sha: "aaaaaaa", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"},
+		{Sha: "bbbbbbb", When: time.Now().Add(-time.Hour).Unix(), Subject: "s2"},
+		{Sha: "ccccccc", When: time.Now().Add(-time.Hour).Unix(), Subject: "s3"},
+	}
+	snap.SyncAhead, snap.SyncBehind = 1, 2
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 12, 28)
+	if !strings.Contains(out, styleAhead.Render("c1")) {
+		t.Errorf("the current-only commit is not painted ahead-green:\n%q", out)
+	}
+	if strings.Contains(out, styleAhead.Render("c2")) {
+		t.Errorf("a shared commit took the current accent:\n%q", out)
+	}
+	if !strings.Contains(out, styleBehind.Render("s1")) || !strings.Contains(out, styleBehind.Render("s2")) {
+		t.Errorf("the sync-only commits are not painted behind-blue:\n%q", out)
+	}
+	if strings.Contains(out, styleBehind.Render("s3")) {
+		t.Errorf("a shared commit took the sync accent:\n%q", out)
+	}
+	if !strings.Contains(out, styleDim.Render(pad("0000000", 8))) {
+		t.Errorf("the shared commits lost their dim sha:\n%q", out)
+	}
+}
+
+// Without the sync group the accents are dropped: they would name a comparison that is not on screen.
+func TestPanelWithoutSyncGroupPaintsNoAccents(t *testing.T) {
+	snap := committedSnap("c1")
+	snap.SyncBranch = "master"
+	snap.SyncAhead, snap.SyncBehind = 3, 2 // no SyncCommits: the second group never exists
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 10, 28)
+	if !strings.Contains(out, "c1") {
+		t.Errorf("the commit is not painted at all:\n%q", out)
+	}
+	if strings.Contains(out, styleAhead.Render("c1")) {
+		t.Errorf("the accent survived without a sync group:\n%q", out)
+	}
+	if strings.Contains(out, "(sync)") {
+		t.Errorf("the fixture painted a sync group:\n%q", out)
+	}
+}
+
 func TestPanelGroupHeaderShowsTheAggregate(t *testing.T) {
 	m := previewModel(t)
 	m.width = 119
