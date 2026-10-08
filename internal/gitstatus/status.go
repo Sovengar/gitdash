@@ -222,6 +222,21 @@ func RemoteURL(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// The branch picker's read: on demand only, and through runGit so it is auditable like every other git call.
+func LocalBranches(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, err
+	}
+	var branches []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			branches = append(branches, l)
+		}
+	}
+	return branches, nil
+}
+
 // Uses --git-path because in a worktree .git is a file and the rebase state lives under .git/worktrees/<name>/.
 func RebaseInProgress(ctx context.Context, dir string) bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {

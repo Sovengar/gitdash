@@ -207,6 +207,7 @@ func DefaultKeybindings() Keybindings {
 		"worktree_remove": "D",
 		"visual":          "v",
 		"pr":              "O",
+		"branch":          "b",
 	}
 }
 
@@ -310,6 +311,7 @@ var hintLabels = map[string]string{
 	"worktree_remove": "remove wt",
 	"visual":          "visual",
 	"pr":              "open PR",
+	"branch":          "branch ▸",
 }
 
 // Lives outside HintBarLines so a test can require a label per action: an unlabelled one would render as a bare key ("p "), indistinguishable from a render bug.
@@ -317,7 +319,7 @@ var hintActions = []string{
 	"dirty", "search", "fetch", "fetch_all", "sync", "pull",
 	"push", "lazygit", "editor", "rescan", "recollect",
 	"fold", "command", "log", "quit", "worktree_remove", "visual",
-	"pr",
+	"pr", "branch",
 }
 
 func (c Config) HintBarLines() []string {
@@ -335,7 +337,7 @@ func (c Config) HintBarLines() []string {
 		switch action {
 		case "dirty", "search", "fold", "command":
 			row1 = append(row1, hint)
-		case "fetch", "fetch_all", "sync", "pull", "push":
+		case "fetch", "fetch_all", "sync", "pull", "push", "branch":
 			row2 = append(row2, hint)
 		default:
 			row3 = append(row3, hint)

@@ -82,6 +82,13 @@ type notifyMsg struct {
 	level toastLevel
 }
 
+// The picker's branch list arrives asynchronously (a git read off the Update goroutine), so the mode is echoed back: a late list for a picker that was closed/reopened for the other variant must be dropped.
+type branchesMsg struct {
+	path, mode string
+	branches   []string
+	err        string
+}
+
 type tickMsg struct{}
 
 type actionResult struct {
@@ -114,6 +121,37 @@ var PullKinds = func() map[string]string {
 	}
 	return kinds
 }()
+
+// Captures the path when armed: the second key resolves on that row, not on whatever sits under the cursor by then.
+type armedPull struct {
+	path string
+}
+
+// Same contract as armedPull: the variant keys (c/s) are resolved against the row captured when `b` armed.
+type armedBranch struct {
+	path string
+}
+
+// Single source of the `b` variants, so the prompt and the dispatch cannot desync.
+type branchOption struct {
+	key   string
+	mode  string
+	label string
+}
+
+var branchOptions = []branchOption{
+	{"c", pickerModeCurrent, "checkout"},
+	{"s", pickerModeSync, "sync ref"},
+}
+
+func branchOptionForKey(key string) (branchOption, bool) {
+	for _, o := range branchOptions {
+		if o.key == key {
+			return o, true
+		}
+	}
+	return branchOption{}, false
+}
 
 func IsPullKind(kind string) bool {
 	for _, k := range PullKinds {
@@ -154,11 +192,6 @@ func visualOptionForSub(sub string) (visualOption, bool) {
 		}
 	}
 	return visualOption{}, false
-}
-
-// Captures the path when armed: the second key resolves on that row, not on whatever sits under the cursor by then.
-type armedPull struct {
-	path string
 }
 
 // Captures path, upstream and behind when armed so the variant argv and the no-op guard are decided by the chosen row, not by the cursor later.
@@ -216,6 +249,9 @@ type Model struct {
 	armed       *armedRemoval
 	pullArmed   *armedPull
 	visualArmed *armedVisual
+	branchArmed *armedBranch
+	// picker is the branch list opened by bc/bs; nil is closed, like the log panel and the PR form it is a view mode.
+	picker *branchPicker
 	// removeTokens maps parent repo path → current attempt token (the in-flight guard is per parent, so the token is too); a result whose token is no longer current is discarded.
 	removeGen    int
 	removeTokens map[string]int
@@ -558,6 +594,22 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 		if err == nil {
 			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch, syncFallback)})
 		}
+	}()
+	return nil
+}
+
+// The list is read off the Update goroutine and published as an event; the picker opens immediately in a loading state instead of blocking the frame.
+func (m *Model) openBranchPicker(path, mode, variant string) tea.Cmd {
+	m.picker = &branchPicker{path: path, mode: mode, variant: variant, loading: true, current: m.states[path].Status.Branch}
+	appCtx := m.ctx
+	events := m.events
+	go func() {
+		branches, err := gitstatus.LocalBranches(appCtx, path)
+		errStr := ""
+		if err != nil {
+			errStr = gitstatus.FailureReason("", err)
+		}
+		sendEvent(appCtx, events, branchesMsg{path: path, mode: mode, branches: branches, err: errStr})
 	}()
 	return nil
 }

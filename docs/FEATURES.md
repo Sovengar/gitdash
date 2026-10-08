@@ -12,6 +12,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [Discovery & marker file](#discovery--marker-file) | Walk roots for `.gitdash.toml`; the folder is the repo | `roots`, `marker` config |
 | [Groups & worktrees](#groups--worktrees) | Two-level foldable groups; worktrees as navigable subrows | `enter`, marker `primary_group`/`secondary_group` |
 | [Pull selector](#pull-selector) | Armed prefix key; next key picks the policy variant | `p` then `p`/`r`/`f`/`m`/`a` |
+| [Switch branch](#switch-branch) | Armed prefix key; picker changes the current or the sync branch | `b` then `c`/`s` |
 | [Push](#push) | Push the cursor's repo | `P` |
 | [Sync](#sync) | Fetch + pull --rebase --autostash against the sync branch | `s` |
 | [AI pull](#ai-pull) | Hand off to a configured AI command with the marker's prompt | `p` then `a` |
@@ -62,6 +63,15 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 ## Push
 
 - Runs `git push` (configurable via `[commands] push`); records the resolved argv in the command log.
+
+## Switch branch
+
+- **Armed prefix** — `b` captures the cursor's path; the next key picks the variant. Any other key cancels and runs its normal action.
+- **Variants** — `c` checkout (change the checked-out branch), `s` sync ref (change the repo's sync branch).
+- **Branch picker** — after the variant opens a list of local branches (read on demand via `git branch`); `j`/`k` or arrows move, `enter` selects, `esc` cancels.
+- **Current branch** — selecting the branch already checked out is a no-op toast; no process runs.
+- **Sync ref persistence** — `bs` rewrites only the `sync_branch` line of the repo's `.gitdash.toml` (comments and the `[ai]` prompt stay byte-identical) and refreshes the project and snapshot.
+- **Command log** — both variants leave an intent (`key bc` / `key bs`); `checkout` runs through the shared git executor.
 
 ## Sync
 
