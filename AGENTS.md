@@ -311,9 +311,11 @@ evident:
   right column owns the worktrees and files lists, each with its own budget so an
   oversized worktrees list does not starve the files list of its `… N more`.
   `renderDetail` pads both columns to the same height and joins them with a dim
-  separator before the box styles anything, or ANSI breaks the width. `activity`
-  (the last-commit age) is what raised the head from 5 to `detailHeadLines` = 6
-  lines.
+  separator before the box styles anything, or ANSI breaks the width. With the
+  right column empty (no worktrees, no files) the separator is NOT painted — a
+  lone gray line with nothing at its right — and the fields take the whole inner
+  width. `activity` (the last-commit age) is what raised the head from 5 to
+  `detailHeadLines` = 6 lines.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
 - **The diagnostics and the action/command tails span the full card width**,
@@ -343,10 +345,12 @@ its header counts). States at zero are not painted.
 To the right of the table there is a panel with the commits of the row under the
 cursor. Decisions that are not evident:
 
-- **It is additive on WIDTH, not height.** A fixed 30 cells plus a 1-cell gap:
-  `m.layout()` draws it only if the table still shows its 5 columns at the split
-  width (`119` with the current constants). It shares the table's box height and
-  gives back nothing, so terminal lines stay conserved at every height.
+- **It is additive on WIDTH, not height.** `max(30, width/4)` cells plus a 1-cell
+  gap: the 30 floor keeps the old `119` boundary, and past it the panel buys the
+  commit subjects a readable width (the table's columns have fixed widths, so the
+  slack it gives up was empty anyway). `m.layout()` still draws it only if the
+  table shows its 5 columns at the split width. It shares the table's box height
+  and gives back nothing, so terminal lines stay conserved at every height.
 - **It is dropped, never fallback.** Below the width boundary there is no commits
   panel and the card does not recover the commits block: the behavior says the
   commits "are not shown anywhere", so a fallback would be a second source of
