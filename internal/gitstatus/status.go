@@ -222,6 +222,16 @@ func RemoteURL(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// Bounded and on demand: one `for-each-ref` per form open serves both pickers, so the periodic scan
+// never pays for branch names nobody asked for. It leaves through runGit, so the log records it as a read.
+func BranchRefs(ctx context.Context, dir string) ([]Ref, error) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return nil, err
+	}
+	return ParseRefs(string(out)), nil
+}
+
 // Uses --git-path because in a worktree .git is a file and the rebase state lives under .git/worktrees/<name>/.
 func RebaseInProgress(ctx context.Context, dir string) bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
