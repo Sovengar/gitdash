@@ -17,7 +17,8 @@ const (
 	minBodyLines = 3
 
 	// Width budget: the table row prefix is a 2-cell cursor plus a 2-cell fetch slot; the commits
-	// panel is a fixed 30 cells with a 1-cell gap, and the card splits into 36 + separator + 24.
+	// panel is a fixed 30 cells with a 1-cell gap; the card splits into at least 36 + separator +
+	// 24 and the fields column grows with the terminal.
 	rowPrefixWidth = 4
 	fetchSlotWidth = 2
 
@@ -27,6 +28,9 @@ const (
 	cardLeftWidth  = 36
 	cardSepWidth   = 1
 	cardRightWidth = 24
+	// Share of the inner width (in fifths) the lists column takes once it grows past its floor;
+	// the fields column keeps the rest, because path/upstream are the values that clip first.
+	cardRightShare = 2
 )
 
 type layout struct {
@@ -139,4 +143,12 @@ func (l layout) mismaChromeQue(o layout) bool {
 	return l.showStats == o.showStats &&
 		l.showKeybinds == o.showKeybinds &&
 		l.hintLines == o.hintLines
+}
+
+// The card's columns: the lists column never drops below cardRightWidth and grows to
+// cardRightShare/5 of the inner width; the fields column takes what is left. Both floors hold
+// whenever the split is on (inner >= cardLeftWidth+cardSepWidth+cardRightWidth).
+func cardColumns(inner int) (left, right int) {
+	right = max(cardRightWidth, (inner-cardSepWidth)*cardRightShare/5)
+	return inner - cardSepWidth - right, right
 }

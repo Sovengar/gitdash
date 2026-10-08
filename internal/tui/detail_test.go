@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
@@ -196,13 +197,14 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 	m.lastAction[pathLargo] = actionResult{kind: "pull_rebase", cmd: "git pull --rebase " + long, output: ""}
 
 	// Literal widths, not the same max(...) the card computes: a derived expectation moves with the mutant.
+	// At width 120 the split is left=71/right=46 (cardColumns), so the clips are 63, 41 and 34.
 	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
 	for _, c := range []struct {
 		that string
 		want string
 	}{
-		{"repo path", truncate(pathLargo, 28)},            // cardLeftWidth - 8
-		{"file", truncate(long+".go", 19)},                // cardRightWidth - 5
+		{"repo path", truncate(pathLargo, 63)},            // left - 8
+		{"file", truncate(long+".go", 41)},                // right - 5
 		{"argv", truncate("git pull --rebase "+long, 90)}, // 120 - 30
 	} {
 		if !strings.Contains(out, c.want) {
@@ -217,7 +219,7 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 	}())
 	m2.width = 120
 	outWT := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
-	if want := truncate("wt/"+long, 12); !strings.Contains(outWT, want) { // cardRightWidth - 2 - wtBranchWidth
+	if want := truncate("wt/"+long, 34); !strings.Contains(outWT, want) { // right - 2 - wtBranchWidth
 		t.Errorf("the worktree path is not clipped to its width (%q…):\n%s", want[:20], outWT)
 	}
 }
@@ -233,7 +235,7 @@ func TestCardClipsTheListsToLiteralWidths(t *testing.T) {
 	}())
 	m.width = 120
 	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
-	// The right column gives the file path cardRightWidth-5 = 19 runes, so the clip leaves 18 x's before the ellipsis.
+	// The right column gives the file path right-5 = 41 runes at width 120, so the clip leaves 40 x's before the ellipsis.
 	var line string
 	for _, l := range strings.Split(out, "\n") {
 		if strings.Contains(l, ".M") && strings.Contains(l, "x") {
@@ -241,13 +243,69 @@ func TestCardClipsTheListsToLiteralWidths(t *testing.T) {
 			break
 		}
 	}
-	if got := trailingRun(line, 'x'); got != 18 {
-		t.Errorf("the file paints a run of %d, want its literal 18 (19 columns):\n%s", got, out)
+	if got := trailingRun(line, 'x'); got != 40 {
+		t.Errorf("the file paints a run of %d, want its literal 40 (41 columns):\n%s", got, out)
 	}
 }
 
 func trailingRun(s string, r rune) int {
 	return len(s) - strings.LastIndexFunc(s, func(c rune) bool { return c != r }) - 1
+}
+
+// Literal widths: the lists column grows to 2/5 of the inner width above cardRightWidth, and the
+// fields keep the rest above cardLeftWidth.
+func TestCardColumns(t *testing.T) {
+	for _, c := range []struct {
+		inner, left, right int
+	}{
+		{61, 36, 24},   // the split's floor: a 63-cell terminal
+		{118, 71, 46},  // a 120-cell terminal
+		{246, 147, 98}, // an ultrawide one
+	} {
+		left, right := cardColumns(c.inner)
+		if left != c.left || right != c.right {
+			t.Errorf("cardColumns(%d) = (%d, %d), want (%d, %d)", c.inner, left, right, c.left, c.right)
+		}
+	}
+}
+
+// The separator was glued to the left while the right half of the card stayed empty: its column
+// has to move with the terminal.
+func TestCardSeparatorFollowsTheWidth(t *testing.T) {
+	long := strings.Repeat("p", 100)
+	for _, c := range []struct {
+		width, sep int
+	}{
+		{63, 36},
+		{64, 37},
+		{120, 71},
+		{246, 146},
+	} {
+		m, r := detailRowWith(t, "/tmp/api/"+long, snapClean())
+		m.width = c.width
+		out := stripANSI(m.renderDetail(r, 40, c.width, m.layout().cardSplit))
+		line := lineWith(out, "path")
+		if idx := strings.Index(line, "│"); idx < 0 || utf8.RuneCountInString(line[:idx]) != c.sep {
+			t.Errorf("width=%d: the separator sits before %d cells, want %d: %q", c.width, utf8.RuneCountInString(line[:max(0, idx)]), c.sep, line)
+		}
+	}
+}
+
+// The complaint that started this: at 120 cells the whole path and upstream fit, so cutting them
+// there while the lists column has room left is wrong.
+func TestCardWidePathAndUpstreamAreVisible(t *testing.T) {
+	path := "/home/dev/work/visualco/assignator-api-vsocial"
+	snap := snapClean()
+	snap.Status.Upstream = "origin/deploy/SEP26Assignee"
+	m, r := detailRowWith(t, path, snap)
+	m.width = 120
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	if !strings.Contains(out, path) {
+		t.Errorf("the path is not painted whole at width 120:\n%s", out)
+	}
+	if !strings.Contains(out, "origin/deploy/SEP26Assignee") {
+		t.Errorf("the upstream is not painted whole at width 120:\n%s", out)
+	}
 }
 
 func TestCardShowsTheArgvOfTheLastAction(t *testing.T) {

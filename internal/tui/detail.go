@@ -12,8 +12,8 @@ import (
 
 const detailHeadLines = 6
 
-// The worktrees list lives in the 24-cell right column: the branch takes a fixed slice and the
-// relative path gets whatever is left.
+// The worktrees list lives in the card's right column (24 cells at its floor): the branch takes a
+// fixed slice and the relative path gets whatever is left.
 const wtBranchWidth = 10
 
 const minListBlockLines = 2
@@ -55,15 +55,15 @@ func (m *Model) cardTail(body string, rows int) string {
 // the layout cannot disagree on where the two-column card begins.
 func (m *Model) renderDetail(r row, rows, width int, split bool) string {
 	rows = max(1, rows)
-	fields := m.detailFields(r)
 	var body string
 	if split {
-		body = joinCardColumns(fields, m.detailRightColumn(r, rows))
+		left, right := cardColumns(width - 2)
+		body = joinCardColumns(m.detailFields(r, left), m.detailRightColumn(r, rows, right), left, right)
 	} else {
-		body = m.detailCollapsed(r, fields, rows)
+		body = m.detailCollapsed(r, m.detailFields(r, cardLeftWidth), rows)
 	}
 	// The diagnostics and the action/command tails span the full card width: they carry argv and
-	// output, which the 36-cell left column would clip to nothing useful.
+	// output, which the fields column would clip to nothing useful.
 	if tail := m.detailTail(r, rows, width); tail != "" {
 		body += "\n" + tail
 	}
@@ -71,12 +71,13 @@ func (m *Model) renderDetail(r row, rows, width int, split bool) string {
 	return m.cardTail(strings.TrimRight(body, "\n"), rows)
 }
 
-// Fields first (the 6-line head).
-func (m *Model) detailFields(r row) string {
+// Fields first (the 6-line head). `left` is either cardLeftWidth (collapsed card) or a split
+// width that never drops below it, so the clip needs no floor.
+func (m *Model) detailFields(r row, left int) string {
 	var b strings.Builder
 	p := r.project
 	key := styleDetailKey.Render
-	value := max(20, cardLeftWidth-8)
+	value := left - 8
 
 	// The path is one more header field and not a loose line: on its own line (with the gap that separated it) it took a height the lists need, and its value is dimmed because it is context, not state.
 	b.WriteString(key("path    ") + styleHint.Render(truncate(p.Path, value)) + "\n")
@@ -123,8 +124,9 @@ func (m *Model) detailFields(r row) string {
 }
 
 // The right column owns the two lists with their own budget: an oversized worktrees list does not
-// starve the files list of its own "… N more" warning.
-func (m *Model) detailRightColumn(r row, rows int) string {
+// starve the files list of its own "… N more" warning. `right` comes from cardColumns, so its
+// floor is cardRightWidth.
+func (m *Model) detailRightColumn(r row, rows, right int) string {
 	var b strings.Builder
 	key := styleDetailKey.Render
 	nW, nF := len(r.snap.Worktrees), len(r.snap.Files)
@@ -144,7 +146,7 @@ func (m *Model) detailRightColumn(r row, rows int) string {
 				rel = wt.Path
 			}
 			b.WriteString("  " + styleDim.Render(pad(truncate(wt.Branch, wtBranchWidth), wtBranchWidth)) +
-				truncate(rel, max(1, cardRightWidth-2-wtBranchWidth)) + "\n")
+				truncate(rel, right-2-wtBranchWidth) + "\n")
 		}
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", nW-shown)) + "\n")
@@ -156,7 +158,7 @@ func (m *Model) detailRightColumn(r row, rows int) string {
 		b.WriteString("\n" + key(fmt.Sprintf("files (%d)", nF)) + "\n")
 		for _, f := range r.snap.Files[:shown] {
 			b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) +
-				truncate(f.Path, max(1, cardRightWidth-5)) + "\n")
+				truncate(f.Path, right-5) + "\n")
 		}
 		if rest {
 			b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", nF-shown)) + "\n")
@@ -255,7 +257,7 @@ func (m *Model) detailCollapsed(r row, left string, rows int) string {
 
 // Rune-clip then pad each column to its exact width (ANSI-aware) so the separator lands on the same
 // column in every row and the joined card keeps the terminal's inner width.
-func joinCardColumns(left, right string) string {
+func joinCardColumns(left, right string, leftW, rightW int) string {
 	ll := strings.Split(strings.TrimRight(left, "\n"), "\n")
 	rl := strings.Split(strings.TrimRight(right, "\n"), "\n")
 	n := max(len(ll), len(rl))
@@ -264,7 +266,7 @@ func joinCardColumns(left, right string) string {
 	sep := styleDim.Render("│")
 	out := make([]string, n)
 	for i := range n {
-		out[i] = fitCell(ll[i], cardLeftWidth) + sep + fitCell(rl[i], cardRightWidth)
+		out[i] = fitCell(ll[i], leftW) + sep + fitCell(rl[i], rightW)
 	}
 	return strings.Join(out, "\n")
 }
