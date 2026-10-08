@@ -1,6 +1,7 @@
 package gitstatus
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
@@ -33,6 +34,9 @@ func TestSyncBehind(t *testing.T) {
 	}
 	if snap.SyncBehind != 1 {
 		t.Errorf("behind = %d, want 1 (only m1 missing)", snap.SyncBehind)
+	}
+	if snap.SyncAhead != 1 {
+		t.Errorf("ahead = %d, want 1 (feat 1 missing on main)", snap.SyncAhead)
 	}
 	// The panel's second group comes from the same ref the divergence counts, newest first.
 	if len(snap.SyncCommits) != 2 || snap.SyncCommits[0].Subject != "main 1" {
@@ -273,12 +277,12 @@ func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	var probadaMain, probadaMaster bool
 	for _, e := range rec.Entries() {
 		switch e.Command() {
-		case "git rev-list --count HEAD..main":
+		case "git rev-list --left-right --count HEAD...main":
 			probadaMain = true
 			if e.Exit == 0 {
 				t.Error("main resolved in a repo that does not have it")
 			}
-		case "git rev-list --count HEAD..master":
+		case "git rev-list --left-right --count HEAD...master":
 			probadaMaster = true
 			if e.Exit != 0 {
 				t.Errorf("Exit = %d, want 0 (master does exist)", e.Exit)
@@ -290,5 +294,37 @@ func TestSyncFallbackLaunchesAGitAgainstMaster(t *testing.T) {
 	}
 	if !probadaMaster {
 		t.Error("the fallback never got to try master")
+	}
+}
+
+// Ahead is the other half of the same count: commits the branch has and the sync ref does not.
+func TestSyncAhead(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	testutil.NewBranch(t, dir, "feat")
+	testutil.CommitFiles(t, dir, map[string]string{"f.txt": "f"}, "feat 1")
+
+	snap := Collect(t.Context(), dir, "main", false)
+	if !snap.SyncKnown || snap.SyncAhead != 1 || snap.SyncBehind != 0 {
+		t.Errorf("known/ahead/behind = %v/%d/%d, want true/1/0", snap.SyncKnown, snap.SyncAhead, snap.SyncBehind)
+	}
+}
+
+// Both logs are capped at the panel's depth, pinned as literals so a mutated constant cannot move the assertion with it. The counts are NOT capped: they are the full divergence.
+func TestCollectCapsBothLogsAt15(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	for i := 0; i < 17; i++ {
+		testutil.CommitFiles(t, dir, map[string]string{"m.txt": fmt.Sprint(i)}, "main "+fmt.Sprint(i))
+	}
+	testutil.NewBranch(t, dir, "feat")
+	for i := 0; i < 17; i++ {
+		testutil.CommitFiles(t, dir, map[string]string{"f.txt": fmt.Sprint(i)}, "feat "+fmt.Sprint(i))
+	}
+
+	snap := Collect(t.Context(), dir, "main", false)
+	if len(snap.Commits) != 15 || len(snap.SyncCommits) != 15 {
+		t.Errorf("current/sync commits = %d/%d, want 15/15", len(snap.Commits), len(snap.SyncCommits))
+	}
+	if snap.SyncAhead != 17 || snap.SyncBehind != 0 {
+		t.Errorf("ahead/behind = %d/%d, want 17/0", snap.SyncAhead, snap.SyncBehind)
 	}
 }

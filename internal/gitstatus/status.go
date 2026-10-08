@@ -22,6 +22,9 @@ import (
 // syncFallbackBranch is probed when the configured sync ref is missing: many repos still live on master.
 const syncFallbackBranch = "master"
 
+// commitsLogDepth caps the commits panel's two logs: the layout paints only what fits, so this is a fetch ceiling, not what the panel always shows.
+const commitsLogDepth = 15
+
 type Snapshot struct {
 	Status      Status
 	Files       []FileEntry
@@ -30,6 +33,7 @@ type Snapshot struct {
 	LastCommit  int64
 	Worktrees   []Worktree
 	SyncBranch  string
+	SyncAhead   int
 	SyncBehind  int
 	SyncKnown   bool
 	Err         string
@@ -67,28 +71,28 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 	if syncBranch != "" {
 		// Filled even when the comparison fails: the UI still shows the branch name.
 		snap.SyncBranch = syncBranch
-		n, ok := syncBehind(ctx, dir, syncBranch)
+		ahead, behind, ok := syncCounts(ctx, dir, syncBranch)
 		if !ok && allowFallback && syncBranch != syncFallbackBranch {
 			// The fallback probe lives here and not earlier: main resolves in every modern repo, so an extra rev-list per repo per cycle would only be paid where it is needed.
-			n, ok = syncBehind(ctx, dir, syncFallbackBranch)
+			ahead, behind, ok = syncCounts(ctx, dir, syncFallbackBranch)
 			if ok {
 				snap.SyncBranch = syncFallbackBranch
 			}
 		}
 		if ok {
-			snap.SyncBehind = n
+			snap.SyncAhead, snap.SyncBehind = ahead, behind
 			snap.SyncKnown = true
 		}
 		// The panel's second group: the same ref the divergence counts, so what is compared and
 		// what is shown cannot disagree; skipped on the sync branch itself (the lists would duplicate).
 		if snap.SyncBranch != snap.Status.Branch {
-			if syncOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s", snap.SyncBranch); err == nil {
+			if syncOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-"+strconv.Itoa(commitsLogDepth), "--format=%h%x00%ct%x00%s", snap.SyncBranch); err == nil {
 				snap.SyncCommits = ParseLog(string(syncOut))
 			}
 		}
 	}
 
-	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s")
+	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-"+strconv.Itoa(commitsLogDepth), "--format=%h%x00%ct%x00%s")
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
 		snap.LastCommit = lastCommitWhen(snap.Commits)
@@ -109,14 +113,14 @@ func lastCommitWhen(commits []Commit) int64 {
 	return commits[0].When
 }
 
-func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
-	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--count", "HEAD.."+sync)
+// syncCounts splits the divergence with the sync ref in one rev-list: commits only HEAD has (ahead) and only the sync ref has (behind), the two counts the panel colours with and the SYNC column shows.
+func syncCounts(ctx context.Context, dir, sync string) (ahead, behind int, ok bool) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--left-right", "--count", "HEAD..."+sync)
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	// known comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to known=false.
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	return n, err == nil
+	// ok comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to ok=false.
+	return parseLeftRightCount(string(out))
 }
 
 func normalizeBranch(st Status) string {
