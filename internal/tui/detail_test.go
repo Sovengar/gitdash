@@ -296,7 +296,7 @@ func TestCardSeparatorFollowsTheWidth(t *testing.T) {
 // A clean repo has no right column: the separator would be a lone gray line with nothing at its
 // right, and the fields can use the whole card.
 func TestCardCleanRepoPaintsNoSeparator(t *testing.T) {
-	long := "/" + strings.Repeat("dir/", 25) + "repo" // 105 chars: clipped by a split's left column, whole at full width
+	long := "/" + strings.Repeat("dir/", 25) + "repo" // 105 chars: whole only because the fields own the card
 	m, r := detailRowWith(t, long, snapClean())
 	m.width = 120
 	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
@@ -305,6 +305,15 @@ func TestCardCleanRepoPaintsNoSeparator(t *testing.T) {
 	}
 	if !strings.Contains(out, long) {
 		t.Errorf("the path is not painted whole with the right column empty:\n%s", out)
+	}
+
+	// The fields clip at the full inner width, not at the split's left column: 120-2-8 = 110.
+	over := "/" + strings.Repeat("x", 150)
+	m2, r2 := detailRowWith(t, over, snapClean())
+	m2.width = 120
+	out2 := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
+	if want := truncate(over, 110); !strings.Contains(out2, want) {
+		t.Errorf("with no lists the path is not clipped at the full 110 cells (want %q):\n%s", truncate(want, 20), out2)
 	}
 }
 
