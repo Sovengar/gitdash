@@ -189,7 +189,7 @@ func (m *Model) panelSection(lay layout, entries []tableEntry) string {
 	case !ok:
 		title, content = "commits", m.panelEmpty()
 	case e.kind == kindRepo:
-		title, content = "commits · "+detailTitle(e.r), m.commitsPanel(e.r.snap.Commits, rows, inner)
+		title, content = "commits · "+detailTitle(e.r), m.commitsPanel(e.r.snap, rows, inner)
 	case e.kind == kindWorktree:
 		title, content = "commits · "+worktreeTitle(e), m.worktreeCommitsPanel(e, rows, inner)
 	default:
@@ -202,19 +202,46 @@ func (m *Model) panelEmpty() string {
 	return styleDim.Render("  " + m.emptyTableHint())
 }
 
-func (m *Model) commitsPanel(commits []gitstatus.Commit, rows, inner int) string {
-	if len(commits) == 0 {
-		return styleDim.Render("  no commits")
+// commitGroup is one labelled list inside the commits panel.
+type commitGroup struct {
+	label   string
+	commits []gitstatus.Commit
+}
+
+// The groups are the current branch and, only when the repo declares a DIFFERENT sync ref with
+// commits of its own, the sync branch: on the sync branch itself the two lists would duplicate.
+func commitGroups(snap gitstatus.Snapshot) []commitGroup {
+	label := "current"
+	if snap.Status.Branch != "" {
+		label = snap.Status.Branch + " (current)"
 	}
+	groups := []commitGroup{{label: label, commits: snap.Commits}}
+	if snap.SyncBranch != "" && snap.SyncBranch != snap.Status.Branch && len(snap.SyncCommits) > 0 {
+		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits})
+	}
+	return groups
+}
+
+// One line per commit, newest first, never wrapped: the subject is cut to whatever the body leaves
+// after the sha/age prefix. The height is shared between the groups so the last one is not clipped
+// away by the first, and each group always keeps room for one commit.
+func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
+	groups := commitGroups(snap)
+	per := max(1, (rows-len(groups))/len(groups))
 	var b strings.Builder
-	// One line per commit, newest first, never wrapped: the subject is cut to whatever the 30-cell body leaves after the sha/age prefix.
-	shown := min(len(commits), max(1, rows))
-	for _, c := range commits[:shown] {
-		fmt.Fprintf(&b, "%s %s %s\n",
-			styleDim.Render(pad(c.Sha, 8)),
-			pad(relativeTime(c.When), 6),
-			truncate(c.Subject, max(1, inner-18)),
-		)
+	for _, g := range groups {
+		b.WriteString(styleDetailKey.Render(truncate(g.label, inner)) + "\n")
+		if len(g.commits) == 0 {
+			b.WriteString(styleDim.Render("  no commits") + "\n")
+			continue
+		}
+		for _, c := range g.commits[:min(len(g.commits), per)] {
+			fmt.Fprintf(&b, "%s %s %s\n",
+				styleDim.Render(pad(c.Sha, 8)),
+				pad(relativeTime(c.When), 6),
+				truncate(c.Subject, max(1, inner-18)),
+			)
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -222,7 +249,7 @@ func (m *Model) commitsPanel(commits []gitstatus.Commit, rows, inner int) string
 func (m *Model) worktreeCommitsPanel(e tableEntry, rows, inner int) string {
 	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
-			return m.commitsPanel(snap.Commits, rows, inner)
+			return m.commitsPanel(snap, rows, inner)
 		}
 	}
 	// No live snapshot for that path: a dim placeholder, never the parent repo's commits.

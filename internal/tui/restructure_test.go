@@ -234,8 +234,110 @@ func TestPanelListsTheCommits(t *testing.T) {
 	if len(panel) != lay.bodyLines+1 {
 		t.Errorf("the panel paints %d lines, want the table's body rows + 1 = %d", len(panel), lay.bodyLines+1)
 	}
-	if !strings.Contains(panel[0], "newest") || !strings.Contains(panel[1], "older") || !strings.Contains(panel[2], "oldest") {
-		t.Errorf("the commits are not newest first:\n%v", panel)
+	if !strings.Contains(panel[0], "main (current)") {
+		t.Errorf("the panel does not label the current branch group:\n%v", panel)
+	}
+	if !strings.Contains(panel[1], "newest") || !strings.Contains(panel[2], "older") || !strings.Contains(panel[3], "oldest") {
+		t.Errorf("the commits are not newest first under their group:\n%v", panel)
+	}
+}
+
+// The sync branch opens a second labelled group, below the current one.
+func TestPanelGroupsCurrentAndSync(t *testing.T) {
+	snap := committedSnap("c1", "c2")
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{{Sha: "1234567", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"}}
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snap})
+	m.width = 119
+	box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+	for _, want := range []string{"main (current)", "c1", "master (sync)", "s1"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the panel does not paint %q:\n%s", want, box)
+		}
+	}
+	if strings.Index(box, "main (current)") > strings.Index(box, "master (sync)") {
+		t.Errorf("the sync group is not below the current one:\n%s", box)
+	}
+}
+
+// The group is only born with the repo declaring a DIFFERENT sync ref and having its commits: on
+// the sync branch itself the two lists would duplicate, and without commits the label lies.
+func TestPanelSyncGroupOnlyWhenItHasCommits(t *testing.T) {
+	commits := []gitstatus.Commit{{Sha: "1234567", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"}}
+	cases := []struct {
+		name              string
+		syncBranch        string
+		injectSyncCommits bool
+	}{
+		{"on the sync branch itself", "main", true},
+		{"the ref has no commits", "master", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snap := committedSnap("c1")
+			snap.SyncBranch = c.syncBranch
+			if c.injectSyncCommits {
+				snap.SyncCommits = commits
+			}
+			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+				map[string]gitstatus.Snapshot{"/tmp/api": snap})
+			m.width = 119
+			box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+			if strings.Contains(box, "(sync)") {
+				t.Errorf("a sync group was painted:\n%s", box)
+			}
+			if !strings.Contains(box, "main (current)") {
+				t.Errorf("the current group lost its label:\n%s", box)
+			}
+		})
+	}
+}
+
+// A detached HEAD without a sha has no branch name to paint: the group falls back to its tag only.
+func TestPanelUnnamedBranchGroup(t *testing.T) {
+	snap := committedSnap("c1")
+	snap.Status.Branch = ""
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snap})
+	m.width = 119
+	box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+	if !strings.Contains(box, "current") {
+		t.Errorf("the group lost its label:\n%s", box)
+	}
+	if strings.Contains(box, "(current)") {
+		t.Errorf("a group without a branch name was labelled as if it had one:\n%s", box)
+	}
+}
+
+// The height is shared between the groups, and each one always keeps room for one commit: the
+// last group cannot be clipped away by the first.
+func TestPanelSharesTheHeightBetweenGroups(t *testing.T) {
+	snap := committedSnap("c1", "c2", "c3")
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{
+		{Sha: "aaaaaaa", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"},
+		{Sha: "bbbbbbb", When: time.Now().Add(-time.Hour).Unix(), Subject: "s2"},
+	}
+	m := newTestModel(t, nil, nil)
+	for _, c := range []struct {
+		rows           int
+		wantC2, wantS2 bool
+	}{
+		{4, false, false}, // (4-2)/2 = 1 per group
+		{6, true, true},   // (6-2)/2 = 2 per group
+		{2, false, false}, // the floor of one per group, with no room to spare
+	} {
+		out := stripANSI(m.commitsPanel(snap, c.rows, 28))
+		if !strings.Contains(out, "c1") || !strings.Contains(out, "s1") {
+			t.Errorf("rows=%d: a group lost its first commit:\n%s", c.rows, out)
+		}
+		if got := strings.Contains(out, "c2"); got != c.wantC2 {
+			t.Errorf("rows=%d: c2 painted = %v, want %v:\n%s", c.rows, got, c.wantC2, out)
+		}
+		if got := strings.Contains(out, "s2"); got != c.wantS2 {
+			t.Errorf("rows=%d: s2 painted = %v, want %v:\n%s", c.rows, got, c.wantS2, out)
+		}
 	}
 }
 
