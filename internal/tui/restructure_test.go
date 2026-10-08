@@ -180,9 +180,9 @@ func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	for _, c := range []struct {
 		width, panel, table int
 	}{
-		{119, 30, 88},  // the floor: the old fixed width
-		{121, 32, 88},  // the cap: the table at its minimum
-		{168, 68, 99},  // the share: cardColumns(166).right + 2
+		{119, 30, 88}, // the floor: the old fixed width
+		{121, 32, 88}, // the cap: the table at its minimum
+		{168, 68, 99}, // the share: cardColumns(166).right + 2
 		{400, 160, 239},
 	} {
 		m := newTestModel(t, projects, states)
