@@ -58,7 +58,14 @@ func (m *Model) renderDetail(r row, rows, width int, split bool) string {
 	var body string
 	if split {
 		left, right := cardColumns(width - 2)
-		body = joinCardColumns(m.detailFields(r, left), m.detailRightColumn(r, rows, right), left, right)
+		rightCol := m.detailRightColumn(r, rows, right)
+		// With nothing to separate (no worktrees, no files) the separator is not painted and the
+		// fields take the whole card: a lone gray line is noise the user reads as a bug.
+		if rightCol == "" {
+			body = m.detailFields(r, width-2)
+		} else {
+			body = joinCardColumns(m.detailFields(r, left), rightCol, left, right)
+		}
 	} else {
 		body = m.detailCollapsed(r, m.detailFields(r, cardLeftWidth), rows)
 	}

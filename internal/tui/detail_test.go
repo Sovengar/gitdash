@@ -270,7 +270,7 @@ func TestCardColumns(t *testing.T) {
 }
 
 // The separator was glued to the left while the right half of the card stayed empty: its column
-// has to move with the terminal.
+// has to move with the terminal. (The right column needs content, or there is nothing to separate.)
 func TestCardSeparatorFollowsTheWidth(t *testing.T) {
 	long := strings.Repeat("p", 100)
 	for _, c := range []struct {
@@ -281,13 +281,30 @@ func TestCardSeparatorFollowsTheWidth(t *testing.T) {
 		{120, 71},
 		{246, 146},
 	} {
-		m, r := detailRowWith(t, "/tmp/api/"+long, snapClean())
+		snap := snapClean()
+		snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+		m, r := detailRowWith(t, "/tmp/api/"+long, snap)
 		m.width = c.width
 		out := stripANSI(m.renderDetail(r, 40, c.width, m.layout().cardSplit))
 		line := lineWith(out, "path")
 		if idx := strings.Index(line, "│"); idx < 0 || utf8.RuneCountInString(line[:idx]) != c.sep {
 			t.Errorf("width=%d: the separator sits before %d cells, want %d: %q", c.width, utf8.RuneCountInString(line[:max(0, idx)]), c.sep, line)
 		}
+	}
+}
+
+// A clean repo has no right column: the separator would be a lone gray line with nothing at its
+// right, and the fields can use the whole card.
+func TestCardCleanRepoPaintsNoSeparator(t *testing.T) {
+	long := "/" + strings.Repeat("dir/", 25) + "repo" // 105 chars: clipped by a split's left column, whole at full width
+	m, r := detailRowWith(t, long, snapClean())
+	m.width = 120
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	if strings.Contains(out, "│") {
+		t.Errorf("the clean card paints the separator:\n%s", out)
+	}
+	if !strings.Contains(out, long) {
+		t.Errorf("the path is not painted whole with the right column empty:\n%s", out)
 	}
 }
 
@@ -395,6 +412,9 @@ func TestCardNotPaintsListsEmpty(t *testing.T) {
 		if strings.Contains(out, header) {
 			t.Errorf("a repo with no data painted the %q list:\n%s", header, out)
 		}
+	}
+	if strings.Contains(out, "│") {
+		t.Errorf("with no lists the card paints the separator:\n%s", out)
 	}
 	for _, field := range []string{"path", "branch", "upstream", "state", "sync", "activity"} {
 		if !strings.Contains(out, field) {
