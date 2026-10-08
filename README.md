@@ -13,6 +13,10 @@ were reimplemented in Go + Bubbletea v2 as an interactive TUI, with discovery by
 **marker file** instead of hunting for a loose `.git`, and **automatic batched
 fetch**.
 
+The inventory of features — what each one does and how it is triggered (key,
+flag or command) — lives in [`docs/FEATURES.md`](docs/FEATURES.md). This README
+keeps the usage details.
+
 ## Install
 
 ```bash
@@ -135,24 +139,12 @@ what demands attention is painted (the order is still attention-first).
 
 ## Keys
 
-| Key | Action |
-|---|---|
-| `j/k`, `↑↓` | move the cursor (`g`/`G` for the ends) |
-| `n` | toggle only repos with pending changes |
-| `/` | filter by name/group or by worktree branch/basename (live; `enter` confirms, `esc` clears) |
-| `D` | delete the worktree under the cursor (configurable, `worktree_remove` action; only the worktree, the branch is kept) |
-| `r` | full rescan (discovery + states + auto fetch) |
-| `R` | re-collect the cursor's repo |
-| `f` / `F` | fetch the repo / fetch everything |
-| `s` | sync the current branch with the repo's *sync branch* (`git pull --rebase --autostash origin <sync>`) |
-| `p` | pull selector (see below) |
-| `P` | push |
-| `e` | open `$EDITOR` in the repo's directory |
-| `enter` | fold/unfold whatever is under the cursor: the repo's worktrees, or a group header's block (configurable, `fold` action) |
-| `l` | command log panel: what really ran, with what result and why (see below) |
-| `q` | quit |
+The keys are always visible in the keybinds bar at the bottom of the TUI, and
+the actions are remappable in the `[keybindings]` table of
+`~/.config/gitdash/config.toml`. The inventory of what each action does and how
+it is triggered is in [`docs/FEATURES.md`](docs/FEATURES.md).
 
-### Pull: the policy lives in your gitconfig
+## Pull: the policy lives in your gitconfig
 
 `p` does not run a pull: it opens a selector and the **next** key picks the
 variant.
@@ -284,7 +276,7 @@ Architecture: `internal/config` (XDG TOML), `internal/discovery` (marker walk),
 
 - Fetch the sync branch (refresh the SYNC column without a manual pull)
 - Group actions (fetch/pull a whole group)
-- Extra actions: stash, PRs
+- Extra actions: stash (opening a PR/MR already ships as `O`)
 - Scheduled background fetch
 
 MIT
