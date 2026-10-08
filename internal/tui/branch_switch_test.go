@@ -320,3 +320,109 @@ func TestPickerPromptAndListInTheDashboard(t *testing.T) {
 		t.Errorf("the current branch is not marked:\n%s", box)
 	}
 }
+
+func TestPickerPromptSyncMode(t *testing.T) {
+	m := newPullModel(t)
+	if got := m.branchArmedPrompt(); got != "" {
+		t.Errorf("branchArmedPrompt without a selector = %q, want empty", got)
+	}
+	if got := m.branchPrompt(); got != "" {
+		t.Errorf("branchPrompt without a picker = %q, want empty", got)
+	}
+	m.picker = pickerOn("/tmp/old-clean", pickerModeSync, "s", []string{"main"}, "main")
+	if got := m.branchPrompt(); !strings.Contains(got, "set sync ref") {
+		t.Errorf("sync-mode prompt = %q, want the sync wording", got)
+	}
+	out := stripANSI(m.View().Content)
+	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "enter set sync ref") {
+		t.Errorf("the sync-mode prompt is not in the keybinds section:\n%s", kb)
+	}
+}
+
+func TestPickerUpAndUnhandledKeys(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", []string{"main", "feature"}, "main")
+	m.picker.cursor = 1
+	m, _ = press(m, "k")
+	if m.picker.cursor != 0 {
+		t.Errorf("k did not move the cursor up: %d", m.picker.cursor)
+	}
+	// An unhandled key is swallowed, not forwarded to the table.
+	if out, _, handled := m.handlePickerKey("x"); !handled || out.(Model).picker == nil {
+		t.Error("an unhandled key closed or leaked past the picker")
+	}
+	// The quit keys keep their course so the terminal is never trapped.
+	if _, _, handled := m.handlePickerKey("q"); handled {
+		t.Error("q was consumed by the picker, want it to reach the quit routing")
+	}
+	if _, _, handled := m.handlePickerKey("ctrl+c"); handled {
+		t.Error("ctrl+c was consumed by the picker, want it to reach the quit routing")
+	}
+}
+
+func TestPickerWindowFollowsTheCursor(t *testing.T) {
+	if got := pickerWindow(3, 1, 5); got != 0 {
+		t.Errorf("a list that fits = offset %d, want 0", got)
+	}
+	if got := pickerWindow(10, 9, 5); got != 5 {
+		t.Errorf("cursor at the tail = offset %d, want 5", got)
+	}
+	if got := pickerWindow(10, 0, 5); got != 0 {
+		t.Errorf("cursor at the head = offset %d, want 0", got)
+	}
+}
+
+func TestBranchSectionEmptyAndError(t *testing.T) {
+	m := newPullModel(t)
+	if got := m.branchSection(6); got != "" {
+		t.Errorf("branchSection without a picker = %q, want empty", got)
+	}
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom"}
+	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "branch list failed") {
+		t.Errorf("error section = %q, want the failure wording", box)
+	}
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", branches: nil}
+	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "no local branches") {
+		t.Errorf("empty section = %q, want the empty wording", box)
+	}
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", loading: true}
+	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "loading branches") {
+		t.Errorf("loading section = %q, want the loading wording", box)
+	}
+}
+
+func TestPickerEnterOnFailedListIsNoOp(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom", branches: []string{"main"}}
+	m, _ = press(m, "enter")
+	if m.picker == nil {
+		t.Error("an enter on a failed list closed the picker, want a no-op")
+	}
+	if len(m.running) != 0 {
+		t.Errorf("an enter on a failed list launched a process: %v", m.running)
+	}
+}
+
+func TestBranchSyncMarkerWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gitdash.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
+	m.picker = pickerOn(dir, pickerModeSync, "s", []string{"develop"}, "main")
+
+	m, cmd := press(m, "enter")
+	if m.picker != nil {
+		t.Error("the picker stayed open after a failed write")
+	}
+	if cmd == nil {
+		t.Fatal("a failed marker write should warn")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || nm.level != toastError || !strings.Contains(nm.text, "marker write failed") {
+		t.Errorf("notification = %v, want the marker-write error", cmd())
+	}
+	if len(m.running) != 0 {
+		t.Errorf("a failed write recollected: %v", m.running)
+	}
+}
