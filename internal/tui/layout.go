@@ -52,8 +52,8 @@ type layout struct {
 	cardSplit  bool
 }
 
-// The preview panel is ADDITIVE: it only stays at a height that leaves minBodyLines rows and costs no hint or section; with a form open the search is skipped, since a preview would compete for the height of what the user is typing.
-func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds bool, formMin int) layout {
+// The preview panel is ADDITIVE: it only stays at a height that leaves minBodyLines rows and costs no hint or section.
+func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds bool) layout {
 	filterH := 0
 	if hasFilter {
 		filterH = filterSectionLines
@@ -62,14 +62,13 @@ func computeLayout(height int, hasFilter bool, keybindsLines int, keepKeybinds b
 
 	sinPanel := fitLayout(height, chrome, filterH, 0, keybindsLines, keepKeybinds)
 	lay := sinPanel
-	if formMin <= 0 {
-		for _, preview := range panelCandidates(height, chrome, filterH, keybindsLines) {
-			l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
-			if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
-				l.previewLines = preview
-				lay = l
-				break
-			}
+
+	for _, preview := range panelCandidates(height, chrome, filterH, keybindsLines) {
+		l := fitLayout(height, chrome, filterH, preview, keybindsLines, keepKeybinds)
+		if l.bodyLines >= minBodyLines && l.mismaChromeQue(sinPanel) {
+			l.previewLines = preview
+			lay = l
+			break
 		}
 	}
 	// The filter is the only section whose visibility is not degraded: it is painted while being typed or confirmed and its height is already counted.

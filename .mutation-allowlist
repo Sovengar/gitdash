@@ -173,6 +173,15 @@ ARITHMETIC_BASE internal/tui/toast.go:205
 #   holds the clipped case against the variants that COULD differ (max(1,·) is
 #   killed by it).
 
+CONDITIONALS_BOUNDARY internal/tui/toast.go:261
+#   `if height <= 0 || height > len(lines)` of spliceModal, on the `height > len`
+#   boundary. The only production caller is View, which passes m.height over a
+#   base that renderDashboard built with m.height lines, so height == len(lines):
+#   `> len` and `>= len` both fire and assign the same `height = len(lines)`. The
+#   `<= 0` half is killed by TestSpliceModalZeroHeightCentersLikeTheBaseHeight,
+#   which shows a height of 0 must fall back to the base's line count (a
+#   different centring), so it is not allowlisted.
+
 # --- Measurement noise (not gaps: a test kills them) ----------------------
 # gremlins sometimes reports a mutation as LIVED and, in the SAME run, marks an
 # identical one (same type, same line, same column, same resulting code) as KILLED.
@@ -211,15 +220,35 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:85
 #   be the deciding one.
 
 # --- internal/tui/proverlay.go -------------------------------------------
-# The form's budget has NO survivors any more: they are killed by
+# The modal's budget has NO survivors: they are killed by
 # TestPROverlayTheBudgetIsTheOneTheCommentStates, which holds it by its
-# COMPOSITION (prMinBodyLines == prFixedLines+2, prMinValueWidth ==
-# prLabelWidth, prMinWidth == 2+prLabelWidth+prValueSlack+prMinValueWidth) instead
-# of against the constants, because a test that uses the constant moves with it
-# when the mutant moves it.
+# COMPOSITION (prMinInterior == prFixedLines+prPaneLines+prBodyMinLines,
+# prMinModal == prMinInterior+2,
+# prMinWidth == 2+prLabelWidth+prValueSlack+prMinValueWidth) instead of against
+# the constants, because a test that uses the constant moves with it when the
+# mutant moves it. The width and the body height are pinned by LITERAL numbers
+# (TestPROverlayModalWidthLiteralMargin, TestPROverlayBodyHeightLiteral) so the
+# margin and the arithmetic of prBodyHeight cannot survive on a self-referencing
+# test.
 # The `1` of prValueSlack is still a free parameter inside a minimum (its
 # requirement is "reserve the cursor's cell", i.e. >= 1), but its mutant no longer
 # comes out as a survivor: the composition ties it down just the same.
+
+# --- internal/tui/picker.go ----------------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/picker.go:40
+#   `if n <= 0 || cursor < 0` of clampHighlight, on the `cursor < 0` boundary.
+#   With cursor == 0 the mutated `cursor <= 0` returns 0 and the unmutated path
+#   also returns 0 (min(0, n-1)), so the two are the same. cursor is never
+#   negative in production (arrow handlers clamp with max(0, …)), so the branch
+#   is defensive.
+INVERT_NEGATIVES internal/tui/picker.go:62
+ARITHMETIC_BASE internal/tui/picker.go:62
+#   The second term of the window's min: `min(max(start, 0), n-show)`. start is
+#   already bounded to [0, n-show] before this line (when cursor >= show,
+#   start = cursor-show+1 <= n-show; otherwise start = 0), so the min never
+#   decides and both mutations of `n-show` (the sign flip and the `+`) give a
+#   term >= n-show, leaving the result unchanged. Same class as the cmdlogpanel
+#   clamp above: a defensive second clamp on an already-bounded value.
 
 # --- internal/tui/prcreate.go --------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/prcreate.go:104

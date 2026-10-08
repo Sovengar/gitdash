@@ -15,7 +15,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [Push](#push) | Push the cursor's repo | `P` |
 | [Sync](#sync) | Fetch + pull --rebase --autostash against the sync branch | `s` |
 | [AI pull](#ai-pull) | Hand off to a configured AI command with the marker's prompt | `p` then `a` |
-| [PR/MR creation](#prmr-creation) | Overlay form → `gh pr create` / `glab mr create` | `O`, `ctrl+s` |
+| [PR/MR creation](#prmr-creation) | Floating modal with branch pickers → `gh pr create` / `glab mr create` | `O`, `ctrl+s`, `ctrl+t` |
 | [Visual preview](#visual-preview) | git-sim pull/merge/rebase simulation | `v` then `p`/`m`/`r` |
 | [Fetch](#fetch) | Fetch one repo or all (batched, concurrent) | `f` / `F` |
 | [Editor & lazygit](#editor--lazygit) | Open `$EDITOR` or `lazygit` in the repo | `e` / `g` |
@@ -78,10 +78,13 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## PR/MR creation
 
-- **Overlay form** — `O` opens a form (title, body, base, draft); `tab`/`shift+tab` cycle fields; `space`/`enter` toggles draft; `ctrl+s` submits; `esc` closes.
-- **Forge resolution** — remote URL → `ParseRemoteURL` → `BuildCreateArgv` → `gh pr create` / `glab mr create`; unknown hosts are rejected before executing.
+- **Floating modal** — `O` opens a centred bordered form over the still-visible dashboard (no dimming); the dashboard keeps painting behind it and `esc` closes with no side effects.
+- **Fields** — title, base, head, draft, body; `tab`/`shift+tab` cycle the five and wrap; `space`/`enter` toggles draft; `ctrl+s` submits; body is a textarea and `ctrl+t` inserts a non-destructive `## Summary` / `## Test plan` skeleton at the cursor.
+- **Branch pickers** — base and head are type-to-filter pickers (case-insensitive contains) fed by a bounded on-demand `for-each-ref` read (one per form open, auditable in the command log as a read). Arrows move the highlight (clamped), `enter` commits the highlighted branch — or the typed text when nothing matches (the escape hatch for a detached sha or a fork's `owner:branch`); leaving a field clears its filter. Base offers local and remote-tracking branches, head locals only (a remote name is not a valid PR head).
+- **Forge resolution** — remote URL → `ParseRemoteURL` → `BuildCreateArgv` → `gh pr create` / `glab mr create`; unknown hosts are rejected before executing; the submitted base/head flags carry the picker-chosen values.
 - **Forge config** — `[forge.gitlab]` with `api_base`, `hosts`, `clone_base`, `enabled`; public hosts (github.com, gitlab.com) built-in.
 - **Not a handoff** — output is captured (non-interactive with all flags); duration is measured.
+- **Fits or refuses** — below the modal's derived minimum it refuses to open with a toast; a resize that no longer holds it closes it with a warning.
 
 ## Visual preview
 

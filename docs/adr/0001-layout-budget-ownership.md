@@ -27,8 +27,12 @@ as an argument and never reads `m.width` for the panes it composes:
 
 - the table and the commits panel get `lay.tableWidth` / `lay.panelWidth`;
 - the card gets `lay.cardWidth` and decides split vs. stacked from `lay.cardSplit`;
-- full-width sections (stats, filter, keybinds, the log and the PR form) keep
+- full-width sections (stats, filter, keybinds and the log) keep
   `m.width`, because they are never split.
+
+The PR form is no longer one of those full-width sections: ADR 0002 moved it out
+of the budget and onto a compositor over the dashboard, so it does not appear in
+`layout` at all.
 
 `--print` is out of scope and keeps its own columns and ordering; no column
 model is shared with the TUI.

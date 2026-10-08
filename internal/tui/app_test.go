@@ -117,6 +117,7 @@ var namedKeys = map[string]tea.KeyPressMsg{
 	"tab":       {Code: tea.KeyTab},
 	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
 	"ctrl+s":    {Code: 's', Mod: tea.ModCtrl},
+	"ctrl+t":    {Code: 't', Mod: tea.ModCtrl},
 	"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
 }
 

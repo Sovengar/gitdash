@@ -197,6 +197,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prStartMsg:
 		return m, m.prCreateCmd()
 
+		// Its own message so the bounded read is attributed: a late answer from a previous form is dropped when there is no modal or it moved to another repo.
+	case prRefsMsg:
+		if m.pr != nil && m.pr.path == msg.path {
+			m.pr.refs = msg.refs
+			m.pr.refsErr = msg.err
+			m.pr.refsReady = true
+		}
+		return m.withPump(nil)
+
 		// reject != "" means nothing ran, so there is no exec to record and no state to recollect: only the warning, which says what is missing.
 	case prResultMsg:
 		delete(m.running, msg.path)
@@ -683,8 +692,13 @@ func (m Model) removePrompt() string {
 }
 
 func (m Model) View() tea.View {
+	// The order is dashboard → modal splice → toasts → visual render overlay: the form floats over the dashboard and the toasts over it, while the "in flight" spinner is the topmost layer (it is what is happening now).
+	base := m.renderDashboard()
+	if modal := m.prModal(); modal != "" {
+		base = spliceModal(base, modal, m.width, m.height)
+	}
 	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
-	content := overlayToasts(m.renderDashboard(), m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
+	content := overlayToasts(base, m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	// The render overlay goes LAST, on top of the toasts too: it is what is happening NOW, and a completion toast of another repo must not hide it.
 	content = overlayCentered(content, m.visualOverlayLines(), m.width, m.height)
 	v := tea.NewView(content)
@@ -692,14 +706,11 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// With the log or the PR overlay open the body is not the table but the log or the form (layout already gave back its height): both are views you go to look at, so they replace the table instead of sharing space with it.
+// With the log panel open the body is the log (layout already gave back its height): it is a view you go to look at, so it replaces the table instead of sharing space with it. The PR form no longer replaces anything: it floats over the dashboard, which paints normally behind it.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
 	if m.logOpen {
 		return m.compose(lay, m.logSection(lay.bodyLines), "")
-	}
-	if m.pr != nil {
-		return m.compose(lay, m.prSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
 	table := m.tableSection(lay.bodyLines, entries, lay.tableWidth)
