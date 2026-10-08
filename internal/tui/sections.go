@@ -36,17 +36,29 @@ func (m Model) layout() layout {
 	}
 	// The width split lives here too: the height search stays height-only and every pane reads its
 	// width from this single value, so a degradation decision cannot disagree with what is painted.
-	lay.cardWidth = m.width
+	lay.detailWidth = m.width
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
-	// The commits panel is additive on width: it enters only if the table still shows all its
-	// columns at the split width, otherwise it would silently cost the table a column.
-	tableWidth := m.width - commitsPanelWidth - commitsPanelGap
-	if fitColumns(tableWidth-rowPrefixWidth-2) == len(tableColumns) {
+	// The commits box and the files box share one width: the lists column's share plus the files
+	// box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
+	_, share := cardColumns(m.width - 2)
+	right := min(share+2, m.width-1-minTableWidth())
+	if right >= commitsPanelWidth {
 		lay.showPanel = true
-		lay.tableWidth = tableWidth
-		lay.panelWidth = commitsPanelWidth
+		lay.panelWidth = right
+		lay.tableWidth = m.width - 1 - right
 	} else {
 		lay.tableWidth = m.width
+	}
+	// The bottom band mirrors the top one: left box == tableWidth and right box == panelWidth when
+	// the panel is on; with the panel off the files box keeps the card's share of the width.
+	if lay.cardSplit {
+		if lay.showPanel {
+			lay.detailWidth = lay.tableWidth
+			lay.filesWidth = lay.panelWidth
+		} else {
+			lay.filesWidth = share + 2
+			lay.detailWidth = m.width - 1 - lay.filesWidth
+		}
 	}
 	return lay
 }
@@ -189,7 +201,7 @@ func (m *Model) panelSection(lay layout, entries []tableEntry) string {
 	case !ok:
 		title, content = "commits", m.panelEmpty()
 	case e.kind == kindRepo:
-		title, content = "commits · "+detailTitle(e.r), m.commitsPanel(e.r.snap.Commits, rows, inner)
+		title, content = "commits · "+detailTitle(e.r), m.commitsPanel(e.r.snap, rows, inner)
 	case e.kind == kindWorktree:
 		title, content = "commits · "+worktreeTitle(e), m.worktreeCommitsPanel(e, rows, inner)
 	default:
@@ -202,19 +214,52 @@ func (m *Model) panelEmpty() string {
 	return styleDim.Render("  " + m.emptyTableHint())
 }
 
-func (m *Model) commitsPanel(commits []gitstatus.Commit, rows, inner int) string {
-	if len(commits) == 0 {
-		return styleDim.Render("  no commits")
+type commitGroup struct {
+	label   string
+	commits []gitstatus.Commit
+	accent  lipglossStyle
+}
+
+// The sync group only exists with a DIFFERENT ref that has commits of its own: on the sync branch
+// itself the two lists would duplicate. Each group carries the colour its one-sided commits get;
+// which ones those are is already decided per sha in `Collect`.
+func commitGroups(snap gitstatus.Snapshot) []commitGroup {
+	label := "current"
+	if snap.Status.Branch != "" {
+		label = snap.Status.Branch + " (current)"
 	}
+	groups := []commitGroup{{label: label, commits: snap.Commits, accent: styleAhead}}
+	if snap.SyncBranch != "" && snap.SyncBranch != snap.Status.Branch && len(snap.SyncCommits) > 0 {
+		groups = append(groups, commitGroup{label: snap.SyncBranch + " (sync)", commits: snap.SyncCommits, accent: styleBehind})
+	}
+	return groups
+}
+
+// Newest first, one line per commit, never wrapped: the subject is cut to whatever the body leaves
+// after the sha/age prefix. The height is shared so the first group does not clip the second away,
+// and the commits only one branch has take its accent, leaving shared ones neutral.
+func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
+	groups := commitGroups(snap)
+	per := max(1, (rows-len(groups))/len(groups))
+	// One-sided only reads next to the other list: without the sync group the colours would name a comparison that is not on screen.
+	coloured := len(groups) > 1
 	var b strings.Builder
-	// One line per commit, newest first, never wrapped: the subject is cut to whatever the 30-cell body leaves after the sha/age prefix.
-	shown := min(len(commits), max(1, rows))
-	for _, c := range commits[:shown] {
-		fmt.Fprintf(&b, "%s %s %s\n",
-			styleDim.Render(pad(c.Sha, 8)),
-			pad(relativeTime(c.When), 6),
-			truncate(c.Subject, max(1, inner-18)),
-		)
+	for _, g := range groups {
+		b.WriteString(styleDetailKey.Render(truncate(g.label, inner)) + "\n")
+		if len(g.commits) == 0 {
+			b.WriteString(styleDim.Render("  no commits") + "\n")
+			continue
+		}
+		for _, c := range g.commits[:min(len(g.commits), per)] {
+			// The subject is untrusted repo text: it goes through the log panel's sanitiser before painting.
+			sha, subject := pad(c.Sha, 8), truncate(sanitizeLogText(c.Subject), max(1, inner-18))
+			if coloured && c.OneSided {
+				sha, subject = g.accent.Render(sha), g.accent.Render(subject)
+			} else {
+				sha = styleDim.Render(sha)
+			}
+			fmt.Fprintf(&b, "%s %s %s\n", sha, pad(relativeTime(c.When), 6), subject)
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -222,32 +267,77 @@ func (m *Model) commitsPanel(commits []gitstatus.Commit, rows, inner int) string
 func (m *Model) worktreeCommitsPanel(e tableEntry, rows, inner int) string {
 	if p, ok := m.discoveredByPath(e.wt.Path); ok {
 		if snap, ok := m.states[p.Path]; ok {
-			return m.commitsPanel(snap.Commits, rows, inner)
+			return m.commitsPanel(snap, rows, inner)
 		}
 	}
 	// No live snapshot for that path: a dim placeholder, never the parent repo's commits.
 	return styleDim.Render("  no commits")
 }
 
-// It paints the same card clipped to its height and padded with empty lines, since the layout owns the height: without padding the box would shrink moving from a clean repo to one with 30 files.
+// It paints the bottom band for the row under the cursor: the detail box, plus the peer files box
+// when the row has files. Both boxes are clipped to their height, since the layout owns it.
 func (m *Model) previewSection(lay layout, entries []tableEntry) string {
 	if lay.previewLines <= 0 {
 		return ""
 	}
 	rows := lay.previewLines
 	e, ok := entryAt(entries, m.cursor)
-	var title, content string
 	switch {
 	case !ok:
-		title, content = "repos", m.previewEmpty()
+		return m.singleBox("repos", m.previewEmpty(), rows)
 	case e.kind == kindRepo:
-		title, content = detailTitle(e.r), m.renderDetail(e.r, rows, lay.cardWidth, lay.cardSplit)
+		return m.detailBand(detailTitle(e.r), e.r, rows, lay)
 	case e.kind == kindWorktree:
-		title, content = worktreeTitle(e), m.renderWorktreeDetail(e, rows, lay.cardWidth, lay.cardSplit)
+		if r, live := m.liveRowForWorktree(e.wt); live {
+			return m.detailBand(worktreeTitle(e), r, rows, lay)
+		}
+		return m.singleBox(worktreeTitle(e), m.renderWorktreeMinimal(e.wt, e.parent, rows, m.width), rows)
 	default:
-		title, content = e.group, m.renderGroupSummary(e, rows)
+		return m.singleBox(e.group, m.renderGroupSummary(e, rows), rows)
 	}
-	return m.section(title, fitLines(content, rows), lay.cardWidth)
+}
+
+// With no files (or below the split floor) the detail box takes the whole band; otherwise the
+// detail box and the files box share the width, side by side.
+func (m *Model) detailBand(title string, r row, rows int, lay layout) string {
+	if !lay.cardSplit || len(r.snap.Files) == 0 {
+		m.fitCmdInput(m.width)
+		return m.section(title, fitLines(m.renderDetail(r, rows, m.width, lay.cardSplit), rows), m.width)
+	}
+	m.fitCmdInput(lay.detailWidth)
+	detail := m.section(title, fitLines(m.renderDetail(r, rows, lay.detailWidth, true), rows), lay.detailWidth)
+	return joinPanes(detail, m.filesSection(r, rows, lay.filesWidth))
+}
+
+// The files live in their own bordered box; the count moves from the old in-body heading to the title.
+func (m *Model) filesSection(r row, rows, width int) string {
+	return m.section(fmt.Sprintf("files (%d)", len(r.snap.Files)),
+		fitLines(m.filesList(r, rows, width-2), rows), width)
+}
+
+func (m *Model) filesList(r row, avail, inner int) string {
+	n := len(r.snap.Files)
+	shown, rest := listBudget(avail, n)
+	var b strings.Builder
+	for _, f := range r.snap.Files[:shown] {
+		b.WriteString("  " + styleWarn.Render(pad(f.Code, 3)) +
+			truncate(f.Path, max(1, inner-5)) + "\n")
+	}
+	if rest {
+		b.WriteString(styleHint.Render(fmt.Sprintf("  … %d more", n-shown)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// The `!` input is painted inside the detail box, so its width is the box minus the borders and the
+// prompt; anything else lets the value run past the border.
+func (m *Model) fitCmdInput(boxWidth int) {
+	m.cmdInput.SetWidth(max(1, boxWidth-4))
+}
+
+func (m *Model) singleBox(title, content string, rows int) string {
+	m.fitCmdInput(m.width)
+	return m.section(title, fitLines(content, rows), m.width)
 }
 
 func (m Model) previewEmpty() string {
@@ -333,7 +423,7 @@ func joinPanes(left, right string) string {
 	lpad := rellenaHasta(ll, n)
 	rpad := rellenaHasta(rl, n)
 	for i := range n {
-		out[i] = lpad[i] + " " + rpad[i]
+		out[i] = lpad[i] + strings.Repeat(" ", commitsPanelGap) + rpad[i]
 	}
 	return strings.Join(out, "\n")
 }

@@ -22,16 +22,20 @@ import (
 // syncFallbackBranch is probed when the configured sync ref is missing: many repos still live on master.
 const syncFallbackBranch = "master"
 
+// commitsLogDepth caps the commits panel's two logs: the layout paints only what fits, so this is a fetch ceiling, not what the panel always shows.
+const commitsLogDepth = 15
+
 type Snapshot struct {
-	Status     Status
-	Files      []FileEntry
-	Commits    []Commit
-	LastCommit int64
-	Worktrees  []Worktree
-	SyncBranch string
-	SyncBehind int
-	SyncKnown  bool
-	Err        string
+	Status      Status
+	Files       []FileEntry
+	Commits     []Commit
+	SyncCommits []Commit
+	LastCommit  int64
+	Worktrees   []Worktree
+	SyncBranch  string
+	SyncBehind  int
+	SyncKnown   bool
+	Err         string
 }
 
 type Worktree struct {
@@ -78,12 +82,23 @@ func Collect(ctx context.Context, dir, syncBranch string, allowFallback bool) Sn
 			snap.SyncBehind = n
 			snap.SyncKnown = true
 		}
+		// The panel's second group: the same ref the divergence counts, so what is compared and
+		// what is shown cannot disagree; skipped on the sync branch itself (the lists would duplicate).
+		if snap.SyncBranch != snap.Status.Branch {
+			if syncOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-"+strconv.Itoa(commitsLogDepth), "--format=%h%x00%ct%x00%s", snap.SyncBranch); err == nil {
+				snap.SyncCommits = ParseLog(string(syncOut))
+				markOneSided(snap.SyncCommits, oneSidedShas(ctx, dir, "HEAD.."+snap.SyncBranch))
+			}
+		}
 	}
 
-	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-5", "--format=%h%x00%ct%x00%s")
+	logOut, err := runGit(ctx, dir, cmdlog.ClassRead, "log", "-"+strconv.Itoa(commitsLogDepth), "--format=%h%x00%ct%x00%s")
 	if err == nil {
 		snap.Commits = ParseLog(string(logOut))
 		snap.LastCommit = lastCommitWhen(snap.Commits)
+		if snap.SyncKnown && snap.SyncBranch != snap.Status.Branch {
+			markOneSided(snap.Commits, oneSidedShas(ctx, dir, snap.SyncBranch+"..HEAD"))
+		}
 	}
 	// A repo with no commits is legitimate, so the log error is ignored.
 
@@ -109,6 +124,33 @@ func syncBehind(ctx context.Context, dir, sync string) (int, bool) {
 	// known comes from the conversion, so an error check here is unreachable; anything unexpected still degrades to known=false.
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	return n, err == nil
+}
+
+// oneSidedShas returns the full shas of the (at most commitsLogDepth) commits the range reserves for one side; a sha and never a position is what the panel marks, because `git log` is date-ordered and a merge can put a shared commit above a one-sided one.
+func oneSidedShas(ctx context.Context, dir, rng string) map[string]bool {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "rev-list", "--max-count="+strconv.Itoa(commitsLogDepth), rng)
+	if err != nil {
+		return nil
+	}
+	shas := map[string]bool{}
+	for _, sha := range strings.Fields(string(out)) {
+		shas[sha] = true
+	}
+	return shas
+}
+
+// markOneSided matches by prefix: the log writes abbreviated shas, rev-list prints full ones. An empty parsed sha would prefix-match everything, so it is skipped.
+func markOneSided(commits []Commit, shas map[string]bool) {
+	for i := range commits {
+		if commits[i].Sha == "" {
+			continue
+		}
+		for sha := range shas {
+			if strings.HasPrefix(sha, commits[i].Sha) {
+				commits[i].OneSided = true
+			}
+		}
+	}
 }
 
 func normalizeBranch(st Status) string {

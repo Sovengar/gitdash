@@ -138,13 +138,13 @@ func TestSubrowsAndHeadersKeepTheFetchSlot(t *testing.T) {
 func TestCommitsPanelWidthGate(t *testing.T) {
 	projects, states := fixtureProjects()
 	for _, c := range []struct {
-		width int
-		show  bool
+		width, panel, table int
+		show                bool
 	}{
-		{117, false},
-		{118, false},
-		{119, true},
-		{120, true},
+		{117, 0, 117, false},
+		{118, 0, 118, false},
+		{119, 30, 88, true},
+		{120, 31, 88, true}, // the cap: the table sits at its minimum
 	} {
 		m := newTestModel(t, projects, states)
 		m.width = c.width
@@ -157,8 +157,8 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 			t.Errorf("width=%d: commits panel drawn = %v, want %v:\n%s", c.width, got, c.show, flat)
 		}
 		if c.show {
-			if lay.tableWidth != c.width-commitsPanelWidth-commitsPanelGap {
-				t.Errorf("width=%d: tableWidth = %d, want %d", c.width, lay.tableWidth, c.width-commitsPanelWidth-commitsPanelGap)
+			if lay.panelWidth != c.panel || lay.tableWidth != c.table {
+				t.Errorf("width=%d: panel/table = %d/%d, want %d/%d", c.width, lay.panelWidth, lay.tableWidth, c.panel, c.table)
 			}
 			if got := fitColumns(lay.tableWidth - rowPrefixWidth - 2); got != len(tableColumns) {
 				t.Errorf("width=%d: the split table shows %d columns, want the full %d", c.width, got, len(tableColumns))
@@ -171,6 +171,51 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 				t.Errorf("width=%d: the commits of the cursor's repo are shown with no panel:\n%s", c.width, flat)
 			}
 		}
+	}
+}
+
+// Past its floor the right column takes the lists share of the card's columns, capped so the table keeps its columns.
+func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
+	projects, states := fixtureProjects()
+	for _, c := range []struct {
+		width, panel, table int
+	}{
+		{119, 30, 88}, // the floor: the old fixed width
+		{121, 32, 88}, // the cap: the table at its minimum
+		{168, 68, 99}, // the share: cardColumns(166).right + 2
+		{400, 160, 239},
+	} {
+		m := newTestModel(t, projects, states)
+		m.width = c.width
+		lay := m.layout()
+		if !lay.showPanel {
+			t.Fatalf("width=%d: no panel: %+v", c.width, lay)
+		}
+		if lay.panelWidth != c.panel || lay.tableWidth != c.table {
+			t.Errorf("width=%d: panel/table = %d/%d, want %d/%d", c.width, lay.panelWidth, lay.tableWidth, c.panel, c.table)
+		}
+	}
+}
+
+// The wider body is spent on the subject: at 213 the inner 84 leaves 66 runes before the ellipsis.
+func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
+	long := strings.Repeat("subject", 10)
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": committedSnap(long)})
+	m.width = 213
+	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "commits · api"))
+	var line string
+	for _, l := range panel {
+		if strings.Contains(l, "subj") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("the commit subject is not painted:\n%v", panel)
+	}
+	if want := truncate(long, 66); !strings.Contains(line, want) {
+		t.Errorf("the subject is not clipped at the wider body's 66 (want %q): %q", want, line)
 	}
 }
 
@@ -234,8 +279,110 @@ func TestPanelListsTheCommits(t *testing.T) {
 	if len(panel) != lay.bodyLines+1 {
 		t.Errorf("the panel paints %d lines, want the table's body rows + 1 = %d", len(panel), lay.bodyLines+1)
 	}
-	if !strings.Contains(panel[0], "newest") || !strings.Contains(panel[1], "older") || !strings.Contains(panel[2], "oldest") {
-		t.Errorf("the commits are not newest first:\n%v", panel)
+	if !strings.Contains(panel[0], "main (current)") {
+		t.Errorf("the panel does not label the current branch group:\n%v", panel)
+	}
+	if !strings.Contains(panel[1], "newest") || !strings.Contains(panel[2], "older") || !strings.Contains(panel[3], "oldest") {
+		t.Errorf("the commits are not newest first under their group:\n%v", panel)
+	}
+}
+
+// The sync branch opens a second labelled group, below the current one.
+func TestPanelGroupsCurrentAndSync(t *testing.T) {
+	snap := committedSnap("c1", "c2")
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{{Sha: "1234567", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"}}
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snap})
+	m.width = 119
+	box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+	for _, want := range []string{"main (current)", "c1", "master (sync)", "s1"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the panel does not paint %q:\n%s", want, box)
+		}
+	}
+	if strings.Index(box, "main (current)") > strings.Index(box, "master (sync)") {
+		t.Errorf("the sync group is not below the current one:\n%s", box)
+	}
+}
+
+// The group is only born with the repo declaring a DIFFERENT sync ref and having its commits: on
+// the sync branch itself the two lists would duplicate, and without commits the label lies.
+func TestPanelSyncGroupOnlyWhenItHasCommits(t *testing.T) {
+	commits := []gitstatus.Commit{{Sha: "1234567", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"}}
+	cases := []struct {
+		name              string
+		syncBranch        string
+		injectSyncCommits bool
+	}{
+		{"on the sync branch itself", "main", true},
+		{"the ref has no commits", "master", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snap := committedSnap("c1")
+			snap.SyncBranch = c.syncBranch
+			if c.injectSyncCommits {
+				snap.SyncCommits = commits
+			}
+			m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+				map[string]gitstatus.Snapshot{"/tmp/api": snap})
+			m.width = 119
+			box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+			if strings.Contains(box, "(sync)") {
+				t.Errorf("a sync group was painted:\n%s", box)
+			}
+			if !strings.Contains(box, "main (current)") {
+				t.Errorf("the current group lost its label:\n%s", box)
+			}
+		})
+	}
+}
+
+// A detached HEAD without a sha has no branch name to paint: the group falls back to its tag only.
+func TestPanelUnnamedBranchGroup(t *testing.T) {
+	snap := committedSnap("c1")
+	snap.Status.Branch = ""
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": snap})
+	m.width = 119
+	box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
+	if !strings.Contains(box, "current") {
+		t.Errorf("the group lost its label:\n%s", box)
+	}
+	if strings.Contains(box, "(current)") {
+		t.Errorf("a group without a branch name was labelled as if it had one:\n%s", box)
+	}
+}
+
+// The height is shared between the groups, and each one always keeps room for one commit: the
+// last group cannot be clipped away by the first.
+func TestPanelSharesTheHeightBetweenGroups(t *testing.T) {
+	snap := committedSnap("c1", "c2", "c3")
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{
+		{Sha: "aaaaaaa", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"},
+		{Sha: "bbbbbbb", When: time.Now().Add(-time.Hour).Unix(), Subject: "s2"},
+	}
+	m := newTestModel(t, nil, nil)
+	for _, c := range []struct {
+		rows           int
+		wantC2, wantS2 bool
+	}{
+		{4, false, false}, // (4-2)/2 = 1 per group
+		{6, true, true},   // (6-2)/2 = 2 per group
+		{2, false, false}, // the floor of one per group, with no room to spare
+	} {
+		out := stripANSI(m.commitsPanel(snap, c.rows, 28))
+		if !strings.Contains(out, "c1") || !strings.Contains(out, "s1") {
+			t.Errorf("rows=%d: a group lost its first commit:\n%s", c.rows, out)
+		}
+		if got := strings.Contains(out, "c2"); got != c.wantC2 {
+			t.Errorf("rows=%d: c2 painted = %v, want %v:\n%s", c.rows, got, c.wantC2, out)
+		}
+		if got := strings.Contains(out, "s2"); got != c.wantS2 {
+			t.Errorf("rows=%d: s2 painted = %v, want %v:\n%s", c.rows, got, c.wantS2, out)
+		}
 	}
 }
 
@@ -267,6 +414,72 @@ func TestPanelEmptyCommitsPlaceholder(t *testing.T) {
 	box := sectionContent(t, stripANSI(m.View().Content), "commits · api")
 	if !strings.Contains(box, "no commits") {
 		t.Errorf("the empty panel does not say so:\n%s", box)
+	}
+}
+
+// The mark decides, not the position: an accented commit can sit below a neutral one and both accents coexist.
+func TestPanelColoursTheOneSidedCommits(t *testing.T) {
+	snap := committedSnap("c1", "c2", "c3")
+	snap.Commits[0].OneSided, snap.Commits[2].OneSided = true, true
+	snap.SyncBranch = "master"
+	snap.SyncCommits = []gitstatus.Commit{
+		{Sha: "aaaaaaa", When: time.Now().Add(-time.Hour).Unix(), Subject: "s1"},
+		{Sha: "bbbbbbb", When: time.Now().Add(-time.Hour).Unix(), Subject: "s2"},
+		{Sha: "ccccccc", When: time.Now().Add(-time.Hour).Unix(), Subject: "s3"},
+	}
+	snap.SyncCommits[0].OneSided, snap.SyncCommits[2].OneSided = true, true
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 12, 28)
+	if !strings.Contains(out, styleAhead.Render("c1")) || !strings.Contains(out, styleAhead.Render("c3")) {
+		t.Errorf("the marked current commits are not painted ahead-green:\n%q", out)
+	}
+	if strings.Contains(out, styleAhead.Render("c2")) {
+		t.Errorf("an unmarked current commit took the accent:\n%q", out)
+	}
+	if !strings.Contains(out, styleBehind.Render("s1")) || !strings.Contains(out, styleBehind.Render("s3")) {
+		t.Errorf("the marked sync commits are not painted behind-blue:\n%q", out)
+	}
+	if strings.Contains(out, styleBehind.Render("s2")) {
+		t.Errorf("an unmarked sync commit took the accent:\n%q", out)
+	}
+	if !strings.Contains(out, styleDim.Render(pad("0000000", 8))) {
+		t.Errorf("the unmarked commits lost their dim sha:\n%q", out)
+	}
+}
+
+// Without the sync group the accents are dropped: they would name a comparison that is not on screen.
+func TestPanelWithoutSyncGroupPaintsNoAccents(t *testing.T) {
+	snap := committedSnap("c1")
+	snap.Commits[0].OneSided = true // marked, but no SyncCommits: the second group never exists
+	snap.SyncBranch = "master"
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 10, 28)
+	if !strings.Contains(out, "c1") {
+		t.Errorf("the commit is not painted at all:\n%q", out)
+	}
+	if strings.Contains(out, styleAhead.Render("c1")) {
+		t.Errorf("the accent survived without a sync group:\n%q", out)
+	}
+	if strings.Contains(out, "(sync)") {
+		t.Errorf("the fixture painted a sync group:\n%q", out)
+	}
+}
+
+// A subject is untrusted repo text: control and escape sequences do not reach the terminal, the readable text stays.
+func TestPanelSanitisesTheSubjects(t *testing.T) {
+	snap := committedSnap("before \x1b[31mred\x1b[0m after")
+	m := newTestModel(t, nil, nil)
+
+	out := m.commitsPanel(snap, 10, 40)
+	if strings.Contains(out, "\x1b[31m") {
+		t.Errorf("an escape sequence from the subject reached the paint:\n%q", out)
+	}
+	for _, want := range []string{"before", "red", "after"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the readable text %q of the subject was lost:\n%q", want, out)
+		}
 	}
 }
 
@@ -357,24 +570,26 @@ func cardModel(t *testing.T) (Model, row) {
 	return m, r
 }
 
-func TestCardIsTwoColumns(t *testing.T) {
+func TestCardIsTwoBoxes(t *testing.T) {
 	m, _ := cardModel(t)
 	m = cursorOn(t, m, "/tmp/api")
 	lay := m.layout()
 	if !lay.cardSplit {
-		t.Fatalf("width 80: the card did not split: %+v", lay)
+		t.Fatalf("width 80: the band did not split: %+v", lay)
 	}
-	box := sectionContent(t, stripANSI(m.View().Content), "api")
+	out := stripANSI(m.View().Content)
+	detail := sectionContent(t, out, "api")
 	for _, field := range []string{"path", "branch", "upstream", "state", "sync", "activity"} {
-		if !strings.Contains(box, field) {
-			t.Errorf("the left column misses the field %q:\n%s", field, box)
+		if !strings.Contains(detail, field) {
+			t.Errorf("the detail box misses the field %q:\n%s", field, detail)
 		}
 	}
-	if !strings.Contains(box, "files (1)") || !strings.Contains(box, "main.go") {
-		t.Errorf("the right column misses the files list:\n%s", box)
+	if !strings.Contains(detail, "worktrees (1)") {
+		t.Errorf("the detail box misses the worktrees list:\n%s", detail)
 	}
-	if !strings.Contains(box, "worktrees (1)") {
-		t.Errorf("the right column misses the worktrees list:\n%s", box)
+	files := sectionContent(t, out, "files (1)")
+	if !strings.Contains(files, "main.go") {
+		t.Errorf("the files box misses the file list:\n%s", files)
 	}
 }
 
@@ -382,30 +597,21 @@ func TestCardCollapsesWhenNarrow(t *testing.T) {
 	m, r := cardModel(t)
 	m.width = 63
 	if !m.layout().cardSplit {
-		t.Error("width 63: the card should split")
+		t.Error("width 63: the band should split")
 	}
 	m.width = 62
 	if m.layout().cardSplit {
-		t.Error("width 62: the card should collapse")
+		t.Error("width 62: the band should collapse")
 	}
 
-	split := lineWith(m.renderDetail(r, 40, 63, true), "path")
-	if !strings.Contains(split, "│") {
-		t.Errorf("at width 63 the card is not split (no column separator): %q", split)
+	split := stripANSI(m.renderDetail(r, 40, 63, true))
+	if strings.Contains(split, "main.go") {
+		t.Errorf("at width 63 the split detail box still stacks the files:\n%s", split)
 	}
-	collapsed := lineWith(m.renderDetail(r, 40, 62, false), "path")
-	if strings.Contains(collapsed, "│") {
-		t.Errorf("at width 62 the card still shows the separator: %q", collapsed)
+	collapsed := stripANSI(m.renderDetail(r, 40, 62, false))
+	if !strings.Contains(collapsed, "files (1)") || !strings.Contains(collapsed, "worktrees (1)") {
+		t.Errorf("at width 62 the collapsed box does not stack both lists:\n%s", collapsed)
 	}
-}
-
-func lineWith(content, needle string) string {
-	for _, l := range strings.Split(content, "\n") {
-		if strings.Contains(l, needle) {
-			return l
-		}
-	}
-	return ""
 }
 
 func TestCardCollapsedStacksListsWithTheirWarnings(t *testing.T) {
@@ -528,7 +734,8 @@ func TestCardCollapsedStacksListsWithTheirWarnings(t *testing.T) {
 	})
 }
 
-// The right column paints a list header exactly when its budget reaches minListBlockLines.
+// The detail box paints the worktrees header exactly when its budget reaches minListBlockLines; the
+// files box paints its first line only when the budget leaves room for one item.
 func TestCardSplitListBudgetBoundary(t *testing.T) {
 	only := func(mutate func(*gitstatus.Snapshot)) (Model, row) {
 		snap := snapClean()
@@ -538,20 +745,20 @@ func TestCardSplitListBudgetBoundary(t *testing.T) {
 	mw, rw := only(func(s *gitstatus.Snapshot) {
 		s.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt", Branch: "feat", Head: "abc1234"}}
 	})
-	if !strings.Contains(stripANSI(mw.renderDetail(rw, minListBlockLines, 120, true)), "worktrees (1)") {
-		t.Error("at rows=minListBlockLines the worktrees header is missing")
+	if !strings.Contains(stripANSI(mw.detailWorktrees(rw, minListBlockLines, 60)), "worktrees (1)") {
+		t.Error("at avail=minListBlockLines the worktrees header is missing")
 	}
-	if strings.Contains(stripANSI(mw.renderDetail(rw, minListBlockLines-1, 120, true)), "worktrees (1)") {
+	if strings.Contains(stripANSI(mw.detailWorktrees(rw, minListBlockLines-1, 60)), "worktrees (1)") {
 		t.Error("below minListBlockLines the worktrees header is painted anyway")
 	}
 	mf, rf := only(func(s *gitstatus.Snapshot) {
 		s.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	})
-	if !strings.Contains(stripANSI(mf.renderDetail(rf, minListBlockLines, 120, true)), "files (1)") {
-		t.Error("at rows=minListBlockLines the files header is missing")
+	if !strings.Contains(stripANSI(mf.filesSection(rf, minListBlockLines+1, 60)), "main.go") {
+		t.Error("with room for one item the files line is missing")
 	}
-	if strings.Contains(stripANSI(mf.renderDetail(rf, minListBlockLines-1, 120, true)), "files (1)") {
-		t.Error("below minListBlockLines the files header is painted anyway")
+	if strings.Contains(stripANSI(mf.filesSection(rf, minListBlockLines, 60)), "main.go") {
+		t.Error("without room for an item the files line is painted anyway")
 	}
 }
 
@@ -627,4 +834,198 @@ func TestTinyTerminalDoesNotPanic(t *testing.T) {
 			t.Errorf("%dx%d: the card splits with no room", c.w, c.h)
 		}
 	}
+}
+
+// ── Bottom band split ────────────────────────────────────────────────────────
+
+// The commits box and the files box share the same divider: both right boxes are one width.
+func TestFilesBoxSharesTheDividerWithCommits(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.panelWidth != 60 || lay.filesWidth != 60 || lay.tableWidth != 89 || lay.detailWidth != 89 {
+		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 60/60/89/89",
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.detailWidth)
+	}
+	out := m.renderDashboard()
+	if a, b := boxLeftColumn(t, out, "commits · api"), boxLeftColumn(t, out, "files (1)"); a != b {
+		t.Errorf("the commits box starts at column %d and the files box at %d, want the same", a, b)
+	}
+}
+
+// Past the floor and up to the cap both right boxes shrink together.
+func TestFilesBoxSharesTheCapWithCommits(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 120, 40
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.panelWidth != 31 || lay.filesWidth != 31 || lay.tableWidth != 88 || lay.detailWidth != 88 {
+		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 31/31/88/88",
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.detailWidth)
+	}
+}
+
+// Below the panel floor the commits box drops and the table takes the full width, but the bottom
+// band keeps its two-box share.
+func TestNoCommitsPanelButFilesBoxKeepsTheShare(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 118, 40
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	if lay.showPanel {
+		t.Fatalf("the commits panel is drawn at width 118: %+v", lay)
+	}
+	if lay.tableWidth != 118 {
+		t.Errorf("repos box = %d, want the full 118", lay.tableWidth)
+	}
+	if lay.filesWidth != 48 || lay.detailWidth != 69 {
+		t.Errorf("files/detail = %d/%d, want 48/69", lay.filesWidth, lay.detailWidth)
+	}
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ commits ") {
+		t.Errorf("a commits box is painted at 118:\n%s", out)
+	}
+	if !strings.Contains(out, "╭ files (1) ") {
+		t.Errorf("the files box is not painted at 118:\n%s", out)
+	}
+}
+
+// The file list lives in its own bordered box: the count is the title, the lines are the files.
+func TestFilesBoxTitleAndLines(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{
+		{Code: ".M", Path: "a.go"},
+		{Code: "??", Path: "b.go"},
+		{Code: "A ", Path: "c.go"},
+	}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	files := boxColumns(t, out, "files (3)", m.layout().filesWidth-2)
+	for _, want := range []string{"  .M a.go", "  ?? b.go", "  A  c.go"} {
+		if !strings.Contains(files, want) {
+			t.Errorf("the files box does not paint %q:\n%s", want, files)
+		}
+	}
+	detail := boxColumns(t, out, "api", m.layout().detailWidth-2)
+	if !strings.Contains(detail, "path") || !strings.Contains(detail, "activity") {
+		t.Errorf("the detail box does not paint the fields head:\n%s", detail)
+	}
+}
+
+// Worktrees moved out of the files box into the detail box.
+func TestWorktreesLiveInTheDetailBoxOnly(t *testing.T) {
+	snap := snapClean()
+	snap.Worktrees = []gitstatus.Worktree{
+		{Path: "/tmp/api/wt-a", Branch: "feat/x", Head: "abc1234"},
+		{Path: "/tmp/api/wt-b", Branch: "feat/y", Head: "abc1234"},
+	}
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	detail := boxColumns(t, out, "api", m.layout().detailWidth-2)
+	if !strings.Contains(detail, "worktrees (2)") || !strings.Contains(detail, "feat/x") {
+		t.Errorf("the detail box does not list the worktrees:\n%s", detail)
+	}
+	files := boxColumns(t, out, "files (1)", m.layout().filesWidth-2)
+	if !strings.Contains(files, "main.go") {
+		t.Errorf("the files box does not list the file:\n%s", files)
+	}
+	if strings.Contains(files, "worktrees") || strings.Contains(files, "feat/x") || strings.Contains(files, "feat/y") {
+		t.Errorf("a worktree leaked into the files box:\n%s", files)
+	}
+}
+
+// With no files there is no files box: the detail box takes the whole band.
+func TestNoFilesBoxTakesTheWholeBand(t *testing.T) {
+	m, _ := detailRowWith(t, "/tmp/api", snapClean())
+	m.width, m.height = 150, 45
+	m = cursorOn(t, m, "/tmp/api")
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ files ") {
+		t.Errorf("a files box is painted with no files:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "╭ api ") {
+			if w := ansi.StringWidth(l); w != m.width {
+				t.Errorf("the detail box spans %d cells, want the full %d", w, m.width)
+			}
+			return
+		}
+	}
+	t.Fatalf("the detail box is not painted:\n%s", out)
+}
+
+// Below the split floor the band is a single box: with room it stacks fields, worktrees and files.
+func TestNarrowBandCollapses(t *testing.T) {
+	snap := snapClean()
+	snap.Worktrees = []gitstatus.Worktree{{Path: "/tmp/api/wt-a", Branch: "feat/x", Head: "abc1234"}}
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 60, 30
+	m = cursorOn(t, m, "/tmp/api")
+	if m.layout().cardSplit {
+		t.Fatal("width 60: the band should be collapsed")
+	}
+	out := stripANSI(m.View().Content)
+	if strings.Contains(out, "╭ files ") {
+		t.Errorf("a separate files box is painted in the collapsed band:\n%s", out)
+	}
+	box := sectionContent(t, out, "api")
+	for _, want := range []string{"path", "worktrees (1)"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the collapsed box misses %q:\n%s", want, box)
+		}
+	}
+
+	// With room the stack keeps all three blocks inside the single box.
+	m.height = 45
+	box = sectionContent(t, stripANSI(m.View().Content), "api")
+	for _, want := range []string{"path", "worktrees (1)", "files (1)", "main.go"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the collapsed box misses %q:\n%s", want, box)
+		}
+	}
+}
+
+// boxLeftColumn is the rune column where the box titled `title` starts its left border.
+func boxLeftColumn(t *testing.T, view, title string) int {
+	t.Helper()
+	col := -1
+	for _, l := range strings.Split(stripANSI(view), "\n") {
+		if idx := strings.Index(l, "╭ "+title+" "); idx >= 0 {
+			col = len([]rune(l[:idx]))
+			break
+		}
+	}
+	if col < 0 {
+		t.Fatalf("no box titled %q in the view:\n%s", title, stripANSI(view))
+	}
+	return col
+}
+
+// boxColumns extracts the cells of the box titled `title` (inner width), so a test can tell the two
+// side-by-side boxes apart even though they share every line.
+func boxColumns(t *testing.T, view, title string, inner int) string {
+	t.Helper()
+	start := boxLeftColumn(t, view, title) + 1
+	lines := strings.Split(stripANSI(view), "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		r := []rune(l)
+		lo := min(start, len(r))
+		hi := min(start+inner, len(r))
+		out = append(out, string(r[lo:hi]))
+	}
+	return strings.Join(out, "\n")
 }

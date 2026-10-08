@@ -30,6 +30,8 @@ type Commit struct {
 	Sha     string
 	When    int64
 	Subject string
+	// OneSided is set by Collect when only this branch's side has the commit (the panel paints those).
+	OneSided bool
 }
 
 type State int

@@ -196,18 +196,24 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 	m.lastAction[pathLargo] = actionResult{kind: "pull_rebase", cmd: "git pull --rebase " + long, output: ""}
 
 	// Literal widths, not the same max(...) the card computes: a derived expectation moves with the mutant.
-	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	// At width 120 the detail box is 88 wide (inner 86), so the path clips at 78 and the argv at 88-30 = 58.
+	out := stripANSI(m.renderDetail(r, 40, m.layout().detailWidth, m.layout().cardSplit))
 	for _, c := range []struct {
 		that string
 		want string
 	}{
-		{"repo path", truncate(pathLargo, 28)},            // cardLeftWidth - 8
-		{"file", truncate(long+".go", 19)},                // cardRightWidth - 5
-		{"argv", truncate("git pull --rebase "+long, 90)}, // 120 - 30
+		{"repo path", truncate(pathLargo, 78)},            // inner - 8
+		{"argv", truncate("git pull --rebase "+long, 58)}, // box - 30
 	} {
 		if !strings.Contains(out, c.want) {
 			t.Errorf("the %s is not clipped to its width (%q…):\n%s", c.that, c.want[:20], out)
 		}
+	}
+
+	// The files live in their own box: 31 wide at 120 (inner 29), so the path clips at 24.
+	files := stripANSI(m.filesList(r, 40, m.layout().filesWidth-2))
+	if want := truncate(long+".go", 24); !strings.Contains(files, want) {
+		t.Errorf("the file is not clipped to its box (%q…):\n%s", want[:20], files)
 	}
 
 	m2, r2 := detailRowWith(t, "/tmp/api", func() gitstatus.Snapshot {
@@ -216,8 +222,8 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 		return s
 	}())
 	m2.width = 120
-	outWT := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
-	if want := truncate("wt/"+long, 12); !strings.Contains(outWT, want) { // cardRightWidth - 2 - wtBranchWidth
+	outWT := stripANSI(m2.renderDetail(r2, 40, m2.layout().detailWidth, m2.layout().cardSplit))
+	if want := truncate("wt/"+long, 74); !strings.Contains(outWT, want) { // inner - 2 - wtBranchWidth
 		t.Errorf("the worktree path is not clipped to its width (%q…):\n%s", want[:20], outWT)
 	}
 }
@@ -232,8 +238,8 @@ func TestCardClipsTheListsToLiteralWidths(t *testing.T) {
 		return s
 	}())
 	m.width = 120
-	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
-	// The right column gives the file path cardRightWidth-5 = 19 runes, so the clip leaves 18 x's before the ellipsis.
+	// The files box is 31 wide at width 120 (inner 29): the path gets inner-5 = 24 columns, so the clip leaves 23 x's before the ellipsis.
+	out := stripANSI(m.filesList(r, 40, 29))
 	var line string
 	for _, l := range strings.Split(out, "\n") {
 		if strings.Contains(l, ".M") && strings.Contains(l, "x") {
@@ -241,13 +247,129 @@ func TestCardClipsTheListsToLiteralWidths(t *testing.T) {
 			break
 		}
 	}
-	if got := trailingRun(line, 'x'); got != 18 {
-		t.Errorf("the file paints a run of %d, want its literal 18 (19 columns):\n%s", got, out)
+	if got := trailingRun(line, 'x'); got != 23 {
+		t.Errorf("the file paints a run of %d, want its literal 23 (24 columns):\n%s", got, out)
 	}
 }
 
 func trailingRun(s string, r rune) int {
 	return len(s) - strings.LastIndexFunc(s, func(c rune) bool { return c != r }) - 1
+}
+
+// Literal widths: the lists column grows to 2/5 of the inner width above cardRightWidth, and the
+// fields keep the rest above cardLeftWidth.
+func TestCardColumns(t *testing.T) {
+	for _, c := range []struct {
+		inner, left, right int
+	}{
+		{61, 36, 24},   // the split's floor: a 63-cell terminal
+		{118, 71, 46},  // a 120-cell terminal
+		{246, 147, 98}, // an ultrawide one
+	} {
+		left, right := cardColumns(c.inner)
+		if left != c.left || right != c.right {
+			t.Errorf("cardColumns(%d) = (%d, %d), want (%d, %d)", c.inner, left, right, c.left, c.right)
+		}
+	}
+}
+
+// The split moves with the terminal: the detail box is what is left after the files box and the gap.
+func TestCardSplitDividerFollowsTheWidth(t *testing.T) {
+	for _, c := range []struct {
+		width, detail, files int
+	}{
+		{63, 36, 26},   // the split's floor: the files box at its minimum
+		{64, 37, 26},   // below the panel floor the share holds
+		{120, 88, 31},  // the panel on: both boxes mirror the top band
+		{246, 146, 99}, // ultrawide: the share grows
+	} {
+		snap := snapClean()
+		snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+		m, _ := detailRowWith(t, "/tmp/api", snap)
+		m.width = c.width
+		lay := m.layout()
+		if !lay.cardSplit {
+			t.Fatalf("width=%d: the band did not split", c.width)
+		}
+		if lay.detailWidth != c.detail || lay.filesWidth != c.files {
+			t.Errorf("width=%d: detail/files = %d/%d, want %d/%d", c.width, lay.detailWidth, lay.filesWidth, c.detail, c.files)
+		}
+	}
+}
+
+// Both boxes share the band's height: the files box is padded to the detail box's rows.
+func TestCardTwoBoxesShareTheHeight(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, _ := detailRowWith(t, "/tmp/api", snap)
+	m.width, m.height = 120, 30
+	m = cursorOn(t, m, "/tmp/api")
+	lay := m.layout()
+	out := stripANSI(m.View().Content)
+	detail := panelLines(t, sectionContent(t, out, "api"))
+	files := panelLines(t, sectionContent(t, out, "files (1)"))
+	if len(detail) != lay.previewLines || len(files) != lay.previewLines {
+		t.Errorf("detail/files boxes = %d/%d lines, want both %d", len(detail), len(files), lay.previewLines)
+	}
+	if lines := strings.Split(out, "\n"); len(lines) != m.height {
+		t.Errorf("the view paints %d lines, want %d", len(lines), m.height)
+	}
+}
+func TestCardCleanRepoPaintsNoSeparator(t *testing.T) {
+	long := "/" + strings.Repeat("dir/", 25) + "repo" // 105 chars: whole only because the fields own the card
+	m, r := detailRowWith(t, long, snapClean())
+	m.width = 120
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	if strings.Contains(out, "│") {
+		t.Errorf("the clean card paints the separator:\n%s", out)
+	}
+	if !strings.Contains(out, long) {
+		t.Errorf("the path is not painted whole with the right column empty:\n%s", out)
+	}
+
+	// The fields clip at the full inner width, not at the split's left column: 120-2-8 = 110.
+	over := "/" + strings.Repeat("x", 150)
+	m2, r2 := detailRowWith(t, over, snapClean())
+	m2.width = 120
+	out2 := stripANSI(m2.renderDetail(r2, 40, m2.width, m2.layout().cardSplit))
+	if want := truncate(over, 110); !strings.Contains(out2, want) {
+		t.Errorf("with no lists the path is not clipped at the full 110 cells (want %q):\n%s", truncate(want, 20), out2)
+	}
+}
+
+// The tail (diagnostics, last action, `$ cmd`) keeps its last line at the bottom of the detail box.
+func TestCardTailStaysAtTheBottom(t *testing.T) {
+	snap := snapClean()
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
+	m, r := detailRowWith(t, "/tmp/api", snap)
+	m.width = 120
+	const rows = 12
+	m.lastCmd["/tmp/api"] = cmdResult{command: "ls", output: "one\ntwo", exit: "0"}
+	out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
+	lines := strings.Split(out, "\n")
+	if len(lines) > rows {
+		t.Fatalf("the detail box paints %d lines, want at most %d:\n%s", len(lines), rows, out)
+	}
+	if last := lines[len(lines)-1]; last != "  two" {
+		t.Errorf("the tail lost its last line at the bottom: %q\n%s", last, out)
+	}
+}
+
+// The complaint that started this: at 120 cells the whole path and upstream fit, so cutting them
+// there while the lists column has room left is wrong.
+func TestCardWidePathAndUpstreamAreVisible(t *testing.T) {
+	path := "/home/dev/work/visualco/assignator-api-vsocial"
+	snap := snapClean()
+	snap.Status.Upstream = "origin/deploy/SEP26Assignee"
+	m, r := detailRowWith(t, path, snap)
+	m.width = 120
+	out := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	if !strings.Contains(out, path) {
+		t.Errorf("the path is not painted whole at width 120:\n%s", out)
+	}
+	if !strings.Contains(out, "origin/deploy/SEP26Assignee") {
+		t.Errorf("the upstream is not painted whole at width 120:\n%s", out)
+	}
 }
 
 func TestCardShowsTheArgvOfTheLastAction(t *testing.T) {
@@ -271,7 +393,7 @@ func TestCardShowsTheArgvOfTheLastAction(t *testing.T) {
 	}
 }
 
-// The number in the warning is the difference between "you are missing 3" and a count that does not add up with the header.
+// The number in the warning is the difference between "you are missing 3" and a count that does not add up with the box title.
 func TestCardTheWarningCountsTheMissingFiles(t *testing.T) {
 	path := "/tmp/api"
 	snap := snapDirty(0, 0)
@@ -281,10 +403,10 @@ func TestCardTheWarningCountsTheMissingFiles(t *testing.T) {
 	}
 	m, r := detailRowWith(t, path, snap)
 
-	rows := detailHeadLines + minListBlockLines + 5 // the right column's own budget
-	out := stripANSI(m.renderDetail(r, rows, m.width, m.layout().cardSplit))
+	rows := detailHeadLines + minListBlockLines + 5 // the files box's own budget
+	out := stripANSI(m.filesSection(r, rows, 60))
 	if !strings.Contains(out, fmt.Sprintf("files (%d)", total)) {
-		t.Errorf("the header does not count the %d files:\n%s", total, out)
+		t.Errorf("the title does not count the %d files:\n%s", total, out)
 	}
 	wantWarning := "… 10 more"
 	if !strings.Contains(out, wantWarning) {
@@ -308,13 +430,16 @@ func TestCardListsPaintUnderTheSplit(t *testing.T) {
 
 	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines, m.width, m.layout().cardSplit))
 	if !strings.Contains(out, "worktrees (1)") {
-		t.Errorf("the right column does not paint the worktrees list:\n%s", out)
+		t.Errorf("the detail box does not paint the worktrees list:\n%s", out)
 	}
-	if !strings.Contains(out, "files (1)") {
-		t.Errorf("the right column does not paint the files list:\n%s", out)
+	if strings.Contains(out, "files (1)") {
+		t.Errorf("the files list still lives in the detail box:\n%s", out)
 	}
 	if strings.Contains(out, "commits") {
 		t.Errorf("the card paints the commits block, which left for the panel:\n%s", out)
+	}
+	if files := stripANSI(m.filesSection(r, detailHeadLines+minListBlockLines, m.width)); !strings.Contains(files, "files (1)") || !strings.Contains(files, "main.go") {
+		t.Errorf("the files box does not paint the files list:\n%s", files)
 	}
 }
 
@@ -337,6 +462,9 @@ func TestCardNotPaintsListsEmpty(t *testing.T) {
 		if strings.Contains(out, header) {
 			t.Errorf("a repo with no data painted the %q list:\n%s", header, out)
 		}
+	}
+	if strings.Contains(out, "│") {
+		t.Errorf("with no lists the card paints the separator:\n%s", out)
 	}
 	for _, field := range []string{"path", "branch", "upstream", "state", "sync", "activity"} {
 		if !strings.Contains(out, field) {
@@ -443,14 +571,21 @@ func TestCardTheListsOwnTheirBudgets(t *testing.T) {
 	}
 
 	out := stripANSI(m.renderDetail(r, detailHeadLines+6, m.width, m.layout().cardSplit))
-	if !strings.Contains(out, "worktrees (40)") || !strings.Contains(out, "files (40)") {
-		t.Errorf("the two lists are not both present:\n%s", out)
+	if !strings.Contains(out, "worktrees (40)") {
+		t.Errorf("the detail box does not paint the worktrees list:\n%s", out)
 	}
-	// Independent budgets: an oversized worktrees list does not starve the files list of its own warning.
-	if got := strings.Count(out, "… "); got != 2 {
-		t.Errorf("the card paints %d truncation warnings, want 2 (one per list):\n%s", got, out)
+	// Independent budgets: an oversized worktrees list does not starve the files box of its own warning.
+	if got := strings.Count(out, "… "); got != 1 {
+		t.Errorf("the detail box paints %d truncation warnings, want 1:\n%s", got, out)
 	}
-	if strings.Contains(out, "commits") {
+	files := stripANSI(m.filesSection(r, detailHeadLines+6, m.width))
+	if !strings.Contains(files, "files (40)") {
+		t.Errorf("the files box does not paint the files list:\n%s", files)
+	}
+	if got := strings.Count(files, "… "); got != 1 {
+		t.Errorf("the files box paints %d truncation warnings, want 1:\n%s", got, files)
+	}
+	if strings.Contains(out, "commits") || strings.Contains(files, "commits") {
 		t.Errorf("the card paints the commits block:\n%s", out)
 	}
 }
@@ -473,7 +608,7 @@ func TestCardTheWarningCountsTheMissingWorktrees(t *testing.T) {
 	if !strings.Contains(out, fmt.Sprintf("worktrees (%d)", total)) {
 		t.Errorf("the header does not count the worktrees:\n%s", out)
 	}
-	if want := "… 11 more"; !strings.Contains(out, want) {
+	if want := "… 17 more"; !strings.Contains(out, want) {
 		t.Errorf("the worktrees warning does not say %q:\n%s", want, out)
 	}
 }
@@ -484,9 +619,49 @@ func TestCardTheGapMinimumItSpendsTheFirstList(t *testing.T) {
 	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "main.go"}}
 	m, r := detailRowWith(t, path, snap) // no worktrees nor commits
 
-	out := stripANSI(m.renderDetail(r, detailHeadLines+minListBlockLines, m.width, m.layout().cardSplit))
-	if !strings.Contains(out, "files (1)") {
-		t.Errorf("with minimum room the files header is missing:\n%s", out)
+	out := stripANSI(m.filesSection(r, minListBlockLines+1, 60))
+	if !strings.Contains(out, "files (1)") || !strings.Contains(out, "main.go") {
+		t.Errorf("with minimum room the files list is missing:\n%s", out)
+	}
+}
+
+func TestFilesSectionInnerWidthIsWidthMinusTwo(t *testing.T) {
+	path := "/tmp/api"
+	snap := snapClean()
+	// A long path forces the list to truncate, so the inner width is observable.
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "pkg/some/very/long/path/to/a/file/that/is/longer/than/the/inner/width/file.go"}}
+	m, r := detailRowWith(t, path, snap)
+
+	// The files box paints at `width`; its content must be `width-2` (the borders).
+	// A mutation of width-2 → width-1 or width-3 changes the inner width and the
+	// truncation of the file path.
+	out := stripANSI(m.filesSection(r, minListBlockLines+1, 60))
+	lines := strings.Split(out, "\n")
+	// The truncated path must be exactly 53 chars (inner-5 = width-2-5).
+	found := false
+	for _, l := range lines {
+		if strings.Contains(l, "pkg/some") {
+			found = true
+			// The line looks like: "│  .M <path>…<padding>│"
+			// Strip the border and code column, then measure the path.
+			inner := strings.TrimPrefix(l, "│")
+			inner = strings.TrimSuffix(inner, "│")
+			// inner is now "  .M <path>…<padding>"
+			// The path starts after "  .M " (5 chars).
+			idx := strings.Index(inner, "  .M ")
+			if idx >= 0 {
+				rest := inner[idx+5:] // path + "…" + padding
+				// Trim trailing spaces.
+				rest = strings.TrimRight(rest, " ")
+				// The path + "…" should be exactly 55 chars (inner-5+1 for the ellipsis = width-2-5+1).
+				if len(rest) != 55 {
+					t.Errorf("the truncated path is %d chars, want 55 (width-2-5+1): %q", len(rest), rest)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the file line was not found in:\n%s", out)
 	}
 }
 

@@ -562,6 +562,6 @@ func TestSyncBehindWithRefNonexistent(t *testing.T) {
 		t.Error("syncBehind against HEAD = known=false, want true (0 commits behind is data)")
 	}
 	if n != 0 {
-		t.Errorf("syncBehind contra HEAD = %d, want 0", n)
+		t.Errorf("syncBehind against HEAD = %d, want 0", n)
 	}
 }

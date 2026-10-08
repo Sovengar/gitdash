@@ -44,6 +44,15 @@ tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux
 changes already made causes false symptoms (e.g. "it finds no repos" because of
 the marker's rename).
 
+## New feature → docs/FEATURES.md
+
+Any **new feature** — and any user-visible change to an existing one — must be
+documented in `docs/FEATURES.md` **in the same change** (create the file if it does
+not exist yet): add or update its entry with what it does and how it is
+triggered (key, flag or command). A feature that is not in `docs/FEATURES.md` does
+not exist for the next reader. Keep it a concise inventory, not a tutorial: the
+details live in `README.md` and `docs/adr/`.
+
 ## CI and `main`'s protection
 
 Two workflows, three required checks: `Lint`, `Test` and `Mutation`. Neither
@@ -164,7 +173,7 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 |---|---|
 | `internal/config` | XDG TOML. `Load()` never fails: defaults + a warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. The marker's folder IS the repo (there is no search for `.git` upwards). Prunes hidden dirs + `exclude`. `MainRepo` links worktree→main repo |
-| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
+| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`), its commits (`SyncCommits`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
 | `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
 | `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
 | `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
@@ -279,9 +288,9 @@ fall, the app would be waiting for a key without saying which ones.
 
 ## Design gotcha: the preview panel
 
-Below the table there is a card for the repo under the cursor (prdash style),
-between the list and the keybinds. **It is the only detail view**: there is no
-`enter` detail, no `detailSection`, no `detailOpen`. Decisions that are not
+Below the table there is the bottom band for the repo under the cursor (prdash
+style), between the list and the keybinds. **It is the only detail view**: there is
+no `enter` detail, no `detailSection`, no `detailOpen`. Decisions that are not
 evident:
 
 - **The title goes only on the border.** `detailTitle`/`worktreeTitle` compose
@@ -295,55 +304,69 @@ evident:
   was before the feature. That floor comes out of `detailHeadLines`, so
   `minPanelHeight` (test) derives it instead of begging for the number.
 - **The share is measured over the FREE height**, not over the terminal: against
-  the total, a 30-line window kept 12 for the card and 3 for the table.
-- **The card's height budget is its own lines**, not the terminal's: `renderDetail(r,
-  rows, width, split)` reserves `detailHeadLines` for the state header; the collapsed
-  branch then shares the remaining height between the lists with `listBudget`, which
-  reserves the `… N more` warning line when a list does not fit whole. `rows` is
-  `lay.previewLines`. Without that, the lists are counted as if they fit and then the
-  box crops them without warning.
-- **The card is two columns when the inner width is at least 61** (terminal width
-  >= 63): `m.layout()` sets `cardSplit` and `renderDetail` consumes it, so the
-  decision has a single source. The left 36 cells are the fields
-  (`path`/`branch`/`upstream`/`state`/`sync`/`activity`); the right 24 are the
-  worktrees and files lists, each with its own budget so an oversized worktrees
-  list does not starve the files list of its `… N more`. `renderDetail` pads both
-  columns to the same height and joins them with a dim separator before the box
-  styles anything, or ANSI breaks the width. `activity` (the last-commit age) is
-  what raised the head from 5 to `detailHeadLines` = 6 lines.
+  the total, a 30-line window kept 12 for the band and 3 for the table.
+- **The band is two peer boxes: DETAIL (left) and FILES (right, own border).**
+  `m.layout()` computes ONE width for the right column of BOTH bands:
+  `right = min(cardColumns(width-2).right + 2, width-1-minTableWidth())`. The
+  commits box uses it while `right >= commitsPanelWidth` (30); the files box
+  always uses it, or the `cardColumns` share when the panel is off. Then
+  `left = width - 1 - right`, and `lay.tableWidth` is the repos box (and the
+  detail box) while `lay.panelWidth` is the commits box (and the files box): the
+  two right boxes are the same width, and `cardColumns(inner)` keeps its 2/5
+  share with `cardRightWidth` (24) as floor and `cardLeftWidth` (36) as floor for
+  the fields. The `+2` is the files box's own borders, so the files LIST content
+  keeps the old column width; `commitsPanelGap` (1) is the gap between the two
+  boxes of a band.
+- **Worktrees moved out of the old right column into the DETAIL box**; the fields
+  head, the worktrees list, the diagnostics/action tails and the `!` input stack
+  there, all clipped to the detail box inner width. The files renderer is reused
+  by the FILES box (`filesSection`), whose count lives in the border title
+  `files (N)` instead of an in-body heading.
+- **No files → no files box**: the detail box spans the whole band (the old
+  "empty right column" rule survives: a lone border with nothing at its right is
+  not painted). `renderDetail(r, rows, width, split)` reserves `detailHeadLines`
+  for the fields and hands the rest, minus the tail's lines, to `detailWorktrees`;
+  `listBudget` reserves the `… N more` warning when a list does not fit whole.
+- **Below the split floor (`cardSplit`, terminal width < 63) the band is one box**
+  and fields, worktrees and files stack inside it (the collapsed path,
+  `detailCollapsed`). The two-column separator (`joinCardColumns`, `cardSepWidth`)
+  is gone: the two boxes replace it.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
-- **The diagnostics and the action/command tails span the full card width**,
-  appended below the two columns: the argv and the command output need more than
-  36 cells to be readable.
+- **The diagnostics and the action/command tails span the detail box width**,
+  appended below the fields and the worktrees: the argv and the command output
+  need more than the fields to be readable.
 - **The path is a field, not a loose line**: `path` goes in the same key/value
   column as `branch`/`upstream`/`state`/`sync`/`activity`, and its value is dimmed
   (it is context, not state).
 - **The card does not repeat the row's keys**: `g lazygit · ! cmd` are already in
-  the keybinds section, so the card has no footer (`fichaTail` only adds the `!`
-  input). Duplicating them cost a line of useful height and two sources that
-  could diverge on a rebind.
-- **The `!` input goes at the END of the card and is always visible**
-  (`fichaTail`): if the card filled the box, the card is cropped from the top.
-  Typing a command without seeing the prompt is typing blind. It is joined after
-  the columns so it spans the full card width.
+  the keybinds section, so the card has no footer. Duplicating them cost a line of
+  useful height and two sources that could diverge on a rebind.
+- **The `!` input goes on the detail box's last line and is always visible**
+  (`cardTail`): if the card filled the box, the card is cropped from the top and a
+  short body is padded. Typing a command without seeing the prompt is typing
+  blind. `fitCmdInput(boxWidth)` sizes the input to the box (borders and prompt
+  subtracted), so the value never runs past the border.
 - **The box is filled** (`fitLines`): the height comes from the layout, not from
   the card. Without the fill, a short card would push the keybinds up and the
   view would not fill the terminal.
 
 With the cursor on a **group header** the panel has no card to show: it shows the
 group's aggregate (`groupStats`, over `rows()` and before folding, which is what
-its header counts). States at zero are not painted.
+its header counts). States at zero are not painted, and the aggregate takes the
+whole band (no files box).
 
 ## Design gotcha: the COMMITS panel (top right)
 
 To the right of the table there is a panel with the commits of the row under the
 cursor. Decisions that are not evident:
 
-- **It is additive on WIDTH, not height.** A fixed 30 cells plus a 1-cell gap:
-  `m.layout()` draws it only if the table still shows its 5 columns at the split
-  width (`119` with the current constants). It shares the table's box height and
-  gives back nothing, so terminal lines stay conserved at every height.
+- **It is additive on WIDTH, not height.** Its width is the SAME `right` the
+  bottom band's files box uses (`min(cardColumns(width-2).right + 2,
+  width-1-minTableWidth())`), so the commits box and the files box share one
+  divider; the panel drops below `commitsPanelWidth` (30) and then only the table
+  widens. It shares the table's box height and gives back nothing, so terminal
+  lines stay conserved at every height.
 - **It is dropped, never fallback.** Below the width boundary there is no commits
   panel and the card does not recover the commits block: the behavior says the
   commits "are not shown anywhere", so a fallback would be a second source of
@@ -351,13 +374,33 @@ cursor. Decisions that are not evident:
 - **The title carries the "commits · " prefix** because the card is already
   titled with the repo/group/worktree name; without the prefix two boxes shared
   the same title.
-- **Dispatch by row kind**: repo → `Snap.Commits`; worktree subrow → its own
-  snapshot's commits when the path is discovered and live, a dim placeholder
-  otherwise (never the parent's); group header → the aggregate text shared with
-  the card (`groupSummaryText`, without `cardTail`); no row → the same empty hint
-  as the table and card.
+- **Dispatch by row kind**: repo → `Snap.Commits` and, when the repo declares a
+  DIFFERENT sync ref with commits, `Snap.SyncCommits` as a second group; worktree
+  subrow → its own snapshot's commits (and its own sync group) when the path is
+  discovered and live, a dim placeholder otherwise (never the parent's); group
+  header → the aggregate text shared with the card (`groupSummaryText`, without
+  `cardTail`); no row → the same empty hint as the table and card.
+- **Two labelled groups share the height**: `<branch> (current)` on top and
+  `<sync> (sync)` below, each with `(rows - headers)/groups` lines and at least
+  one commit, so the second group is not clipped away by the first. Both lists
+  are fetched at `commitsLogDepth` (15) per side — the layout still paints only
+  what fits — from the SAME ref the divergence counts (`SyncFor`/fallback
+  resolved, never a `git config` probe), so what is compared and what is shown
+  cannot disagree; the group is skipped when the sync IS the current branch (the
+  lists would duplicate) or when the log failed (no ref). `Collect` pays those
+  reads, and the two marking rev-lists, only where a sync branch is declared.
+- **One-sided commits take their group's colour; shared ones stay neutral.**
+  `Collect` marks each commit (`Commit.OneSided`) by sha membership in the
+  other side's set — two bounded `rev-list --max-count` calls, never a position
+  in the log, because `git log` is date-ordered and a merge can put a shared
+  commit above a one-sided one. The current group paints green (`styleAhead`)
+  and the sync group blue (`styleBehind`) — the table's ↑/↓ palette. The accent
+  is dropped when the sync group is not on screen: it would name a comparison
+  nobody can see.
 - **Rendered with the same `sha / age / subject` line as the old card block**,
-  newest first, subject truncated to the panel's inner width (never wrapped).
+  newest first, subject truncated to the panel's inner width (never wrapped)
+  and sanitised first (`sanitizeLogText`): a commit subject is untrusted repo
+  text like the marker's prompt.
 
 ## Design gotcha: the table's fetch slot
 

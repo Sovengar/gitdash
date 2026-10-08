@@ -16,17 +16,21 @@ const (
 	// Below this there is no window left to scroll.
 	minBodyLines = 3
 
-	// Width budget: the table row prefix is a 2-cell cursor plus a 2-cell fetch slot; the commits
-	// panel is a fixed 30 cells with a 1-cell gap, and the card splits into 36 + separator + 24.
+	// Width budget: the table's row prefix, the right column (a share of the terminal, capped by
+	// the table's minimum) and the card's columns.
 	rowPrefixWidth = 4
 	fetchSlotWidth = 2
 
 	commitsPanelWidth = 30
-	commitsPanelGap   = 1
+	// The 1-cell gap between the two boxes of a band: table|commits on top, detail|files below.
+	commitsPanelGap = 1
 
 	cardLeftWidth  = 36
 	cardSepWidth   = 1
 	cardRightWidth = 24
+	// The lists column takes this share of the inner width past its floor; the fields keep the rest
+	// because path/upstream are what clip first.
+	cardRightShare = 2
 )
 
 type layout struct {
@@ -41,7 +45,10 @@ type layout struct {
 	showPanel  bool
 	tableWidth int
 	panelWidth int
-	cardWidth  int
+	// detailWidth is the detail box (bottom-left); zero files or a collapsed band make it the full width.
+	detailWidth int
+	// filesWidth is the files box (bottom-right) when the row has files; it mirrors panelWidth.
+	filesWidth int
 	cardSplit  bool
 }
 
@@ -139,4 +146,11 @@ func (l layout) mismaChromeQue(o layout) bool {
 	return l.showStats == o.showStats &&
 		l.showKeybinds == o.showKeybinds &&
 		l.hintLines == o.hintLines
+}
+
+// The card's columns: the lists take cardRightShare/5 of the inner width (floor cardRightWidth),
+// the fields the rest; both floors hold whenever cardSplit is on.
+func cardColumns(inner int) (left, right int) {
+	right = max(cardRightWidth, (inner-cardSepWidth)*cardRightShare/5)
+	return inner - cardSepWidth - right, right
 }

@@ -43,8 +43,8 @@ func TestPreviewShowsTheRepoOfTheCursor(t *testing.T) {
 			t.Errorf("the panel does not say %q:\n%s", want, panel)
 		}
 	}
-	if !strings.Contains(panel, "main.go") {
-		t.Errorf("the panel does not list the repo's files:\n%s", panel)
+	if files := sectionContent(t, out, "files (2)"); !strings.Contains(files, "main.go") {
+		t.Errorf("the files box does not list the repo's files:\n%s", files)
 	}
 
 	m, _ = press(m, "down")
@@ -177,8 +177,8 @@ func TestPreviewAnnouncesTheListsThatDoNotFit(t *testing.T) {
 		t.Fatalf("precondition: the panel should have room for a list, it is %d", lay.previewLines)
 	}
 
-	panel := sectionContent(t, stripANSI(m.View().Content), "api · vsocial/backend")
-	if !strings.Contains(panel, "files (2)") || !strings.Contains(panel, "main.go") {
+	panel := sectionContent(t, stripANSI(m.View().Content), "files (2)")
+	if !strings.Contains(panel, "main.go") {
 		t.Errorf("the files list is not visible with room:\n%s", panel)
 	}
 	if strings.Contains(panel, "more") {
@@ -190,10 +190,7 @@ func TestPreviewAnnouncesTheListsThatDoNotFit(t *testing.T) {
 		s.Files = append(s.Files, gitstatus.FileEntry{Code: ".M", Path: fmt.Sprintf("pkg/file%02d.go", i)})
 	}
 	m.states["/tmp/api"] = s
-	panel = sectionContent(t, stripANSI(m.View().Content), "api · vsocial/backend")
-	if !strings.Contains(panel, "files (22)") {
-		t.Errorf("the header does not count the files:\n%s", panel)
-	}
+	panel = sectionContent(t, stripANSI(m.View().Content), "files (22)")
 	if !strings.Contains(panel, "more") {
 		t.Errorf("a truncated list is not announced:\n%s", panel)
 	}
