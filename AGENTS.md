@@ -44,6 +44,15 @@ tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux
 changes already made causes false symptoms (e.g. "it finds no repos" because of
 the marker's rename).
 
+## New feature → docs/FEATURES.md
+
+Any **new feature** — and any user-visible change to an existing one — must be
+documented in `docs/FEATURES.md` **in the same change** (create the file if it does
+not exist yet): add or update its entry with what it does and how it is
+triggered (key, flag or command). A feature that is not in `docs/FEATURES.md` does
+not exist for the next reader. Keep it a concise inventory, not a tutorial: the
+details live in `README.md` and `docs/adr/`.
+
 ## CI and `main`'s protection
 
 Two workflows, three required checks: `Lint`, `Test` and `Mutation`. Neither
@@ -314,8 +323,9 @@ evident:
   separator before the box styles anything, or ANSI breaks the width. With the
   right column empty (no worktrees, no files) the separator is NOT painted — a
   lone gray line with nothing at its right — and the fields take the whole inner
-  width. `activity` (the last-commit age) is what raised the head from 5 to
-  `detailHeadLines` = 6 lines.
+  width; with it non-empty the separator runs down to the card's bottom (or to
+  the full-width tail), not only to the last list item. `activity` (the
+  last-commit age) is what raised the head from 5 to `detailHeadLines` = 6 lines.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
 - **The diagnostics and the action/command tails span the full card width**,
@@ -345,12 +355,12 @@ its header counts). States at zero are not painted.
 To the right of the table there is a panel with the commits of the row under the
 cursor. Decisions that are not evident:
 
-- **It is additive on WIDTH, not height.** `max(30, width/4)` cells plus a 1-cell
-  gap: the 30 floor keeps the old `119` boundary, and past it the panel buys the
-  commit subjects a readable width (the table's columns have fixed widths, so the
-  slack it gives up was empty anyway). `m.layout()` still draws it only if the
-  table shows its 5 columns at the split width. It shares the table's box height
-  and gives back nothing, so terminal lines stay conserved at every height.
+- **It is additive on WIDTH, not height.** `max(30, min(width/3, width-minTableWidth()-gap))`
+  cells plus a 1-cell gap: the 30 floor keeps the old `119` boundary, the share
+  buys the commit subjects a readable width, and the cap at the table's minimum
+  keeps the fit gate a safety net instead of a dead zone where the share would
+  drop the panel. It shares the table's box height and gives back nothing, so
+  terminal lines stay conserved at every height.
 - **It is dropped, never fallback.** Below the width boundary there is no commits
   panel and the card does not recover the commits block: the behavior says the
   commits "are not shown anywhere", so a fallback would be a second source of
