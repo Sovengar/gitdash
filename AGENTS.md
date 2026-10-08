@@ -173,7 +173,7 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 |---|---|
 | `internal/config` | XDG TOML. `Load()` never fails: defaults + a warning string |
 | `internal/discovery` | `Project{Path,Name,Group,SyncBranch,HasRepo,IsWorktree,MainRepo,MarkerErr}`. The marker's folder IS the repo (there is no search for `.git` upwards). Prunes hidden dirs + `exclude`. `MainRepo` links worktree→main repo |
-| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncBehind`), its commits (`SyncCommits`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
+| `internal/gitstatus` | `parse.go` pure (ParsePorcelain, ParseWorktrees, Derive, Score) + `status.go` (Collect, StreamPool, Run, Fetch, RemoteURL, RebaseInProgress, RemoveWorktree) + `outcome.go` (Classify: what git really did). The `Snapshot` carries `Err` embedded and also the deviation vs the sync branch (`SyncAhead`/`SyncBehind`), its commits (`Commits`/`SyncCommits`) and its worktrees; it never fails hard. `runGit`/`runGitCombined` are the **only** place a git subprocess leaves from, and both leave an entry in the command log |
 | `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
 | `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
 | `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
@@ -376,12 +376,20 @@ cursor. Decisions that are not evident:
   `cardTail`); no row → the same empty hint as the table and card.
 - **Two labelled groups share the height**: `<branch> (current)` on top and
   `<sync> (sync)` below, each with `(rows - headers)/groups` lines and at least
-  one commit, so the second group is not clipped away by the first. The sync
-  commits come from a second `git log -5` on the SAME ref the divergence counts
-  (`SyncFor`/fallback resolved, never a `git config` probe), so what is compared
-  and what is shown cannot disagree; the group is skipped when the sync IS the
-  current branch (the lists would duplicate) or when the log failed (no ref).
-  `Collect` pays that read only where a sync branch is declared.
+  one commit, so the second group is not clipped away by the first. Both lists
+  are fetched at `commitsLogDepth` (15) per side — the layout still paints only
+  what fits — from the SAME ref the divergence counts (`SyncFor`/fallback
+  resolved, never a `git config` probe), so what is compared and what is shown
+  cannot disagree; the group is skipped when the sync IS the current branch (the
+  lists would duplicate) or when the log failed (no ref). `Collect` pays those
+  reads only where a sync branch is declared.
+- **One-sided commits take their group's colour; shared ones stay neutral.**
+  The first `SyncAhead` commits of the current group paint green (`styleAhead`)
+  and the first `SyncBehind` of the sync group blue (`styleBehind`) — the
+  table's ↑/↓ palette. Both counts come from one
+  `rev-list --left-right --count HEAD...sync`, the same numbers the SYNC column
+  shows. The accent is dropped when the sync group is not on screen: it would
+  name a comparison nobody can see.
 - **Rendered with the same `sha / age / subject` line as the old card block**,
   newest first, subject truncated to the panel's inner width (never wrapped).
 
