@@ -138,13 +138,13 @@ func TestSubrowsAndHeadersKeepTheFetchSlot(t *testing.T) {
 func TestCommitsPanelWidthGate(t *testing.T) {
 	projects, states := fixtureProjects()
 	for _, c := range []struct {
-		width int
-		show  bool
+		width, panel, table int
+		show                bool
 	}{
-		{117, false},
-		{118, false},
-		{119, true},
-		{120, true},
+		{117, 0, 117, false},
+		{118, 0, 118, false},
+		{119, 30, 88, true},
+		{120, 31, 88, true}, // the cap: the table sits at its minimum
 	} {
 		m := newTestModel(t, projects, states)
 		m.width = c.width
@@ -157,8 +157,8 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 			t.Errorf("width=%d: commits panel drawn = %v, want %v:\n%s", c.width, got, c.show, flat)
 		}
 		if c.show {
-			if lay.tableWidth != c.width-commitsPanelWidth-commitsPanelGap {
-				t.Errorf("width=%d: tableWidth = %d, want %d", c.width, lay.tableWidth, c.width-commitsPanelWidth-commitsPanelGap)
+			if lay.panelWidth != c.panel || lay.tableWidth != c.table {
+				t.Errorf("width=%d: panel/table = %d/%d, want %d/%d", c.width, lay.panelWidth, lay.tableWidth, c.panel, c.table)
 			}
 			if got := fitColumns(lay.tableWidth - rowPrefixWidth - 2); got != len(tableColumns) {
 				t.Errorf("width=%d: the split table shows %d columns, want the full %d", c.width, got, len(tableColumns))
@@ -174,17 +174,16 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 	}
 }
 
-// Past its floor the panel takes a quarter of the terminal so the subjects stay readable; the
-// table keeps its 5 columns because the fit gate still runs (159-cell table at 213).
+// Past its floor the panel takes a third of the terminal, capped so the table keeps its columns.
 func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	projects, states := fixtureProjects()
 	for _, c := range []struct {
 		width, panel, table int
 	}{
-		{119, 30, 88}, // the floor: the old fixed width
-		{121, 30, 90},
-		{213, 53, 159},
-		{400, 100, 299},
+		{119, 30, 88},  // the floor: the old fixed width
+		{121, 32, 88},  // the cap: the table at its minimum
+		{168, 56, 111}, // the share: 168/3
+		{400, 133, 266},
 	} {
 		m := newTestModel(t, projects, states)
 		m.width = c.width
@@ -198,7 +197,7 @@ func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	}
 }
 
-// The wider body is spent on the subject: at 213 the inner 51 leaves 33 runes before the ellipsis.
+// The wider body is spent on the subject: at 213 the inner 69 leaves 51 runes before the ellipsis.
 func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
 	long := strings.Repeat("subject", 10)
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
@@ -215,8 +214,8 @@ func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
 	if line == "" {
 		t.Fatalf("the commit subject is not painted:\n%v", panel)
 	}
-	if want := truncate(long, 33); !strings.Contains(line, want) {
-		t.Errorf("the subject is not clipped at the wider body's 33 (want %q): %q", want, line)
+	if want := truncate(long, 51); !strings.Contains(line, want) {
+		t.Errorf("the subject is not clipped at the wider body's 51 (want %q): %q", want, line)
 	}
 }
 

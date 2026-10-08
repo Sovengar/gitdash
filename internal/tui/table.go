@@ -293,6 +293,15 @@ func fitColumns(innerWidth int) int {
 	return len(tableColumns)
 }
 
+// The narrowest table that still fits all 5 columns; the width decisions cap against it.
+func minTableWidth() int {
+	used := 0
+	for _, c := range tableColumns {
+		used += c.width
+	}
+	return used + rowPrefixWidth + 2
+}
+
 // width includes the two borders and the 4-cell row prefix (cursor + fetch slot): -6 is what keeps
 // the header on the exact same columns as the rows, with no overflow past the right border.
 func headerColumns(width int) string {

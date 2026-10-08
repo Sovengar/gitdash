@@ -16,23 +16,22 @@ const (
 	// Below this there is no window left to scroll.
 	minBodyLines = 3
 
-	// Width budget: the table row prefix is a 2-cell cursor plus a 2-cell fetch slot; the commits
-	// panel is a quarter of the terminal (30 as floor) with a 1-cell gap; the card splits into at
-	// least 36 + separator + 24 and the fields column grows with the terminal.
+	// Width budget: the table's row prefix, the commits panel (a share of the terminal, capped by
+	// the table's minimum) and the card's two columns.
 	rowPrefixWidth = 4
 	fetchSlotWidth = 2
 
 	commitsPanelWidth = 30
-	// 1/4 of the terminal: past the floor the panel takes this share so the commit subjects stay
-	// readable; the fit gate below still decides, so the table never loses a column for it.
-	commitsPanelShare = 4
+	// Share of the terminal the panel takes past its floor so the subjects stay readable; layout()
+	// caps it at the table's minimum, or the width gate would drop the panel instead of shrinking it.
+	commitsPanelShare = 3
 	commitsPanelGap   = 1
 
 	cardLeftWidth  = 36
 	cardSepWidth   = 1
 	cardRightWidth = 24
-	// Share of the inner width (in fifths) the lists column takes once it grows past its floor;
-	// the fields column keeps the rest, because path/upstream are the values that clip first.
+	// The lists column takes this share of the inner width past its floor; the fields keep the rest
+	// because path/upstream are what clip first.
 	cardRightShare = 2
 )
 
@@ -148,9 +147,8 @@ func (l layout) mismaChromeQue(o layout) bool {
 		l.hintLines == o.hintLines
 }
 
-// The card's columns: the lists column never drops below cardRightWidth and grows to
-// cardRightShare/5 of the inner width; the fields column takes what is left. Both floors hold
-// whenever the split is on (inner >= cardLeftWidth+cardSepWidth+cardRightWidth).
+// The card's columns: the lists take cardRightShare/5 of the inner width (floor cardRightWidth),
+// the fields the rest; both floors hold whenever cardSplit is on.
 func cardColumns(inner int) (left, right int) {
 	right = max(cardRightWidth, (inner-cardSepWidth)*cardRightShare/5)
 	return inner - cardSepWidth - right, right

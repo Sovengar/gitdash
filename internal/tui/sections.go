@@ -38,9 +38,8 @@ func (m Model) layout() layout {
 	// width from this single value, so a degradation decision cannot disagree with what is painted.
 	lay.cardWidth = m.width
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
-	// The commits panel is additive on width: it enters only if the table still shows all its
-	// columns at the split width, otherwise it would silently cost the table a column.
-	panelWidth := max(commitsPanelWidth, m.width/commitsPanelShare)
+	// The panel's share is capped by the table's minimum, so the fit gate stays a safety net.
+	panelWidth := max(commitsPanelWidth, min(m.width/commitsPanelShare, m.width-minTableWidth()-commitsPanelGap))
 	tableWidth := m.width - panelWidth - commitsPanelGap
 	if fitColumns(tableWidth-rowPrefixWidth-2) == len(tableColumns) {
 		lay.showPanel = true
@@ -203,14 +202,13 @@ func (m *Model) panelEmpty() string {
 	return styleDim.Render("  " + m.emptyTableHint())
 }
 
-// commitGroup is one labelled list inside the commits panel.
 type commitGroup struct {
 	label   string
 	commits []gitstatus.Commit
 }
 
-// The groups are the current branch and, only when the repo declares a DIFFERENT sync ref with
-// commits of its own, the sync branch: on the sync branch itself the two lists would duplicate.
+// The sync group only exists with a DIFFERENT ref that has commits of its own: on the sync branch
+// itself the two lists would duplicate.
 func commitGroups(snap gitstatus.Snapshot) []commitGroup {
 	label := "current"
 	if snap.Status.Branch != "" {
@@ -223,9 +221,8 @@ func commitGroups(snap gitstatus.Snapshot) []commitGroup {
 	return groups
 }
 
-// One line per commit, newest first, never wrapped: the subject is cut to whatever the body leaves
-// after the sha/age prefix. The height is shared between the groups so the last one is not clipped
-// away by the first, and each group always keeps room for one commit.
+// Newest first, one line per commit, never wrapped: the subject is cut to whatever the body leaves
+// after the sha/age prefix. The height is shared so the first group does not clip the second away.
 func (m *Model) commitsPanel(snap gitstatus.Snapshot, rows, inner int) string {
 	groups := commitGroups(snap)
 	per := max(1, (rows-len(groups))/len(groups))
