@@ -696,6 +696,43 @@ func TestPRURLYNoteOfTheOutcome(t *testing.T) {
 	}
 }
 
+// The chosen picker values are what reaches the forge flags, not the snapshot's.
+func TestPRSubmitCarriesThePickerChosenBranches(t *testing.T) {
+	dir := prRepo(t, "git@github.com:acme/widget.git")
+	forgeStub(t, "gh", "echo https://github.com/acme/widget/pull/9")
+	m, rec := prModel(t, dir)
+
+	m = openPROverlay(t, m)
+	m = typeText(m, "a title")
+	m = focusField(t, m, prFieldBase)
+	m = loadRefs(m, gitstatus.Ref{Name: "release"})
+	m = typeText(m, "release")
+	m, _ = press(m, "enter")
+	m = focusField(t, m, prFieldHead)
+	m = loadRefs(m, gitstatus.Ref{Name: "feat/x"})
+	m = typeText(m, "feat/x")
+	m, _ = press(m, "enter")
+
+	m, cmd := press(m, prSubmitKey)
+	if cmd == nil {
+		t.Fatal("the submit returned no cmd")
+	}
+	out, _ := m.Update(cmd())
+	m = out.(Model)
+	awaitPR(t, &m)
+
+	e := prExec(rec)
+	if e == nil {
+		t.Fatal("the exec was not recorded")
+	}
+	if !containsPair(e.Argv, "-B", "release") {
+		t.Errorf("argv = %v, want -B release", e.Argv)
+	}
+	if !containsPair(e.Argv, "-H", "feat/x") {
+		t.Errorf("argv = %v, want -H feat/x", e.Argv)
+	}
+}
+
 // The case comes from the seam's own shape: the overlay publishes the submission and the Cmd runs one tick later, so a rescan can requeue in between, and without this guard that tick would run the last submission again.
 func TestPRCreateCmdWithoutSendNotMakesNothing(t *testing.T) {
 	m, _ := prModel(t, prRepo(t, "git@github.com:acme/widget.git"))

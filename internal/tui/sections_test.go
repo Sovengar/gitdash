@@ -14,7 +14,7 @@ import (
 )
 
 func layoutTest(height int, hasFilter bool, keybinds int, keep bool) layout {
-	return computeLayout(height, hasFilter, keybinds, keep, 0)
+	return computeLayout(height, hasFilter, keybinds, keep)
 }
 
 func TestDashboardSectionsBordered(t *testing.T) {
@@ -960,7 +960,7 @@ func TestFetchStateForItsValue(t *testing.T) {
 // Its size is the SHARE of that gap and not "the biggest that fits": the search starts at the share and only goes down when the minimum of table rows leaves no other spot.
 func TestPreviewWithFilterRespectsTheShareOfTheGap(t *testing.T) {
 	for _, h := range []int{24, 30, 40, 50, 60, 80, 100, 140} {
-		lay := computeLayout(h, true, defaultHintLines, false, 0)
+		lay := computeLayout(h, true, defaultHintLines, false)
 		free := h - (tableChrome + filterSectionLines + statsSectionLines +
 			keybindsChrome + defaultHintLines + previewChrome)
 		if free < 1 {

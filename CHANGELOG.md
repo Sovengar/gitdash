@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Open the PR/MR form (`O`) as a floating modal over the still-visible dashboard, with base and head editable through type-to-filter branch pickers fed by a bounded on-demand ref read.
 - Sync the current branch with the repo's *sync branch* with `s`: an explicit `git fetch origin`, then the configured `[commands] sync` base with `origin <sync>` appended; the result reports as a toast, not a card action block.
 
 ### Changed

@@ -32,14 +32,9 @@ func (m Model) visualOverlayLines() []string {
 
 // With a warning in keybinds (pull selector, removal confirmation, log or PR legend) what is forced is that section's visibility: degrading it would leave the app waiting for a key without saying which.
 func (m Model) layout() layout {
-	// The PR overlay lives IN the body (it is the dashboard that gets replaced), so its minimum is passed through: the layout must not steal height from a preview panel that will not be drawn below.
-	formMin := 0
-	if m.pr != nil {
-		formMin = prMinBodyLines()
-	}
-	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "", formMin)
-	if m.logOpen || m.pr != nil {
-		// The log and the form REPLACE the table and the card disappears, so the total number of terminal lines is what has to be conserved: the column header and the whole card go back to the body's height, otherwise the panel measures 3 lines short and the keybinds move up.
+	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "")
+	if m.logOpen {
+		// The log REPLACES the table and the card disappears, so the total number of terminal lines is what has to be conserved: the column header and the whole card go back to the body's height, otherwise the panel measures 3 lines short and the keybinds move up. The PR form no longer needs this: it floats over the dashboard, which measures exactly as if no form were open.
 		freed := 1
 		if lay.previewLines > 0 {
 			freed += previewChrome + lay.previewLines

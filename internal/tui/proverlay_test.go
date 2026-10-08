@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"gitdash/internal/cmdlog"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/testutil"
@@ -67,6 +68,21 @@ func formPainted(t *testing.T, m Model) bool {
 	return false
 }
 
+func modalContent(t *testing.T, m Model) string {
+	t.Helper()
+	if m.pr == nil {
+		t.Fatalf("the overlay is not open")
+	}
+	return stripANSI(m.prModal())
+}
+
+func loadRefs(m Model, refs ...gitstatus.Ref) Model {
+	m.pr.refs = refs
+	m.pr.refsReady = true
+	m.pr.refsErr = ""
+	return m
+}
+
 func focusField(t *testing.T, m Model, want prField) Model {
 	t.Helper()
 	for range prFieldCount {
@@ -113,8 +129,8 @@ func TestPROverlayCapturesTheRowOnTheArm(t *testing.T) {
 	if m.pr.name != "dirty-api" {
 		t.Errorf("name = %q", m.pr.name)
 	}
-	if m.pr.head != "main" {
-		t.Errorf("head = %q, want main (the snapshot's branch)", m.pr.head)
+	if got := m.pr.headValue(); got != "main" {
+		t.Errorf("head = %q, want main (the snapshot's branch)", got)
 	}
 	if got := m.prParams().Base; got != "main" {
 		t.Errorf("base = %q, want main (sync branch or config default)", got)
@@ -271,7 +287,7 @@ func TestPROverlayTitleEmptyNotCloses(t *testing.T) {
 	if m.pr.err == "" {
 		t.Error("there is no validation notice")
 	}
-	if !strings.Contains(sectionContent(t, stripANSI(m.View().Content), "new PR · dirty-api"), m.pr.err) {
+	if !strings.Contains(modalContent(t, m), m.pr.err) {
 		t.Errorf("the notice is not in the panel:\n%s", stripANSI(m.View().Content))
 	}
 	if len(m.toasts.blocksFor(m.width)) != 0 {
@@ -282,10 +298,8 @@ func TestPROverlayTitleEmptyNotCloses(t *testing.T) {
 func TestPROverlayBaseEmptyNotCloses(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m = typeText(m, "a title")
-	m = focusField(t, m, prFieldBase)
-	for range 10 { // the prefilled base is cleared entirely
-		m, _ = press(m, "backspace")
-	}
+	m = loadRefs(m, gitstatus.Ref{Name: "main"})
+	m.pr.base.value = "" // a picker normally carries a value; the submit still validates
 
 	m, _ = press(m, prSubmitKey)
 
@@ -362,27 +376,13 @@ func TestPROverlayDraftToggle(t *testing.T) {
 	}
 }
 
-// The box is located by its text without ANSI and the RAW lines are read, because that is where the style lives: the focused label and the unfocused one only differ in color.
+// The box is located by its text without ANSI and the RAW lines are read, because that is where the style lives: the focused label and the unfocused one only differ in color. It reads the modal directly (not the spliced view), since the dashboard behind shares its border glyphs.
 func formLines(t *testing.T, m Model) []string {
 	t.Helper()
-	all := strings.Split(m.View().Content, "\n")
-	start := -1
-	for i, l := range all {
-		if strings.Contains(stripANSI(l), "╭ new PR · "+m.pr.name+" ") {
-			start = i
-			break
-		}
+	if m.pr == nil {
+		t.Fatalf("the form's box is not open")
 	}
-	if start < 0 {
-		t.Fatalf("the form's box is not in the view:\n%s", stripANSI(m.View().Content))
-	}
-	for i := start; i < len(all); i++ {
-		if strings.Contains(stripANSI(all[i]), "╯") {
-			return all[start : i+1]
-		}
-	}
-	t.Fatalf("the form's box does not close in the view:\n%s", stripANSI(m.View().Content))
-	return nil
+	return strings.Split(m.prModal(), "\n")
 }
 
 // The ANSI of the view is looked at and not the text, because labels ALWAYS carry the label text, so without the style this check would distinguish nothing.
@@ -404,11 +404,11 @@ func highlightedLabels(t *testing.T, m Model) []string {
 	return out
 }
 
-// Walking the four fields with tab fixes that the focused label is its own: an inverted `focus == prFieldX` would mark the wrong one and leave the right one unmarked.
+// Walking the five fields with tab fixes that the focused label is its own: an inverted `focus == prFieldX` would mark the wrong one and leave the right one unmarked.
 func TestPROverlayHighlightsTheLabelOfTheFieldWithTheFocus(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 
-	for _, want := range []prField{prFieldTitle, prFieldBase, prFieldDraft, prFieldBody} {
+	for _, want := range []prField{prFieldTitle, prFieldBase, prFieldHead, prFieldDraft, prFieldBody} {
 		m = focusField(t, m, want)
 		if got := highlightedLabels(t, m); !reflect.DeepEqual(got, []string{prLabelFor(want)}) {
 			t.Errorf("with the focus on %q it highlights %v, want only [%q]", prLabelFor(want), got, prLabelFor(want))
@@ -422,17 +422,19 @@ func prLabelFor(f prField) string {
 		return "title"
 	case prFieldBase:
 		return "base"
+	case prFieldHead:
+		return "head"
 	case prFieldDraft:
 		return "draft"
 	case prFieldBody:
 		return "body"
 	}
-	return "head"
+	return ""
 }
 
 func TestPROverlayTabWalksTheFields(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
-	want := []prField{prFieldTitle, prFieldBase, prFieldDraft, prFieldBody}
+	want := []prField{prFieldTitle, prFieldBase, prFieldHead, prFieldDraft, prFieldBody}
 
 	for _, f := range want {
 		if m.pr.focus != f {
@@ -449,11 +451,28 @@ func TestPROverlayTabWalksTheFields(t *testing.T) {
 	}
 }
 
+// Leaving a branch field clears its transient filter: re-entering starts from the committed value and the full list.
+func TestPROverlayLeavingABranchFieldClearsTheFilter(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m, gitstatus.Ref{Name: "main"}, gitstatus.Ref{Name: "dev"})
+	m = focusField(t, m, prFieldBase)
+	m = typeText(m, "dev")
+	if m.pr.base.filter.Value() != "dev" {
+		t.Fatalf("precondition: filter = %q", m.pr.base.filter.Value())
+	}
+
+	m, _ = press(m, "tab") // base -> head
+
+	if m.pr.base.filter.Value() != "" {
+		t.Errorf("the base filter survived the tab: %q", m.pr.base.filter.Value())
+	}
+}
+
 func TestPROverlayMarksTheFieldWithTheFocus(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m = focusField(t, m, prFieldDraft)
 
-	content := sectionContent(t, stripANSI(m.View().Content), "new PR · dirty-api")
+	content := modalContent(t, m)
 	if !strings.Contains(content, "▸ draft") {
 		t.Errorf("the focused field is not marked:\n%s", content)
 	}
@@ -475,6 +494,40 @@ func TestPROverlayBodyIsMultiline(t *testing.T) {
 	}
 	if got := m.prParams().Body; got != "first\nsecond" {
 		t.Errorf("Body = %q, want two lines", got)
+	}
+}
+
+// The template key inserts a non-destructive skeleton at the cursor: what is already written stays.
+func TestPROverlayBodyTemplateInsertsAtTheCursor(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = focusField(t, m, prFieldBody)
+	m = typeText(m, "before")
+
+	m, _ = press(m, "ctrl+t")
+
+	body := m.prParams().Body
+	if !strings.HasPrefix(body, "before") {
+		t.Errorf("the skeleton overwrote the text: %q", body)
+	}
+	for _, want := range []string{"## Summary", "## Test plan"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the skeleton misses %q:\n%s", want, body)
+		}
+	}
+}
+
+// The template key only acts in the body; in another field it falls through to the widget without inserting anything.
+func TestPROverlayBodyTemplateOnlyInTheBody(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = typeText(m, "title text")
+
+	m, _ = press(m, "ctrl+t")
+
+	if m.prParams().Body != "" {
+		t.Errorf("the template fired outside the body: %q", m.prParams().Body)
+	}
+	if got := m.prParams().Title; got != "title text" {
+		t.Errorf("the title changed: %q", got)
 	}
 }
 
@@ -515,8 +568,6 @@ func TestPROverlayTheParamsArriveWhole(t *testing.T) {
 func TestPROverlayClipsTheTextOfALine(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m = typeText(m, "  a title  ")
-	m = focusField(t, m, prFieldBase)
-	m = typeText(m, "  ")
 
 	m, _ = press(m, prSubmitKey)
 
@@ -554,9 +605,7 @@ func TestPROverlayReopenStartsClean(t *testing.T) {
 	m = focusField(t, m, prFieldDraft)
 	m, _ = press(m, " ")
 	m = focusField(t, m, prFieldBase)
-	for range 10 { // emptying the base makes the submission FAIL
-		m, _ = press(m, "backspace")
-	}
+	m.pr.base.value = ""
 	m, _ = press(m, prSubmitKey)
 	if m.pr.err == "" {
 		t.Fatal("with no base there is no notice")
@@ -607,6 +656,7 @@ func TestPROverlayCloseDropsTheFocusOfTheFields(t *testing.T) {
 	}{
 		{"the title", prFieldTitle},
 		{"the base", prFieldBase},
+		{"the head", prFieldHead},
 		{"the body", prFieldBody},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -618,7 +668,10 @@ func TestPROverlayCloseDropsTheFocusOfTheFields(t *testing.T) {
 				w := &m.pr.title
 				conFoco = func() bool { return w.Focused() }
 			case prFieldBase:
-				w := &m.pr.baseIn
+				w := &m.pr.base.filter
+				conFoco = func() bool { return w.Focused() }
+			case prFieldHead:
+				w := &m.pr.head.filter
 				conFoco = func() bool { return w.Focused() }
 			default:
 				w := &m.pr.body
@@ -640,7 +693,7 @@ func TestPROverlayCloseDropsTheFocusOfTheFields(t *testing.T) {
 	}
 }
 
-// The overlay is one more box of the dashboard and the whole still measures EXACTLY what the terminal does: a height that does not add up means something is off-screen.
+// The overlay floats over the dashboard and the whole still measures EXACTLY what the terminal does: a height that does not add up means something is off-screen.
 func TestPROverlayIsFitsInTheTerminal(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 
@@ -654,19 +707,16 @@ func TestPROverlayIsFitsInTheTerminal(t *testing.T) {
 			t.Errorf("line %d width = %d, want %d: %q", i, w, m.width, ansi.Strip(l))
 		}
 	}
-	lay := m.layout()
-	content := sectionContent(t, stripANSI(out), "new PR · dirty-api")
-	if got := len(strings.Split(content, "\n")); got != lay.bodyLines {
-		t.Errorf("box height = %d, want the budget %d", got, lay.bodyLines)
+	if !formPainted(t, m) {
+		t.Fatalf("the open overlay is not painted:\n%s", stripANSI(out))
 	}
-	if strings.Contains(stripANSI(out), "NAME") {
-		t.Errorf("the table is still painted with the overlay open:\n%s", stripANSI(out))
-	}
-	if strings.Contains(stripANSI(out), "upstream") {
-		t.Errorf("the repo's card is still painted with the overlay open:\n%s", stripANSI(out))
+	// The dashboard stays painted behind the modal: the repos box's title is above the modal's top edge.
+	if !strings.Contains(stripANSI(out), "╭ repos ") {
+		t.Errorf("the table is not painted behind the modal:\n%s", stripANSI(out))
 	}
 }
 
+// The modal floats: the dashboard is rendered normally and keeps its panels (the form does not replace the body any more).
 func TestPROverlayPromptInKeybinds(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
 	if m.promptLine() != "" {
@@ -687,19 +737,17 @@ func TestPROverlayPromptInKeybinds(t *testing.T) {
 		t.Errorf("the hints are still there with the notice in place:\n%s", kb)
 	}
 
-	m.height = 6
+	// Below the minimum the resize closes the form and the hints come back (the warning no longer belongs on screen).
+	m = resize(m, m.width, 12)
 	kb = sectionContent(t, stripANSI(m.View().Content), "keybinds")
-	if !strings.Contains(kb, "ctrl+s") {
-		t.Errorf("the notice disappears on a short terminal:\n%s", kb)
+	if strings.Contains(kb, "ctrl+s") {
+		t.Errorf("the PR legend survived the close:\n%s", kb)
 	}
 }
 
 func TestPROverlayNotOpensInTerminalSmall(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
-	m.height = 12 // below prMinBodyLines() the body does not reach
-	if m.layout().bodyLines >= prMinBodyLines() {
-		t.Skipf("precondition: at %d lines the body does fit (%d)", m.height, m.layout().bodyLines)
-	}
+	m.height = prMinModal() - 1
 
 	_, cmd := press(m, "O")
 
@@ -714,13 +762,10 @@ func TestPROverlayNotOpensInTerminalSmall(t *testing.T) {
 	}
 }
 
-// A NARROW but tall terminal is the case the height alone does not see: the body height is plenty while the label column subtraction drives the input width negative, so without the minimum width the only thing between the user and an unusable box was prFit's max(1, …).
+// A NARROW but tall terminal is the case the height alone does not see: without the minimum width the label column subtraction drives the input width negative.
 func TestPROverlayNotOpensInTerminalNarrow(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
 	m.width, m.height = prMinWidth()-1, 40
-	if m.layout().bodyLines < prMinBodyLines() {
-		t.Skipf("precondition: at %d lines the height does not reach (%d)", m.height, m.layout().bodyLines)
-	}
 
 	_, cmd := press(m, "O")
 
@@ -757,11 +802,10 @@ func TestPROverlayOpensInTheWidthMinimum(t *testing.T) {
 	}
 }
 
-// The height is an edge and not an approximation: the first height that opens is the one leaving the body EXACTLY at the form's minimum, and one line less does not open, so a `>=` there would accept a line too few.
+// The height is an edge and not an approximation: the first height that opens is the modal's exact minimum, and one line less does not open.
 func TestPROverlayOpensFairInTheHeightMinimum(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
 
-	// The first height that opens is searched and not hardcoded, so a change in the layout's split shows up here instead of freezing a number that no longer means anything.
 	var opens int
 	for h := 8; h <= 60; h++ {
 		probe := m
@@ -775,6 +819,9 @@ func TestPROverlayOpensFairInTheHeightMinimum(t *testing.T) {
 	if opens == 0 {
 		t.Fatal("the form opens at no height")
 	}
+	if opens != prMinModal() {
+		t.Errorf("the first height that opens = %d, want the exact minimum %d", opens, prMinModal())
+	}
 
 	atEdge := m
 	atEdge.height = opens
@@ -782,61 +829,57 @@ func TestPROverlayOpensFairInTheHeightMinimum(t *testing.T) {
 	if atEdge.pr == nil {
 		t.Fatalf("it did not open at %d lines", opens)
 	}
-	if got := atEdge.layout().bodyLines; got != prMinBodyLines() {
-		t.Errorf("it opens at %d lines with a body of %d, want the exact minimum %d", opens, got, prMinBodyLines())
+	if got := atEdge.prInterior(); got != prMinInterior() {
+		t.Errorf("it opens at %d lines with an interior of %d, want the exact minimum %d", opens, got, prMinInterior())
 	}
 
 	smaller := m
 	smaller.height = opens - 1
 	smaller, _ = press(smaller, "O")
 	if smaller.pr != nil {
-		t.Errorf("it opened at %d lines, one below the minimum (%d)", opens-1, prMinBodyLines())
+		t.Errorf("it opened at %d lines, one below the minimum (%d)", opens-1, prMinModal())
 	}
 }
 
-// prSection is the other side of the same edge: with the EXACT gap it paints and with one less it returns "" so the caller does not leave half a box; if layout and prSection disagreed on the minimum, the overlay would open with its box not drawn.
-func TestPROverlayPrSectionOnlyFromTheHeightMinimum(t *testing.T) {
+// The modal has its own minimum height, derived from its parts; at it the box measures exactly prMinModal and one line below the form does not paint.
+func TestPROverlayModalOnlyFromTheHeightMinimum(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
-
-	if got := m.prSection(prMinBodyLines() - 1); got != "" {
-		t.Errorf("with one line less it painted %d lines, want the empty section:\n%s",
-			len(strings.Split(got, "\n")), got)
+	m.height = prMinModal()
+	if !m.prFits() {
+		t.Fatalf("at %d lines the modal does not fit its own minimum %d", m.height, prMinModal())
 	}
-	got := m.prSection(prMinBodyLines())
-	if got == "" {
-		t.Fatalf("with the minimum height it painted nothing:\n%s", stripANSI(m.View().Content))
+	if got := len(strings.Split(m.prModal(), "\n")); got != prMinModal() {
+		t.Errorf("box height = %d, want %d", got, prMinModal())
 	}
-	if n := len(strings.Split(got, "\n")); n != prMinBodyLines()+2 {
-		t.Errorf("box height = %d, want %d (2 borders + %d)", n, prMinBodyLines()+2, prMinBodyLines())
-	}
-	if !strings.Contains(stripANSI(got), "dirty-api") {
-		t.Errorf("the minimum-height section does not say which repo it is for:\n%s", stripANSI(got))
+	m.height = prMinModal() - 1
+	if m.prFits() {
+		t.Errorf("at %d lines (one below %d) the modal still fits", m.height, prMinModal())
 	}
 }
 
-// prFit's split is a view contract: the inputs take what is left after the label column and the margin cell, the body takes ALL the interior (its ┃ prompt marks the left edge) plus the height the fixed lines leave.
+// prFit's split is a view contract: the inputs take the label column and the margin off the modal's width, the body takes the modal's interior.
 func TestPROverlayTheWidgetsIsSizeOnTheGap(t *testing.T) {
 	const width, height = 100, 40
 	const prBodyPrompt = 2
 
 	m := openPROverlay(t, resize(newPROverlayModel(t, "/tmp/dirty-api"), width, height))
+	inner := m.prModalWidth() - 2
 
-	if got := m.pr.body.Width(); got != width-2-prBodyPrompt {
-		t.Errorf("body width = %d, want %d (the box's whole interior, prompt included)",
-			got, width-2-prBodyPrompt)
+	if got := m.pr.body.Width(); got != inner-prBodyPrompt {
+		t.Errorf("body width = %d, want %d (the modal's interior minus the prompt)",
+			got, inner-prBodyPrompt)
 	}
-	wantValue := width - 2 - prLabelWidth - prValueSlack
-	for _, in := range []struct {
-		name string
-		got  int
-	}{{"title", m.pr.title.Width()}, {"base", m.pr.baseIn.Width()}} {
-		if in.got != wantValue {
-			t.Errorf("width of the %s input = %d, want %d (the interior minus labels and margin)",
-				in.name, in.got, wantValue)
-		}
+	if got, want := m.pr.title.Width(), m.prValueWidth(); got != want {
+		t.Errorf("title width = %d, want %d", got, want)
 	}
-	if got, want := m.pr.body.Height(), m.layout().bodyLines-prFixedLines; got != want {
-		t.Errorf("body height = %d, want %d (what the %d fixed lines leave)", got, want, prFixedLines)
+	if got, want := m.pr.base.filter.Width(), max(1, inner-4); got != want {
+		t.Errorf("base filter width = %d, want %d", got, want)
+	}
+	if got, want := m.pr.head.filter.Width(), max(1, inner-4); got != want {
+		t.Errorf("head filter width = %d, want %d", got, want)
+	}
+	if got, want := m.pr.body.Height(), m.prBodyHeight(); got != want {
+		t.Errorf("body height = %d, want %d (the interior the fixed lines and the pane leave)", got, want)
 	}
 }
 
@@ -870,7 +913,7 @@ func TestPROverlayResizeEnoughNotCloses(t *testing.T) {
 	}
 }
 
-// The real branch is in the parent repo's inventory; without that fallback the overlay would show an empty head and the PR would go out with -H omitted, i.e. against whatever the CLI guesses the current branch is, and the field the user reads would not be the one being sent.
+// The real branch is in the parent repo's inventory; without that fallback the overlay would show an empty head and the PR would go out with -H omitted.
 func TestPRHeadOfWorktreeWithoutMarkerComesOfTheInventory(t *testing.T) {
 	projects, states := fixtureProjects()
 	parent := projects[0].Path
@@ -890,7 +933,7 @@ func TestPRHeadOfWorktreeWithoutMarkerComesOfTheInventory(t *testing.T) {
 	if m.pr == nil {
 		t.Fatal("the overlay did not open over the worktree subrow")
 	}
-	if got := m.pr.head; got != "feat/wt" {
+	if got := m.pr.headValue(); got != "feat/wt" {
 		t.Errorf("head = %q, want %q (it comes from the inventory, not the empty snapshot)", got, "feat/wt")
 	}
 	if got := m.prParams().Head; got != "feat/wt" {
@@ -898,7 +941,7 @@ func TestPRHeadOfWorktreeWithoutMarkerComesOfTheInventory(t *testing.T) {
 	}
 }
 
-// Both axes have a minimum and the test holds them AT THE EDGE: one line less does not open and one more does, so a mutant changing the 2 or the 12 shows up here and a `>=` in the place of a `>` does not.
+// Both axes have a minimum and the test holds them AT THE EDGE: one line/column less does not open and the exact minimum does.
 func TestPROverlayOnlyOpensInTheBorderExact(t *testing.T) {
 	t.Run("width", func(t *testing.T) {
 		m := newPROverlayModel(t, "/tmp/dirty-api")
@@ -924,34 +967,21 @@ func TestPROverlayOnlyOpensInTheBorderExact(t *testing.T) {
 	})
 
 	t.Run("height", func(t *testing.T) {
-		// The height threshold is not begged for: the first height at which the form fits is searched and the check confirms that just above it the body comes up short, so the test pins the minimum without writing a magic number.
 		m := newPROverlayModel(t, "/tmp/dirty-api")
 		m.width = 100
 
-		var first int
-		for h := 8; h < 40; h++ {
-			m.height = h
-			if open, _ := press(m, "O"); open.pr != nil {
-				first = h
-				break
-			}
-		}
-		if first == 0 {
-			t.Fatalf("the overlay opened at no height between 8 and 39")
-		}
-
-		m.height = first - 1
+		m.height = prMinModal() - 1
 		if open, _ := press(m, "O"); open.pr != nil {
-			t.Errorf("height %d: the overlay opened and below that it does not fit", first-1)
+			t.Errorf("height %d: the overlay opened and below that it does not fit", m.height)
 		}
-		m.height = first
+		m.height = prMinModal()
 		open, _ := press(m, "O")
 		if open.pr == nil {
-			t.Fatalf("height %d: the overlay did not open", first)
+			t.Fatalf("height %d: the overlay did not open", m.height)
 		}
-		if got := open.layout().bodyLines; got != prMinBodyLines() {
-			t.Errorf("height %d: bodyLines = %d, want the exact minimum %d",
-				first, got, prMinBodyLines())
+		if got := open.prInterior(); got != prMinInterior() {
+			t.Errorf("height %d: interior = %d, want the exact minimum %d",
+				m.height, got, prMinInterior())
 		}
 	})
 }
@@ -959,34 +989,26 @@ func TestPROverlayOnlyOpensInTheBorderExact(t *testing.T) {
 func TestPROverlayTheMinimumOfHeightNotIsAFloorOfParty(t *testing.T) {
 	m := newPROverlayModel(t, "/tmp/dirty-api")
 	m.width = 100
-	var first int
-	for h := 8; h < 40; h++ {
-		m.height = h
-		if open, _ := press(m, "O"); open.pr != nil {
-			first = h
-			break
-		}
-	}
-	if first == 0 {
-		t.Fatal("the overlay opened at no height between 8 and 39")
-	}
-	m.height = first - 2
+	m.height = prMinModal() - 2
 	if open, _ := press(m, "O"); open.pr != nil {
-		t.Errorf("height %d (two below the threshold %d): it opened",
-			first-2, first)
+		t.Errorf("height %d (two below the threshold %d): it opened", m.height, prMinModal())
 	}
 }
 
-// The minimums are tested against the pieces they are made of, because that is the contract the comments write: a test comparing against the constant itself does not pin it (if prMinBodyLines became +3 the test would move with it and the mutant would survive).
+// The minimums are tested against the pieces they are made of, because that is the contract the comments write: a test comparing against the constant itself does not pin it (if the composition changed the test would move with it and the mutant would survive).
 func TestPROverlayTheBudgetIsTheOneTheCommentStates(t *testing.T) {
-	const fieldsAndLabels = 6
-	if prFixedLines != fieldsAndLabels {
-		t.Errorf("prFixedLines = %d, want %d (4 fields + notice + body label)",
-			prFixedLines, fieldsAndLabels)
+	const fixed = 6 // four single-line fields + notice + body label
+	if prFixedLines() != fixed {
+		t.Errorf("prFixedLines() = %d, want %d", prFixedLines(), fixed)
 	}
-	if prMinBodyLines() != prFixedLines+2 {
-		t.Errorf("prMinBodyLines() = %d, want %d (the %d fixed + 2 of body)",
-			prMinBodyLines(), prFixedLines+2, prFixedLines)
+	if want := prFixedLines() + prPaneLines() + prBodyMinLines(); prMinInterior() != want {
+		t.Errorf("prMinInterior() = %d, want %d (fixed + pane + body floor)", prMinInterior(), want)
+	}
+	if want := prMinInterior() + 2; prMinModal() != want {
+		t.Errorf("prMinModal() = %d, want %d (interior + borders)", prMinModal(), want)
+	}
+	if want := prFixedLines() + prPaneLines() + prBodyPreferredLines(); prInteriorPreferred() != want {
+		t.Errorf("prInteriorPreferred() = %d, want %d", prInteriorPreferred(), want)
 	}
 	if prMinValueWidth != prLabelWidth {
 		t.Errorf("prMinValueWidth = %d, want %d (the label column's width)",
@@ -1003,6 +1025,54 @@ func TestPROverlayTheBudgetIsTheOneTheCommentStates(t *testing.T) {
 	}
 	if got := m.prValueWidth(); got < 1 {
 		t.Errorf("prValueWidth = %d: an input of width 0 or less is not an input", got)
+	}
+}
+
+// The modal width is pinned by LITERAL numbers: a test recomputing it from prModalWidth() would move with a margin mutant and leave it alive.
+func TestPROverlayModalWidthLiteralMargin(t *testing.T) {
+	m := newPROverlayModel(t, "/tmp/dirty-api")
+	cases := []struct{ width, want int }{
+		{100, 96}, // 100 - prModalMargin
+		{200, 196},
+		{30, 27}, // clamped up to prMinWidth
+		{27, 27},
+	}
+	for _, c := range cases {
+		m.width = c.width
+		if got := m.prModalWidth(); got != c.want {
+			t.Errorf("width %d: prModalWidth() = %d, want %d", c.width, got, c.want)
+		}
+	}
+}
+
+// The body height is pinned by LITERAL numbers: body.Height() == prBodyHeight() holds under a mutant of prBodyHeight's arithmetic and proves nothing.
+func TestPROverlayBodyHeightLiteral(t *testing.T) {
+	m := openPROverlay(t, resize(newPROverlayModel(t, "/tmp/dirty-api"), 100, 40))
+	if got := m.prBodyHeight(); got != 6 {
+		t.Errorf("prBodyHeight() at a tall terminal = %d, want 6 (the preferred body)", got)
+	}
+	m.height = prMinModal()
+	if got := m.prBodyHeight(); got != 2 {
+		t.Errorf("prBodyHeight() at the minimum = %d, want 2 (the body floor)", got)
+	}
+}
+
+// A committed ref longer than the value column is cut in the field line (marker included), so the modal keeps its exact width.
+func TestPROverlayFieldLineCutsAnOverlongCommittedRef(t *testing.T) {
+	m := openPROverlay(t, resize(newPROverlayModel(t, "/tmp/dirty-api"), 100, 40))
+	m.pr.head.value = strings.Repeat("x", 200)
+
+	line := m.prFieldDisplay(prFieldHead)
+	if w := ansi.StringWidth(line); w > m.prValueWidth() {
+		t.Errorf("field value width = %d, want <= %d", w, m.prValueWidth())
+	}
+	if !strings.HasSuffix(line, "…") {
+		t.Errorf("the overlong ref is not marked as cut: %q", line)
+	}
+	for i, l := range strings.Split(stripANSI(m.View().Content), "\n") {
+		if w := ansi.StringWidth(l); w != m.width {
+			t.Errorf("line %d width = %d, want %d", i, w, m.width)
+		}
 	}
 }
 
@@ -1047,4 +1117,357 @@ func TestOverlayWithoutOpenReturnsValuesEmpty(t *testing.T) {
 	if params.Title != "" || params.Body != "" || params.Base != "" {
 		t.Errorf("prParams without overlay = %+v, want forge.Params' zero", params)
 	}
+}
+
+// ---------- branch pickers ----------
+
+func TestPROverlayBasePickerListsLocalAndRemoteAndHighlightsTheValue(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m,
+		gitstatus.Ref{Name: "main"},
+		gitstatus.Ref{Name: "dev"},
+		gitstatus.Ref{Name: "origin/main", Remote: true},
+	)
+	m = focusField(t, m, prFieldBase)
+
+	content := modalContent(t, m)
+	for _, want := range []string{"main", "dev", "origin/main"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the pane does not list %q:\n%s", want, content)
+		}
+	}
+	p := m.pr.picker(prFieldBase)
+	refs := m.pr.filteredRefs(prFieldBase)
+	if refs[p.cursor].Name != "main" {
+		t.Errorf("the highlight is on %q, want the current base value main", refs[p.cursor].Name)
+	}
+}
+
+func TestPROverlayPickerFiltersAsYouType(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m,
+		gitstatus.Ref{Name: "main"},
+		gitstatus.Ref{Name: "feature/login"},
+		gitstatus.Ref{Name: "dev"},
+		gitstatus.Ref{Name: "origin/dev", Remote: true},
+	)
+	m = focusField(t, m, prFieldBase)
+
+	m = typeText(m, "dev")
+
+	got := names(m.pr.filteredRefs(prFieldBase))
+	want := []string{"dev", "origin/dev"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the filter kept %v, want %v", got, want)
+	}
+	if m.pr.picker(prFieldBase).cursor != 0 {
+		t.Errorf("the highlight moved to %d, want the first match", m.pr.picker(prFieldBase).cursor)
+	}
+	if content := modalContent(t, m); strings.Contains(content, "feature/login") {
+		t.Errorf("a non-matching branch is still listed:\n%s", content)
+	}
+	if m.pr.base.value != "main" {
+		t.Errorf("typing changed the committed value: %q", m.pr.base.value)
+	}
+}
+
+func TestPROverlayPickerArrowsAndEnterCommit(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m,
+		gitstatus.Ref{Name: "main"},
+		gitstatus.Ref{Name: "dev"},
+		gitstatus.Ref{Name: "origin/dev", Remote: true},
+	)
+	m = focusField(t, m, prFieldBase)
+	m = typeText(m, "dev") // [dev, origin/dev]
+
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter")
+
+	if got := m.pr.base.value; got != "origin/dev" {
+		t.Errorf("the committed value = %q, want the highlighted origin/dev", got)
+	}
+	if got := m.pr.base.filter.Value(); got != "" {
+		t.Errorf("the filter was not cleared: %q", got)
+	}
+	if got := names(m.pr.filteredRefs(prFieldBase)); len(got) != 3 {
+		t.Errorf("the pane did not return to the full list: %v", got)
+	}
+}
+
+func TestPROverlayPickerHighlightClamped(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m, gitstatus.Ref{Name: "main"}, gitstatus.Ref{Name: "dev"})
+	m = focusField(t, m, prFieldBase)
+
+	for range 5 {
+		m, _ = press(m, "down")
+	}
+	if got := m.pr.picker(prFieldBase).cursor; got != 1 {
+		t.Errorf("down past the end left the highlight at %d, want 1", got)
+	}
+	for range 5 {
+		m, _ = press(m, "up")
+	}
+	if got := m.pr.picker(prFieldBase).cursor; got != 0 {
+		t.Errorf("up past the start left the highlight at %d, want 0", got)
+	}
+}
+
+func TestPROverlayPickerTypedRefUsedVerbatimOnNoMatch(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m, gitstatus.Ref{Name: "main"})
+	m = focusField(t, m, prFieldBase)
+	m = typeText(m, "deadbeef")
+
+	m, _ = press(m, "enter")
+
+	if got := m.pr.base.value; got != "deadbeef" {
+		t.Errorf("value = %q, want the typed text used verbatim", got)
+	}
+}
+
+func TestPROverlayHeadPickerOffersLocalsOnly(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m,
+		gitstatus.Ref{Name: "main"},
+		gitstatus.Ref{Name: "dev"},
+		gitstatus.Ref{Name: "origin/main", Remote: true},
+	)
+	m = focusField(t, m, prFieldHead)
+
+	if got := names(m.pr.filteredRefs(prFieldHead)); !reflect.DeepEqual(got, []string{"main", "dev"}) {
+		t.Errorf("head pane = %v, want locals only", got)
+	}
+	if content := modalContent(t, m); strings.Contains(content, "origin/") {
+		t.Errorf("a remote name reaches the head pane:\n%s", content)
+	}
+}
+
+func TestPROverlayPaneLoadingEmptyAndErrorStates(t *testing.T) {
+	t.Run("loading", func(t *testing.T) {
+		m := focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), prFieldBase)
+		if !strings.Contains(modalContent(t, m), "loading branches") {
+			t.Errorf("the loading state is not painted:\n%s", modalContent(t, m))
+		}
+	})
+	t.Run("error keeps the value and the escape hatch", func(t *testing.T) {
+		m := focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), prFieldBase)
+		m.pr.refsReady = true
+		m.pr.refsErr = "boom"
+		if !strings.Contains(modalContent(t, m), "could not list branches") {
+			t.Errorf("the error state is not painted:\n%s", modalContent(t, m))
+		}
+		if m.pr.base.value != "main" {
+			t.Errorf("the read error dropped the field value: %q", m.pr.base.value)
+		}
+		m = typeText(m, "typed/ref")
+		m, _ = press(m, "enter")
+		if m.pr.base.value != "typed/ref" {
+			t.Errorf("typing by hand after an error did not work: %q", m.pr.base.value)
+		}
+	})
+	t.Run("no match", func(t *testing.T) {
+		m := loadRefs(focusField(t, openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api")), prFieldBase),
+			gitstatus.Ref{Name: "main"})
+		m = typeText(m, "zzz")
+		if !strings.Contains(modalContent(t, m), "no matches") {
+			t.Errorf("the no-match state is not painted:\n%s", modalContent(t, m))
+		}
+	})
+}
+
+// The bounded read is one exec per form open, only for that repo, and a fresh one starts on reopen.
+func TestPROverlayRefReadRunsPerOpenAndIsAuditable(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	testutil.FetchLocal(t, dir)
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snapClean()})
+	m = cursorOn(t, m, dir)
+	// The model installs its own recorder in New; the test's is installed after so it captures the read.
+	rec := cmdlog.New(cmdlog.DefaultCap)
+	cmdlog.SetRecorder(rec)
+	t.Cleanup(func() { cmdlog.SetRecorder(nil) })
+
+	m = openPROverlay(t, m)
+	waitEvent(t, &m, func(ev event) bool { _, ok := ev.(prRefsMsg); return ok })
+	if !m.pr.refsReady {
+		t.Fatal("the ref read never landed in the form")
+	}
+	if len(m.pr.refs) == 0 {
+		t.Fatal("the ref read returned no branches")
+	}
+	if got := countRefReads(rec); got != 1 {
+		t.Fatalf("for-each-ref executions = %d, want 1", got)
+	}
+	if e := lastRefRead(rec); e.Class != cmdlog.ClassRead {
+		t.Errorf("Class = %v, want %v", e.Class, cmdlog.ClassRead)
+	}
+
+	m, _ = press(m, "esc")
+	m = openPROverlay(t, m)
+	waitEvent(t, &m, func(ev event) bool { _, ok := ev.(prRefsMsg); return ok })
+
+	if got := countRefReads(rec); got != 2 {
+		t.Errorf("for-each-ref executions = %d, want 2 (a fresh read per open)", got)
+	}
+}
+
+// A late answer is attributed to the repo it was read for: with no modal or with the form moved on, it is dropped.
+func TestPROverlayRefsMsgAttributedToTheOpenForm(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	refs := []gitstatus.Ref{{Name: "dev"}}
+
+	out, _ := m.Update(prRefsMsg{path: "/tmp/other", refs: refs})
+	m = out.(Model)
+	if m.pr.refsReady {
+		t.Error("a result for another repo was accepted")
+	}
+
+	out, _ = m.Update(prRefsMsg{path: "/tmp/dirty-api", refs: refs})
+	m = out.(Model)
+	if !m.pr.refsReady || len(m.pr.refs) != 1 {
+		t.Errorf("the result for the open repo was dropped: ready=%v refs=%v", m.pr.refsReady, m.pr.refs)
+	}
+
+	closed := newPROverlayModel(t, "/tmp/dirty-api")
+	out, _ = closed.Update(prRefsMsg{path: "/tmp/dirty-api", refs: refs})
+	if out.(Model).pr != nil {
+		t.Error("a result arrived with no modal open")
+	}
+}
+
+// Non-picker fields have no list and no value: the head/base helpers fall back cleanly (a `—` placeholder and an empty slice), never a nil dereference.
+func TestPROverlayNonPickerFieldsHaveNoRefs(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+
+	if got := m.pr.filteredRefs(prFieldTitle); got != nil {
+		t.Errorf("filteredRefs(title) = %v, want nil", got)
+	}
+	if got := m.pr.fieldValue(prFieldTitle); got != "" {
+		t.Errorf("fieldValue(title) = %q, want empty", got)
+	}
+	if got := m.prFieldDisplay(prFieldTitle); got != styleDim.Render("—") {
+		t.Errorf("fieldDisplay(title) = %q, want the dim placeholder", got)
+	}
+	m.pr.base.value = ""
+	if !strings.Contains(modalContent(t, m), "—") {
+		t.Errorf("an empty committed value has no placeholder:\n%s", modalContent(t, m))
+	}
+}
+
+// With the read done and no refs at all the pane says so instead of staying blank.
+func TestPROverlayPaneSaysNoBranches(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m) // ready, no refs
+	m = focusField(t, m, prFieldBase)
+
+	if !strings.Contains(modalContent(t, m), "no branches") {
+		t.Errorf("the empty list is not told:\n%s", modalContent(t, m))
+	}
+}
+
+// More refs than the window show the "… N more" tail, so the pane height stays fixed. With exactly one
+// more than the window the tail must appear: that pins prPickerWindow to prPaneLines()-1.
+func TestPROverlayPickerRowsShowMore(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	var refs []gitstatus.Ref
+	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+		refs = append(refs, gitstatus.Ref{Name: n})
+	}
+	m = loadRefs(m, refs...)
+	m = focusField(t, m, prFieldBase)
+
+	if !strings.Contains(modalContent(t, m), "more") {
+		t.Errorf("the window does not warn about the dropped tail:\n%s", modalContent(t, m))
+	}
+}
+
+// The tail carries the EXACT number dropped (len(refs)-end), so a mutant of that arithmetic changes the text.
+func TestPROverlayPickerRowsExactMoreCount(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	var refs []gitstatus.Ref
+	for _, n := range []string{"a", "b", "c", "d", "e"} { // 5 refs, window 4 -> 3 shown, 2 dropped
+		refs = append(refs, gitstatus.Ref{Name: n})
+	}
+	m = loadRefs(m, refs...)
+	m = focusField(t, m, prFieldBase)
+
+	if got := modalContent(t, m); !strings.Contains(got, "… 2 more") {
+		t.Errorf("the tail does not carry the exact dropped count:\n%s", got)
+	}
+}
+
+// The pane marker sits ONLY on the highlighted row: the others are blank. An inverted index would move it.
+func TestPROverlayPaneMarkerOnlyOnTheHighlightedRow(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = loadRefs(m,
+		gitstatus.Ref{Name: "main"},
+		gitstatus.Ref{Name: "dev"},
+		gitstatus.Ref{Name: "origin/main", Remote: true},
+	)
+	m = focusField(t, m, prFieldBase)
+
+	rows := m.pickerRows(m.pr.picker(prFieldBase))
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
+	}
+	// base.value is "main", so the highlight is index 0.
+	if !strings.Contains(rows[0], "▸") {
+		t.Errorf("the highlighted row carries no marker: %q", stripANSI(rows[0]))
+	}
+	for _, i := range []int{1, 2} {
+		if strings.Contains(rows[i], "▸") {
+			t.Errorf("row %d wears the marker without the highlight: %q", i, stripANSI(rows[i]))
+		}
+	}
+}
+
+// A ref longer than the value column is cut in the pane with the marker, and the modal clips it to the box: a larger `inner` would let the row run past the border and the clip would eat the cut marker.
+func TestPROverlayPaneCutsALongRefAndKeepsTheEllipsis(t *testing.T) {
+	m := openPROverlay(t, resize(newPROverlayModel(t, "/tmp/dirty-api"), 100, 40))
+	m = loadRefs(m, gitstatus.Ref{Name: strings.Repeat("x", 200)})
+	m = focusField(t, m, prFieldBase)
+
+	// The long ref is the only row carrying x's, so its painted line is found unambiguously (the body placeholder also has "…", and the field lines carry "▸").
+	var paneLine string
+	for _, l := range strings.Split(modalContent(t, m), "\n") {
+		if strings.Contains(l, "xxx") {
+			paneLine = l
+			break
+		}
+	}
+	if paneLine == "" {
+		t.Fatalf("the pane row is not painted:\n%s", modalContent(t, m))
+	}
+	// The row must fill the box exactly: the cut marker flush against the right border. A larger inner lets the row overflow (the clip eats "…") and a smaller one leaves padding after it, so both are visible.
+	if !strings.HasSuffix(paneLine, "…│") {
+		t.Errorf("the pane row does not end cut-flush against the border (inner wrong): %q", paneLine)
+	}
+	for i, l := range strings.Split(stripANSI(m.View().Content), "\n") {
+		if w := ansi.StringWidth(l); w != m.width {
+			t.Errorf("line %d width = %d, want %d", i, w, m.width)
+		}
+	}
+}
+
+func countRefReads(rec *cmdlog.Recorder) int {
+	n := 0
+	for _, e := range rec.Entries() {
+		if strings.HasPrefix(e.Command(), "git for-each-ref") {
+			n++
+		}
+	}
+	return n
+}
+
+func lastRefRead(rec *cmdlog.Recorder) cmdlog.Entry {
+	var got cmdlog.Entry
+	for _, e := range rec.Entries() {
+		if strings.HasPrefix(e.Command(), "git for-each-ref") {
+			got = e
+		}
+	}
+	return got
 }

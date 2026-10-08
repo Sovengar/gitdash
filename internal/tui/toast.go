@@ -238,9 +238,37 @@ func overlayToasts(base string, blocks [][]string, width, height, reserved int) 
 		}
 		for j, b := range block[:min(len(block), max(0, len(lines)-top))] {
 			y := top + j
-			lines[y] = ansi.Truncate(lines[y], x, "") + b + ansi.TruncateLeft(lines[y], x+bw, "")
+			lines[y] = spliceLine(lines[y], b, x)
 		}
 		bottom = top - 2
+	}
+	return strings.Join(lines, "\n")
+}
+
+// One ANSI-safe horizontal splice: the block replaces the x..x+width cells of the line and the rest is rebuilt around it, so the line's total width is preserved.
+func spliceLine(line, block string, x int) string {
+	return ansi.Truncate(line, x, "") + block + ansi.TruncateLeft(line, x+ansi.StringWidth(block), "")
+}
+
+// The modal is centred over the dashboard by the same splice primitive the toasts use: the dashboard is rendered normally and the modal's lines replace the cells they cover. A modal that does not fit whole is left un-spliced.
+func spliceModal(base, modal string, width, height int) string {
+	if modal == "" || width <= 0 {
+		return base
+	}
+	block := strings.Split(modal, "\n")
+	mh := len(block)
+	lines := strings.Split(base, "\n")
+	if height <= 0 || height > len(lines) {
+		height = len(lines)
+	}
+	x := max(0, (width-blockWidth(block))/2)
+	y := max(0, (height-mh)/2)
+	for j, b := range block {
+		yy := y + j
+		if yy >= len(lines) {
+			break
+		}
+		lines[yy] = spliceLine(lines[yy], b, x)
 	}
 	return strings.Join(lines, "\n")
 }
