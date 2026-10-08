@@ -614,15 +614,6 @@ func TestCardCollapsesWhenNarrow(t *testing.T) {
 	}
 }
 
-func lineWith(content, needle string) string {
-	for _, l := range strings.Split(content, "\n") {
-		if strings.Contains(l, needle) {
-			return l
-		}
-	}
-	return ""
-}
-
 func TestCardCollapsedStacksListsWithTheirWarnings(t *testing.T) {
 	// One worktree fits whole and the files list then gets the remainder: the files header fits
 	// with no room for an item or a warning.
