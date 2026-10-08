@@ -179,6 +179,11 @@ type armedVisual struct {
 	behind   int // commits the upstream is missing from HEAD, as the last scan saw them
 }
 
+// visualFlight is the render overlay's VIEW state: the truth of "in flight" is m.running (the busy guard), and this only says what to paint until the render answers or esc drops it. It is not cancelled on esc because the completion still has to record in the log and toast.
+type visualFlight struct {
+	path, sub string
+}
+
 type armedRemoval struct {
 	wtPath string
 	parent string
@@ -227,6 +232,7 @@ type Model struct {
 	armed       *armedRemoval
 	pullArmed   *armedPull
 	visualArmed *armedVisual
+	visualBusy  *visualFlight
 	// removeTokens maps parent repo path → current attempt token (the in-flight guard is per parent, so the token is too); a result whose token is no longer current is discarded.
 	removeGen    int
 	removeTokens map[string]int
@@ -742,6 +748,7 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 		return m.toastCmd(toastWarning, "git-sim not installed")
 	}
 	m.running[path] = "visual"
+	m.visualBusy = &visualFlight{path: path, sub: sub}
 	runner := sim.New()
 	appCtx := m.ctx
 	events := m.events

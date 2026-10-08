@@ -486,6 +486,55 @@ func TestVisualHalfDirWithoutCacheDirGivesError(t *testing.T) {
 	}
 }
 
+// The overlay is view state: painting it needs no live render (the wiring that sets it is held by TestVisualResolvesAboutTheArmed), and the box must paint OVER the dashboard, not replace it.
+func TestVisualOverlayPaintsOverTheDashboard(t *testing.T) {
+	m := newPullModel(t)
+	if got := m.visualOverlayLines(); got != nil {
+		t.Fatalf("visualOverlayLines with nothing rendering = %v, want nil (the splice must be a no-op)", got)
+	}
+	m.visualBusy = &visualFlight{path: "/tmp/old-clean", sub: "merge"}
+
+	out := stripANSI(m.View().Content)
+	box := sectionContent(t, out, "simulate: merge")
+	for _, want := range []string{"rendering merge", "esc close"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the overlay does not mention %q:\n%s", want, box)
+		}
+	}
+	if !strings.Contains(out, "╭ repos ") {
+		t.Error("the overlay replaced the dashboard: it must paint OVER it (prdash style)")
+	}
+}
+
+func TestVisualOverlayEscClosesOnlyTheOverlay(t *testing.T) {
+	m := newPullModel(t)
+	m.visualBusy = &visualFlight{path: "/tmp/old-clean", sub: "rebase"}
+	m.running["/tmp/old-clean"] = "visual"
+
+	m, _ = press(m, "esc")
+
+	if m.visualBusy != nil {
+		t.Error("esc did not close the overlay")
+	}
+	if m.running["/tmp/old-clean"] != "visual" {
+		t.Error("esc cancelled the render: closing the overlay must not (the log has to record the exec that happened)")
+	}
+}
+
+func TestVisualOverlayClearsForTheRepoThatAnswered(t *testing.T) {
+	m := newPullModel(t)
+	m.visualBusy = &visualFlight{path: "/tmp/old-clean", sub: "merge"}
+
+	updated, _ := m.Update(visualDoneMsg{path: "/tmp/dirty-api", sub: "merge"})
+	if updated.(Model).visualBusy == nil {
+		t.Error("another repo's completion closed the overlay: a render can still be in flight")
+	}
+	updated, _ = m.Update(visualDoneMsg{path: "/tmp/old-clean", sub: "merge"})
+	if updated.(Model).visualBusy != nil {
+		t.Error("the answering repo did not close the overlay")
+	}
+}
+
 // The render answers through the events channel (one event per tea.Cmd), so the test reads it directly instead of sleeping on a race.
 func waitVisual(t *testing.T, ch chan event) visualDoneMsg {
 	t.Helper()

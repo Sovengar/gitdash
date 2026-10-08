@@ -194,6 +194,21 @@ func splitWidth(s string, maxWidth int) (string, string) {
 	return s, ""
 }
 
+// overlayCentered paints a block over the base, centered both ways: the render overlay is not a toast (it is not an event, it lives until the render answers) and not a view mode (the dashboard must stay visible behind it), and only a splice keeps both. Every degenerate input falls back to identity: clampBlock bounds every line to the width, x and the top floor at zero and the row count clips to the canvas.
+func overlayCentered(base string, block []string, width, height int) string {
+	block = clampBlock(block, width)
+	lines := strings.Split(base, "\n")
+	bw := blockWidth(block)
+	h := min(height, len(lines))
+	x := max(0, (width-bw)/2)
+	top := max(0, (h-len(block))/2)
+	for j, b := range block[:max(0, min(len(block), h-top))] {
+		y := top + j
+		lines[y] = ansi.Truncate(lines[y], x, "") + b + ansi.TruncateLeft(lines[y], x+bw, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // The splice is ANSI-safe: it is clipped by cells with ansi.Truncate/TruncateLeft and each block is bounded to the terminal width so nothing overflows; when they do not fit, the most recent toast wins.
 func overlayToasts(base string, blocks [][]string, width, height, reserved int) string {
 	if len(blocks) == 0 || width <= 0 {

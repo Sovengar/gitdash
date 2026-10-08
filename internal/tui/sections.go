@@ -17,6 +17,19 @@ func (m Model) section(title, content string, width int) string {
 	return bordered.RenderWithTitle(bordered.Rounded(), borderColor, title, content, width)
 }
 
+// The overlay's width fits its longest line ("this takes a couple of seconds · esc close") plus the box's borders.
+const visualOverlayWidth = 44
+
+// The render overlay is a centered box over the dashboard (prdash style): a toast would expire after 3s while a bigger history can render for longer, and a view mode would hide the table the render belongs to. Empty when nothing renders, which is what makes the splice a no-op.
+func (m Model) visualOverlayLines() []string {
+	if m.visualBusy == nil {
+		return nil
+	}
+	content := m.spinner.View() + styleFetchRun.Render(" rendering "+m.visualBusy.sub+"…") + "\n" +
+		styleDim.Render("this takes a couple of seconds · esc close")
+	return strings.Split(m.section("simulate: "+m.visualBusy.sub, content, visualOverlayWidth), "\n")
+}
+
 // With a warning in keybinds (pull selector, removal confirmation, log or PR legend) what is forced is that section's visibility: degrading it would leave the app waiting for a key without saying which.
 func (m Model) layout() layout {
 	// The PR overlay lives IN the body (it is the dashboard that gets replaced), so its minimum is passed through: the layout must not steal height from a preview panel that will not be drawn below.

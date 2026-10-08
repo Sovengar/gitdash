@@ -86,7 +86,8 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 ## Visual preview
 
 - **git-sim integration** — `v` arms a selector; next key picks `p` (pull), `m` (merge), or `r` (rebase).
-- **Background render** — no terminal handoff: git-sim runs captured with `--output-only-path` (60s timeout), the card's activity shows it, and the outcome (git-sim's own verdict on failure) reports as a toast.
+- **Background render** — no terminal handoff: git-sim runs captured with `--output-only-path` (60s timeout), the outcome (git-sim's own verdict on failure) reports as a toast.
+- **Loading overlay** — while the render runs, a centered box (spinner + variant) paints over the dashboard; `esc` closes the overlay only — the render keeps going and still reports; it clears when the render answers.
 - **Image as an image** — the finished image opens with `xdg-open` (git-sim's own auto-open stays off); with no viewer available the toast carries the kept path instead.
 - **No-op guard** — merge/rebase variants are blocked when `behind == 0` (git-sim would abort); the warning names the fetch key.
 - **Media dir** — `--media-dir` is mandatory (git-sim writes `git-sim_media/` into the repo otherwise); the image is copied out of git-sim's per-repo subtree (deleted with its mp4/texts) and the cache keeps the last 20 renders.

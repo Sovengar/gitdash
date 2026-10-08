@@ -154,9 +154,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	// The render answers through the events channel, so the pump is rearmed; it measures its own duration (a capture can be measured, a handoff cannot) and needs no recollect: git-sim draws, it does not mutate the repo.
+	// The render answers through the events channel, so the pump is rearmed; it measures its own duration (a capture can be measured, a handoff cannot) and needs no recollect: git-sim draws, it does not mutate the repo. The overlay clears only for the repo that answered: another render can still be in flight.
 	case visualDoneMsg:
 		delete(m.running, msg.path)
+		if m.visualBusy != nil && m.visualBusy.path == msg.path {
+			m.visualBusy = nil
+		}
 		cmdlog.RecordExec(cmdlog.Entry{
 			Repo:   m.nameOf(msg.path),
 			Dir:    msg.path,
@@ -422,6 +425,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cancel()
 		return m, tea.Quit
 	case "esc":
+		// Dropping the overlay does NOT cancel the render: it is view state (the truth of "in flight" is m.running), and the completion must still record in the log and toast.
+		m.visualBusy = nil
 		return m, nil
 	case "up", "k":
 		m.cursor = max(0, m.cursor-1)
@@ -680,6 +685,8 @@ func (m Model) removePrompt() string {
 func (m Model) View() tea.View {
 	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
 	content := overlayToasts(m.renderDashboard(), m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
+	// The render overlay goes LAST, on top of the toasts too: it is what is happening NOW, and a completion toast of another repo must not hide it.
+	content = overlayCentered(content, m.visualOverlayLines(), m.width, m.height)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v

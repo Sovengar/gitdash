@@ -558,6 +558,14 @@ evident:
 - **The duration IS measured** (unlike the handoffs, which go with `Dur = 0`):
   the goroutine wraps only the render, and `visualDoneMsg` carries it to the
   command log.
+- **The loading overlay is VIEW state** (`m.visualBusy`), painted by
+  `overlayCentered` on top of the dashboard AND the toasts (prdash's shape): a
+  toast would expire after 3s while a bigger history renders longer, and a view
+  mode would hide the table the render belongs to. `esc` drops the overlay but
+  NOT the render: the truth of "in flight" is `m.running`, and the completion
+  must still record in the log and toast — the overlay clears when the answering
+  repo's `visualDoneMsg` arrives (another repo can still be rendering, and its
+  completion must not close that flight's box).
 
 ## Design gotcha: opening a PR/MR (`O`)
 
