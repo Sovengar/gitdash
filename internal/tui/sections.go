@@ -41,7 +41,7 @@ func (m Model) layout() layout {
 	// The commits box and the files box share one width: the lists column's share plus the files
 	// box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
 	_, share := cardColumns(m.width - 2)
-	right := min(share+2, m.width-1-minTableWidth())
+	right := min(share+2, m.width-2-minTableWidth())
 	if right >= commitsPanelWidth {
 		lay.showPanel = true
 		lay.panelWidth = right

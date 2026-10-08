@@ -625,6 +625,46 @@ func TestCardTheGapMinimumItSpendsTheFirstList(t *testing.T) {
 	}
 }
 
+func TestFilesSectionInnerWidthIsWidthMinusTwo(t *testing.T) {
+	path := "/tmp/api"
+	snap := snapClean()
+	// A long path forces the list to truncate, so the inner width is observable.
+	snap.Files = []gitstatus.FileEntry{{Code: ".M", Path: "pkg/some/very/long/path/to/a/file/that/is/longer/than/the/inner/width/file.go"}}
+	m, r := detailRowWith(t, path, snap)
+
+	// The files box paints at `width`; its content must be `width-2` (the borders).
+	// A mutation of width-2 → width-1 or width-3 changes the inner width and the
+	// truncation of the file path.
+	out := stripANSI(m.filesSection(r, minListBlockLines+1, 60))
+	lines := strings.Split(out, "\n")
+	// The truncated path must be exactly 53 chars (inner-5 = width-2-5).
+	found := false
+	for _, l := range lines {
+		if strings.Contains(l, "pkg/some") {
+			found = true
+			// The line looks like: "│  .M <path>…<padding>│"
+			// Strip the border and code column, then measure the path.
+			inner := strings.TrimPrefix(l, "│")
+			inner = strings.TrimSuffix(inner, "│")
+			// inner is now "  .M <path>…<padding>"
+			// The path starts after "  .M " (5 chars).
+			idx := strings.Index(inner, "  .M ")
+			if idx >= 0 {
+				rest := inner[idx+5:] // path + "…" + padding
+				// Trim trailing spaces.
+				rest = strings.TrimRight(rest, " ")
+				// The path + "…" should be exactly 55 chars (inner-5+1 for the ellipsis = width-2-5+1).
+				if len(rest) != 55 {
+					t.Errorf("the truncated path is %d chars, want 55 (width-2-5+1): %q", len(rest), rest)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the file line was not found in:\n%s", out)
+	}
+}
+
 func TestCardMinimumWorktreeNamesItsRepo(t *testing.T) {
 	wt := gitstatus.Worktree{Path: "/tmp/multi/wt-feat", Branch: "feat", Head: "abc1234"}
 	p := discovery.Project{Path: "/tmp/multi", Name: "multi", HasRepo: true}
