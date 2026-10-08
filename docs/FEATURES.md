@@ -21,7 +21,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [Editor & lazygit](#editor--lazygit) | Open `$EDITOR` or `lazygit` in the repo | `e` / `g` |
 | [Command input](#command-input) | Run `$SHELL -c` in the repo; empty = interactive shell | `!` |
 | [Command log](#command-log) | Session timeline of intents and execs | `l`, `a` |
-| [Detail card](#detail-card) | Repo card below the table (fields, worktrees, files, last action) | automatic |
+| [Detail card](#detail-card) | Detail box (fields, worktrees, tails) + peer files box below the table | automatic |
 | [Commits panel](#commits-panel) | Top-right commits of the cursor's row | automatic (width-gated) |
 | [Filter & dirty toggle](#filter--dirty-toggle) | Live filter by name/group/worktree; show only dirty | `/`, `d` |
 | [Config & keybindings](#config--keybindings) | XDG TOML; remappable actions; command templates | `~/.config/gitdash/config.toml` |
@@ -100,7 +100,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## Command input
 
-- `!` opens an input at the end of the detail card; `enter` runs `$SHELL -c <cmd>` in the repo; empty `enter` opens an interactive shell; `esc` cancels.
+- `!` opens an input at the end of the detail box; `enter` runs `$SHELL -c <cmd>` in the repo; empty `enter` opens an interactive shell; `esc` cancels.
 
 ## Command log
 
@@ -111,17 +111,20 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## Detail card
 
-- **Repo card** — path, branch, upstream, state, sync, activity, worktrees list, files list, last action (with resolved argv), last `!` command.
-- **Group aggregate** — cursor on a header shows the group's stats (repos, dirty, ahead, behind, errors, worktrees).
+- **Detail box** — path, branch, upstream, state, sync, activity, worktrees list, diagnostics/last action (with resolved argv), last `!` command.
+- **Files box** — a peer bordered box titled `files (N)` next to the detail box; one `  <code> <path>` line per file and `… N more` on overflow.
+- **Shared divider** — the detail/files boxes and the repos/commits boxes above share one width split, so the files box and the commits box are the same width.
+- **Empty-files collapse** — with no files on the row there is no files box; the detail box takes the whole band.
+- **Group aggregate** — cursor on a header shows the group's stats (repos, dirty, ahead, behind, errors, worktrees) in the single box.
 - **Worktree card** — minimal (path, branch, head) when discovered; no invented git state.
-- **Two-column split** — when inner width ≥ 61; fields left, lists right; `… N more` for overflow. Without a right column the separator disappears and the fields own the card; with one, the separator runs to the card's bottom.
+- **Narrow collapse** — below the split floor (terminal width < 63) the band is one box and fields, worktrees and files stack inside it.
 
 ## Commits panel
 
 - **Top-right band** — shows the cursor's row's commits (current branch + sync branch as labelled groups); same height as the table.
 - **Up to 15 commits per side** — both lists are fetched at 15 and the panel paints only what fits in the shared height; the divergence counts are not capped.
 - **Colours** — commits only the sync branch has paint blue (↓) and only the current branch green (↑), the table's palette; shared commits stay neutral.
-- **Additive on width** — `max(30, width/3)` cells, capped so the table keeps its 5 columns; dropped entirely below the boundary (never fallback into the card).
+- **Additive on width** — the lists column's share of the card plus the files box's borders, capped so the table keeps its 5 columns; dropped entirely below the boundary (the table takes the full width and the detail/files band keeps its share).
 
 ## Filter & dirty toggle
 

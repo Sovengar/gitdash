@@ -288,9 +288,9 @@ fall, the app would be waiting for a key without saying which ones.
 
 ## Design gotcha: the preview panel
 
-Below the table there is a card for the repo under the cursor (prdash style),
-between the list and the keybinds. **It is the only detail view**: there is no
-`enter` detail, no `detailSection`, no `detailOpen`. Decisions that are not
+Below the table there is the bottom band for the repo under the cursor (prdash
+style), between the list and the keybinds. **It is the only detail view**: there is
+no `enter` detail, no `detailSection`, no `detailOpen`. Decisions that are not
 evident:
 
 - **The title goes only on the border.** `detailTitle`/`worktreeTitle` compose
@@ -304,63 +304,69 @@ evident:
   was before the feature. That floor comes out of `detailHeadLines`, so
   `minPanelHeight` (test) derives it instead of begging for the number.
 - **The share is measured over the FREE height**, not over the terminal: against
-  the total, a 30-line window kept 12 for the card and 3 for the table.
-- **The card's height budget is its own lines**, not the terminal's: `renderDetail(r,
-  rows, width, split)` reserves `detailHeadLines` for the state header; the collapsed
-  branch then shares the remaining height between the lists with `listBudget`, which
-  reserves the `… N more` warning line when a list does not fit whole. `rows` is
-  `lay.previewLines`. Without that, the lists are counted as if they fit and then the
-  box crops them without warning.
-- **The card is two columns when the inner width is at least 61** (terminal width
-  >= 63): `m.layout()` sets `cardSplit` and `renderDetail` consumes it, so the
-  decision has a single source. The columns are NOT fixed: `cardColumns(inner)`
-  gives the lists 2/5 of the inner width with `cardRightWidth` (24) as floor and
-  the fields the rest with `cardLeftWidth` (36) as floor. A fixed 36-cell left
-  clipped `path`/`upstream` while the unused rest of a wide card stayed empty. The
-  right column owns the worktrees and files lists, each with its own budget so an
-  oversized worktrees list does not starve the files list of its `… N more`.
-  `renderDetail` pads both columns to the same height and joins them with a dim
-  separator before the box styles anything, or ANSI breaks the width. With the
-  right column empty (no worktrees, no files) the separator is NOT painted — a
-  lone gray line with nothing at its right — and the fields take the whole inner
-  width; with it non-empty the separator runs down to the card's bottom (or to
-  the full-width tail), not only to the last list item. `activity` (the
-  last-commit age) is what raised the head from 5 to `detailHeadLines` = 6 lines.
+  the total, a 30-line window kept 12 for the band and 3 for the table.
+- **The band is two peer boxes: DETAIL (left) and FILES (right, own border).**
+  `m.layout()` computes ONE width for the right column of BOTH bands:
+  `right = min(cardColumns(width-2).right + 2, width-1-minTableWidth())`. The
+  commits box uses it while `right >= commitsPanelWidth` (30); the files box
+  always uses it, or the `cardColumns` share when the panel is off. Then
+  `left = width - 1 - right`, and `lay.tableWidth` is the repos box (and the
+  detail box) while `lay.panelWidth` is the commits box (and the files box): the
+  two right boxes are the same width, and `cardColumns(inner)` keeps its 2/5
+  share with `cardRightWidth` (24) as floor and `cardLeftWidth` (36) as floor for
+  the fields. The `+2` is the files box's own borders, so the files LIST content
+  keeps the old column width; `commitsPanelGap` (1) is the gap between the two
+  boxes of a band.
+- **Worktrees moved out of the old right column into the DETAIL box**; the fields
+  head, the worktrees list, the diagnostics/action tails and the `!` input stack
+  there, all clipped to the detail box inner width. The files renderer is reused
+  by the FILES box (`filesSection`), whose count lives in the border title
+  `files (N)` instead of an in-body heading.
+- **No files → no files box**: the detail box spans the whole band (the old
+  "empty right column" rule survives: a lone border with nothing at its right is
+  not painted). `renderDetail(r, rows, width, split)` reserves `detailHeadLines`
+  for the fields and hands the rest, minus the tail's lines, to `detailWorktrees`;
+  `listBudget` reserves the `… N more` warning when a list does not fit whole.
+- **Below the split floor (`cardSplit`, terminal width < 63) the band is one box**
+  and fields, worktrees and files stack inside it (the collapsed path,
+  `detailCollapsed`). The two-column separator (`joinCardColumns`, `cardSepWidth`)
+  is gone: the two boxes replace it.
 - **The commits block left the card** for the top-right panel (see below). The
   card never paints a commits list, at any width.
-- **The diagnostics and the action/command tails span the full card width**,
-  appended below the two columns: the argv and the command output need more than
-  the fields column to be readable.
+- **The diagnostics and the action/command tails span the detail box width**,
+  appended below the fields and the worktrees: the argv and the command output
+  need more than the fields to be readable.
 - **The path is a field, not a loose line**: `path` goes in the same key/value
   column as `branch`/`upstream`/`state`/`sync`/`activity`, and its value is dimmed
   (it is context, not state).
 - **The card does not repeat the row's keys**: `g lazygit · ! cmd` are already in
-  the keybinds section, so the card has no footer (`fichaTail` only adds the `!`
-  input). Duplicating them cost a line of useful height and two sources that
-  could diverge on a rebind.
-- **The `!` input goes at the END of the card and is always visible**
-  (`fichaTail`): if the card filled the box, the card is cropped from the top.
-  Typing a command without seeing the prompt is typing blind. It is joined after
-  the columns so it spans the full card width.
+  the keybinds section, so the card has no footer. Duplicating them cost a line of
+  useful height and two sources that could diverge on a rebind.
+- **The `!` input goes on the detail box's last line and is always visible**
+  (`cardTail`): if the card filled the box, the card is cropped from the top and a
+  short body is padded. Typing a command without seeing the prompt is typing
+  blind. `fitCmdInput(boxWidth)` sizes the input to the box (borders and prompt
+  subtracted), so the value never runs past the border.
 - **The box is filled** (`fitLines`): the height comes from the layout, not from
   the card. Without the fill, a short card would push the keybinds up and the
   view would not fill the terminal.
 
 With the cursor on a **group header** the panel has no card to show: it shows the
 group's aggregate (`groupStats`, over `rows()` and before folding, which is what
-its header counts). States at zero are not painted.
+its header counts). States at zero are not painted, and the aggregate takes the
+whole band (no files box).
 
 ## Design gotcha: the COMMITS panel (top right)
 
 To the right of the table there is a panel with the commits of the row under the
 cursor. Decisions that are not evident:
 
-- **It is additive on WIDTH, not height.** `max(30, min(width/3, width-minTableWidth()-gap))`
-  cells plus a 1-cell gap: the 30 floor keeps the old `119` boundary, the share
-  buys the commit subjects a readable width, and the cap at the table's minimum
-  keeps the fit gate a safety net instead of a dead zone where the share would
-  drop the panel. It shares the table's box height and gives back nothing, so
-  terminal lines stay conserved at every height.
+- **It is additive on WIDTH, not height.** Its width is the SAME `right` the
+  bottom band's files box uses (`min(cardColumns(width-2).right + 2,
+  width-1-minTableWidth())`), so the commits box and the files box share one
+  divider; the panel drops below `commitsPanelWidth` (30) and then only the table
+  widens. It shares the table's box height and gives back nothing, so terminal
+  lines stay conserved at every height.
 - **It is dropped, never fallback.** Below the width boundary there is no commits
   panel and the card does not recover the commits block: the behavior says the
   commits "are not shown anywhere", so a fallback would be a second source of
