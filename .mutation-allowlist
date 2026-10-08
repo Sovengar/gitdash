@@ -137,26 +137,41 @@ CONDITIONALS_BOUNDARY internal/tui/toast.go:154
 #   whole line anyway. With the mutation the cut returns (w, "") and the line
 #   closes the same way. It is the same class as truncating to a width >= its own.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:199
+CONDITIONALS_BOUNDARY internal/tui/toast.go:214
 #   `if len(blocks) == 0 || width <= 0`, the first entry guard of overlayToasts.
+#   (Line moved by the insertion of overlayCentered above it; re-verified.)
 #   With width == 0 (and not < 0) the guard still returns base, and even if it did
 #   not, the splice below is a pure identity at width 0: x == 0 and bw == 0, so
 #   `Truncate(l,0) + block + TruncateLeft(l,0)` rebuilds the line. Neither boundary
 #   changes anything observable.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:203
-CONDITIONALS_NEGATION internal/tui/toast.go:203
+CONDITIONALS_BOUNDARY internal/tui/toast.go:218
+CONDITIONALS_NEGATION internal/tui/toast.go:218
 #   `if height <= 0 || height > len(lines)`, the second entry guard of
-#   overlayToasts. With height == len(lines) the two branches assign the same value
+#   overlayToasts. (Line moved by the insertion of overlayCentered above it;
+#   re-verified.) With height == len(lines) the two branches assign the same value
 #   (height is already bounded), and with height == 0 the splice is a pure identity:
 #   x == 0 and bw == 0, so `Truncate(l,0) + block + TruncateLeft(l,0)` rebuilds the
 #   line. Neither boundary changes anything observable.
 
-CONDITIONALS_BOUNDARY internal/tui/toast.go:216
+CONDITIONALS_BOUNDARY internal/tui/toast.go:231
 #   `if top < 0` of the block that does not fit whole. It only differs with
 #   top == 0, where keep == bottom+1 == bh: the slice `block[bh-keep:]` leaves the
 #   block whole. It is the "does not fit" guard written backwards by one step, and
-#   at the exact bound it clips nothing.
+#   at the exact bound it clips nothing. (Line moved by the insertion of
+#   overlayCentered above it; re-verified.)
+
+# --- internal/tui/overlayCentered -----------------------------------------
+INVERT_NEGATIVES internal/tui/toast.go:205
+ARITHMETIC_BASE internal/tui/toast.go:205
+#   The row count of the centered splice: `block[:max(0, min(len(block), h-top))]`.
+#   Both mutators land on the `h-top` and produce the SUM (verified by hand:
+#   `h+top` survives the whole suite). It is an IDENTITY twice over: in the
+#   unclipped case (h >= len(block)) h+top = (3h-len)/2 >= len, so the min still
+#   picks len(block); in the clipped case top == 0, so sum and difference
+#   coincide. No row count can change, and TestOverlayCenteredDegenerateIsIdentity
+#   holds the clipped case against the variants that COULD differ (max(1,·) is
+#   killed by it).
 
 # --- Measurement noise (not gaps: a test kills them) ----------------------
 # gremlins sometimes reports a mutation as LIVED and, in the SAME run, marks an
@@ -239,6 +254,17 @@ CONDITIONALS_BOUNDARY internal/forge/parse.go:28
 #   contract, which is why it is written here: if someone ever passed a map with
 #   the "" key, the invariant would break and the NOT COVERED would give it away
 #   the moment this entry disappeared.
+
+# --- internal/sim/keep.go ------------------------------------------------
+CONDITIONALS_BOUNDARY internal/sim/keep.go:50
+#   The Prune comparator: `renders[i].seq > renders[j].seq`. With `>=` the only
+#   difference is among EQUAL sequences, and there the order is unobservable twice
+#   over: Keep stamps every render with time.Now().UnixNano(), so two cache files
+#   cannot share a seq in the flow that produces them, and among equal keys
+#   sort.Slice's order is unspecified either way (a cut through a tie block deletes
+#   interchangeable files). Same demonstration as table.go's two comparator
+#   boundaries: a total-order comparison always has the ==-tie mutant, and no test
+#   can ever tell the two apart.
 
 # ---------------------------------------------------------------------------
 # Real backlog, still untested: none. The 215 NOT COVERED mutants of the first run

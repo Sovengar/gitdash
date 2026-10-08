@@ -753,32 +753,23 @@ func TestHandoffsWithGuardOfBusy(t *testing.T) {
 		}
 	})
 
-	t.Run("visual builds the argv and the dir", func(t *testing.T) {
-		bin := filepath.Join(t.TempDir(), "git-sim")
-		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("PATH", filepath.Dir(bin)+":"+os.Getenv("PATH"))
-		t.Setenv("XDG_CACHE_HOME", t.TempDir())
-
+	t.Run("visual runs git-sim in the background with the argv", func(t *testing.T) {
+		openLog := writeVisualStubs(t)
 		mm := newTestModel(t, nil, nil)
 		m := &mm
-		spy := &handoffSpy{t: t, done: func(error) tea.Msg { return nil }}
-		m.handoff = spy.exec
+		repo := t.TempDir()
 
-		cmd := m.startVisualCmd("/tmp/repo", "origin/main", "rebase")
-		if cmd == nil {
-			t.Fatal("startVisualCmd returned nil")
+		if cmd := m.startVisualCmd(repo, "origin/main", "rebase"); cmd != nil {
+			t.Fatal("startVisualCmd returned a command: the render must not suspend the TUI")
 		}
-		// The handoff is armed when the Cmd is INVOKED, not when it is built: without invoking it, spy stays empty and the assertions below compare empty with empty and pass by accident.
-		cmd()
-		if spy.vals != 1 {
-			t.Fatalf("the handoff launched %d times, want 1", spy.vals)
+		if m.running[repo] != "visual" {
+			t.Errorf("running = %v, want the repo marked as visual in progress", m.running)
 		}
-		if spy.dir != "/tmp/repo" {
-			t.Errorf("Dir = %q, want /tmp/repo", spy.dir)
+		dm := waitVisual(t, m.events)
+		if dm.err != nil || dm.openErr != nil {
+			t.Fatalf("the render failed: err=%v openErr=%v", dm.err, dm.openErr)
 		}
-		full := strings.Join(spy.argv, " ")
+		full := strings.Join(dm.argv, " ")
 		if !strings.Contains(full, "rebase") {
 			t.Errorf("argv = %q, want the rebase subcommand", full)
 		}
@@ -788,25 +779,21 @@ func TestHandoffsWithGuardOfBusy(t *testing.T) {
 		if !strings.Contains(full, "--media-dir") {
 			t.Errorf("argv = %q, want --media-dir ALWAYS (without it git-sim dirties the repo)", full)
 		}
-		if m.running["/tmp/repo"] != "visual" {
-			t.Errorf("running = %v, want the repo marked as visual in progress", m.running)
+		if !strings.Contains(full, "--output-only-path") {
+			t.Errorf("argv = %q, want --output-only-path (the capture's only way back is the printed path)", full)
 		}
+		if !strings.HasPrefix(dm.image, filepath.Join(os.Getenv("XDG_CACHE_HOME"), "gitdash", "git-sim")) {
+			t.Errorf("the image was kept at %q, want the git-sim cache dir", dm.image)
+		}
+		waitForOpen(t, openLog, dm.image)
 
-		spy.vals = 0
-		cmd2 := m.startVisualCmd("/tmp/repo2", "origin/main", "pull")
-		if cmd2 == nil {
-			t.Fatal("startVisualCmd(pull) returned nil")
+		mm2 := newTestModel(t, nil, nil)
+		if cmd := mm2.startVisualCmd(repo, "origin/main", "pull"); cmd != nil {
+			t.Fatal("startVisualCmd(pull) returned a command")
 		}
-		cmd2() // same reason: the handoff is armed on invocation
-		if strings.Contains(strings.Join(spy.argv, " "), "origin/main") {
-			t.Errorf("argv = %q, want no ref: git-sim's pull takes no argument", spy.argv)
-		}
-		msg, ok := spy.finish(nil).(execDoneMsg)
-		if !ok || msg.action != "visual" {
-			t.Fatalf("the returned message = %#v, want a visual execDoneMsg", msg)
-		}
-		if msg.path != "/tmp/repo2" || len(msg.argv) == 0 {
-			t.Errorf("execDoneMsg = %+v, want the handoff's repo and argv", msg)
+		dm2 := waitVisual(t, mm2.events)
+		if strings.Contains(strings.Join(dm2.argv, " "), "origin/main") {
+			t.Errorf("argv = %q, want no ref: git-sim's pull takes no argument", dm2.argv)
 		}
 	})
 }

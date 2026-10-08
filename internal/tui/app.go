@@ -23,6 +23,7 @@ import (
 	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
+	"gitdash/internal/sim"
 	"gitdash/internal/state"
 )
 
@@ -71,6 +72,16 @@ type execDoneMsg struct {
 	path, action string
 	argv         []string
 	err          error
+}
+
+// visualDoneMsg is what the background render sends back: the argv that ran (for the log), the kept image and the opener's failure travels apart from the render's, because a rendered image with no viewer is a warning and not an error.
+type visualDoneMsg struct {
+	path, sub string
+	argv      []string
+	image     string
+	openErr   error
+	err       error
+	dur       time.Duration
 }
 
 type cmdResultMsg struct {
@@ -168,6 +179,11 @@ type armedVisual struct {
 	behind   int // commits the upstream is missing from HEAD, as the last scan saw them
 }
 
+// visualFlight is the render overlay's VIEW state: the truth of "in flight" is m.running (the busy guard), and this only says what to paint until the render answers or esc drops it. It is not cancelled on esc because the completion still has to record in the log and toast.
+type visualFlight struct {
+	path, sub string
+}
+
 type armedRemoval struct {
 	wtPath string
 	parent string
@@ -216,6 +232,7 @@ type Model struct {
 	armed       *armedRemoval
 	pullArmed   *armedPull
 	visualArmed *armedVisual
+	visualBusy  *visualFlight
 	// removeTokens maps parent repo path → current attempt token (the in-flight guard is per parent, so the token is too); a result whose token is no longer current is discarded.
 	removeGen    int
 	removeTokens map[string]int
@@ -709,13 +726,15 @@ func visualMediaDir() (string, error) {
 }
 
 func visualArgv(sub, upstream, mediaDir string) []string {
-	argv := []string{"git-sim", "--media-dir", mediaDir, sub}
+	// --output-only-path is what makes a capture enough: git-sim prints the image path as the only stdout line (a --quiet alongside it would void the path, so it is never passed, and --animate is never asked for either: the image is what opens, not the video git-sim also writes).
+	argv := []string{"git-sim", "--output-only-path", "--media-dir", mediaDir, sub}
 	if o, ok := visualOptionForSub(sub); ok && o.needsUpstream && upstream != "" {
 		argv = append(argv, upstream)
 	}
 	return argv
 }
 
+// Not a handoff: the render is captured in the background — the terminal never sees manim's output — and the card's activity flag shows it while it runs. git-sim's own auto-open stays off (sim.env), so the finished image is opened here, by the desktop viewer, which is what keeps the "image as an image" behavior without lending the terminal.
 func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
@@ -724,16 +743,40 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	if err != nil {
 		return m.toastCmd(toastError, fmt.Sprintf("git-sim media dir: %v", err))
 	}
-	if _, err := exec.LookPath("git-sim"); err != nil {
+	argv := visualArgv(sub, upstream, mediaDir)
+	if !sim.Available(argv[0]) {
 		return m.toastCmd(toastWarning, "git-sim not installed")
 	}
-	argv := visualArgv(sub, upstream, mediaDir)
 	m.running[path] = "visual"
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = path
-	return m.handoff(cmd, func(err error) tea.Msg {
-		return m.handoffDone("visual", path, argv, err)
-	})
+	m.visualBusy = &visualFlight{path: path, sub: sub}
+	runner := sim.New()
+	appCtx := m.ctx
+	events := m.events
+	go func() {
+		start := time.Now()
+		msg := visualDoneMsg{path: path, sub: sub, argv: argv}
+		image, err := runner.Render(appCtx, path, argv)
+		msg.dur = time.Since(start)
+		if err != nil {
+			msg.err = err
+		} else if kept, kerr := sim.Keep(image, mediaDir, path); kerr != nil {
+			msg.err = kerr
+		} else {
+			msg.image = kept
+			msg.openErr = openImageViewer(kept)
+		}
+		sendEvent(appCtx, events, msg)
+	}()
+	return nil
+}
+
+// The image is opened by the desktop and never painted in the terminal (a manim frame in half-blocks loses the labels git-sim draws on it): Start without Wait, because the viewer outlives this call and its lifetime is the user's, not ours.
+func openImageViewer(image string) error {
+	cmd := exec.Command("xdg-open", image)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 // A function, not a const: Go does not instrument constant expressions, so a package const would leave its ARITHMETIC_BASE mutant permanently NOT COVERED.
