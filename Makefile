@@ -28,11 +28,14 @@ install: build ## Installs bin/gitdash into PREFIX/bin (default ~/.local/bin; ma
 uninstall: ## Deletes the installed binary from PREFIX/bin (default ~/.local/bin)
 	rm -f $(DESTDIR)$(BINDIR)/gitdash
 
+# .worktrees is pruned on purpose: those are other branches' checkouts (often dirty WIP), and gofmt over them re-checks the same code twice at best and blocks main's gate with someone's unfinished file at worst.
+GO_SRC = find . -path ./.worktrees -prune -o -name '*.go' -print
+
 fmt: ## Runs gofmt over the tree
-	gofmt -w .
+	gofmt -w $$($(GO_SRC))
 
 fmt-check: ## Checks gofmt formatting without writing (fails if anything is pending)
-	@out="$$(gofmt -l .)"; \
+	@out="$$(gofmt -l $$($(GO_SRC)))"; \
 	if [ -n "$$out" ]; then echo "gofmt pending in:"; echo "$$out"; exit 1; fi
 
 vet: ## go vet
