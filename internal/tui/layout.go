@@ -17,12 +17,15 @@ const (
 	minBodyLines = 3
 
 	// Width budget: the table row prefix is a 2-cell cursor plus a 2-cell fetch slot; the commits
-	// panel is a fixed 30 cells with a 1-cell gap; the card splits into at least 36 + separator +
-	// 24 and the fields column grows with the terminal.
+	// panel is a quarter of the terminal (30 as floor) with a 1-cell gap; the card splits into at
+	// least 36 + separator + 24 and the fields column grows with the terminal.
 	rowPrefixWidth = 4
 	fetchSlotWidth = 2
 
 	commitsPanelWidth = 30
+	// 1/4 of the terminal: past the floor the panel takes this share so the commit subjects stay
+	// readable; the fit gate below still decides, so the table never loses a column for it.
+	commitsPanelShare = 4
 	commitsPanelGap   = 1
 
 	cardLeftWidth  = 36

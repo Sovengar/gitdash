@@ -174,6 +174,52 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 	}
 }
 
+// Past its floor the panel takes a quarter of the terminal so the subjects stay readable; the
+// table keeps its 5 columns because the fit gate still runs (159-cell table at 213).
+func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
+	projects, states := fixtureProjects()
+	for _, c := range []struct {
+		width, panel, table int
+	}{
+		{119, 30, 88}, // the floor: the old fixed width
+		{121, 30, 90},
+		{213, 53, 159},
+		{400, 100, 299},
+	} {
+		m := newTestModel(t, projects, states)
+		m.width = c.width
+		lay := m.layout()
+		if !lay.showPanel {
+			t.Fatalf("width=%d: no panel: %+v", c.width, lay)
+		}
+		if lay.panelWidth != c.panel || lay.tableWidth != c.table {
+			t.Errorf("width=%d: panel/table = %d/%d, want %d/%d", c.width, lay.panelWidth, lay.tableWidth, c.panel, c.table)
+		}
+	}
+}
+
+// The wider body is spent on the subject: at 213 the inner 51 leaves 33 runes before the ellipsis.
+func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
+	long := strings.Repeat("subject", 10)
+	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
+		map[string]gitstatus.Snapshot{"/tmp/api": committedSnap(long)})
+	m.width = 213
+	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "commits · api"))
+	var line string
+	for _, l := range panel {
+		if strings.Contains(l, "subj") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("the commit subject is not painted:\n%v", panel)
+	}
+	if want := truncate(long, 33); !strings.Contains(line, want) {
+		t.Errorf("the subject is not clipped at the wider body's 33 (want %q): %q", want, line)
+	}
+}
+
 func TestPanelAbsentAt80x24(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)

@@ -40,11 +40,12 @@ func (m Model) layout() layout {
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
 	// The commits panel is additive on width: it enters only if the table still shows all its
 	// columns at the split width, otherwise it would silently cost the table a column.
-	tableWidth := m.width - commitsPanelWidth - commitsPanelGap
+	panelWidth := max(commitsPanelWidth, m.width/commitsPanelShare)
+	tableWidth := m.width - panelWidth - commitsPanelGap
 	if fitColumns(tableWidth-rowPrefixWidth-2) == len(tableColumns) {
 		lay.showPanel = true
 		lay.tableWidth = tableWidth
-		lay.panelWidth = commitsPanelWidth
+		lay.panelWidth = panelWidth
 	} else {
 		lay.tableWidth = m.width
 	}
