@@ -16,16 +16,14 @@ const (
 	// Below this there is no window left to scroll.
 	minBodyLines = 3
 
-	// Width budget: the table's row prefix, the commits panel (a share of the terminal, capped by
-	// the table's minimum) and the card's two columns.
+	// Width budget: the table's row prefix, the right column (a share of the terminal, capped by
+	// the table's minimum) and the card's columns.
 	rowPrefixWidth = 4
 	fetchSlotWidth = 2
 
 	commitsPanelWidth = 30
-	// Share of the terminal the panel takes past its floor so the subjects stay readable; layout()
-	// caps it at the table's minimum, or the width gate would drop the panel instead of shrinking it.
-	commitsPanelShare = 3
-	commitsPanelGap   = 1
+	// The 1-cell gap between the two boxes of a band: table|commits on top, detail|files below.
+	commitsPanelGap = 1
 
 	cardLeftWidth  = 36
 	cardSepWidth   = 1

@@ -38,13 +38,14 @@ func (m Model) layout() layout {
 	// width from this single value, so a degradation decision cannot disagree with what is painted.
 	lay.cardWidth = m.width
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
-	// The panel's share is capped by the table's minimum, so the fit gate stays a safety net.
-	panelWidth := max(commitsPanelWidth, min(m.width/commitsPanelShare, m.width-minTableWidth()-commitsPanelGap))
-	tableWidth := m.width - panelWidth - commitsPanelGap
-	if fitColumns(tableWidth-rowPrefixWidth-2) == len(tableColumns) {
+	// The commits box and (below) the files box share one width: the lists column's share plus the
+	// files box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
+	_, right := cardColumns(m.width - 2)
+	right = min(right+2, m.width-1-minTableWidth())
+	if right >= commitsPanelWidth {
 		lay.showPanel = true
-		lay.tableWidth = tableWidth
-		lay.panelWidth = panelWidth
+		lay.panelWidth = right
+		lay.tableWidth = m.width - 1 - right
 	} else {
 		lay.tableWidth = m.width
 	}

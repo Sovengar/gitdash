@@ -174,7 +174,7 @@ func TestCommitsPanelWidthGate(t *testing.T) {
 	}
 }
 
-// Past its floor the panel takes a third of the terminal, capped so the table keeps its columns.
+// Past its floor the right column takes the lists share of the card's columns, capped so the table keeps its columns.
 func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	projects, states := fixtureProjects()
 	for _, c := range []struct {
@@ -182,8 +182,8 @@ func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	}{
 		{119, 30, 88},  // the floor: the old fixed width
 		{121, 32, 88},  // the cap: the table at its minimum
-		{168, 56, 111}, // the share: 168/3
-		{400, 133, 266},
+		{168, 68, 99},  // the share: cardColumns(166).right + 2
+		{400, 160, 239},
 	} {
 		m := newTestModel(t, projects, states)
 		m.width = c.width
@@ -197,7 +197,7 @@ func TestCommitsPanelGrowsWithTheWidth(t *testing.T) {
 	}
 }
 
-// The wider body is spent on the subject: at 213 the inner 69 leaves 51 runes before the ellipsis.
+// The wider body is spent on the subject: at 213 the inner 84 leaves 66 runes before the ellipsis.
 func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
 	long := strings.Repeat("subject", 10)
 	m := newTestModel(t, []discovery.Project{proj("api", "/tmp/api", true)},
@@ -214,8 +214,8 @@ func TestCommitsPanelSubjectUsesTheWiderBody(t *testing.T) {
 	if line == "" {
 		t.Fatalf("the commit subject is not painted:\n%v", panel)
 	}
-	if want := truncate(long, 51); !strings.Contains(line, want) {
-		t.Errorf("the subject is not clipped at the wider body's 51 (want %q): %q", want, line)
+	if want := truncate(long, 66); !strings.Contains(line, want) {
+		t.Errorf("the subject is not clipped at the wider body's 66 (want %q): %q", want, line)
 	}
 }
 
