@@ -2,7 +2,9 @@ package gitstatus
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -339,19 +341,42 @@ func TestCollectCapsBothLogsAt15(t *testing.T) {
 	if snap.SyncBehind != 0 {
 		t.Errorf("behind = %d, want 0", snap.SyncBehind)
 	}
-	// The marks come from the same capped window: the newest current commit is one-sided, the sync side has none.
-	if !snap.Commits[0].OneSided || snap.SyncCommits[0].OneSided {
-		t.Errorf("flags = %v/%v, want the newest current commit marked and none on the sync side", snap.Commits[0].OneSided, snap.SyncCommits[0].OneSided)
+	// The marks come from the same capped window: the newest and the last painted rows are one-sided, and the sync side has none.
+	if !snap.Commits[0].OneSided || !snap.Commits[14].OneSided || snap.SyncCommits[0].OneSided {
+		t.Errorf("flags = current[0]=%v current[14]=%v sync[0]=%v, want true/true/false", snap.Commits[0].OneSided, snap.Commits[14].OneSided, snap.SyncCommits[0].OneSided)
 	}
 }
 
-// The merge case that killed the positional rule: the sync tip comes into the current log NEWER than the branch's own commit, and the marks still follow the sha.
+// commitAt writes files and commits with explicit dates: the merge fixture needs the sync tip strictly
+// newer than the branch's own commit, or tied wall-clock seconds would let a positional rule pass it.
+func commitAt(t *testing.T, dir, date, msg string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("git", "add", "-A")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add in %s: %v\n%s", dir, err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", msg)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit %q in %s: %v\n%s", msg, dir, err, out)
+	}
+}
+
+// The merge case that killed the positional rule: the sync tip comes into the current log NEWER than
+// the branch's own commit (forced dates, not wall-clock luck), and the marks still follow the sha.
 func TestCollectMarksOneSidedCommitsUnderAMerge(t *testing.T) {
 	dir, _ := testutil.NewRepo(t, false)
 	testutil.NewBranch(t, dir, "feat")
-	testutil.CommitFiles(t, dir, map[string]string{"c4.txt": "c4"}, "c4")
+	commitAt(t, dir, "2026-01-01T00:00:00Z", "c4", map[string]string{"c4.txt": "c4"})
 	testutil.Checkout(t, dir, "main")
-	testutil.CommitFiles(t, dir, map[string]string{"s3.txt": "s3"}, "S3")
+	commitAt(t, dir, "2026-01-02T00:00:00Z", "S3", map[string]string{"s3.txt": "s3"})
 	testutil.Checkout(t, dir, "feat")
 	gitLocal(t, dir, "merge", "--no-edit", "-m", "merged", "main")
 
@@ -363,16 +388,29 @@ func TestCollectMarksOneSidedCommitsUnderAMerge(t *testing.T) {
 	for _, c := range snap.Commits {
 		flags[c.Subject] = c.OneSided
 	}
+	// S3 (shared) sorts ABOVE c4 (one-sided), so a positional rule would mark merged and a shared row and leave c4 neutral: every assertion below fails if the rule comes back.
 	if !flags["c4"] || !flags["merged"] {
 		t.Errorf("the branch's own commits are not marked: %v", flags)
 	}
-	if flags["S3"] {
-		t.Errorf("the merged-in sync tip is marked as one-sided: %v", flags)
+	if flags["S3"] || flags["base"] {
+		t.Errorf("a shared commit is marked as one-sided: %v", flags)
 	}
 	for _, c := range snap.SyncCommits {
 		if c.OneSided {
 			t.Errorf("a sync-side commit marked with nothing behind it: %+v", c)
 		}
+	}
+}
+
+// An empty parsed sha would prefix-match every rev-list sha; it is skipped instead of being marked.
+func TestMarkOneSidedSkipsAnEmptySha(t *testing.T) {
+	commits := []Commit{{Sha: ""}, {Sha: "abc"}}
+	markOneSided(commits, map[string]bool{"abc1234def": true})
+	if commits[0].OneSided {
+		t.Error("an empty sha was marked")
+	}
+	if !commits[1].OneSided {
+		t.Error("the abbreviated sha did not match its full one")
 	}
 }
 

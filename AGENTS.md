@@ -388,7 +388,7 @@ cursor. Decisions that are not evident:
   resolved, never a `git config` probe), so what is compared and what is shown
   cannot disagree; the group is skipped when the sync IS the current branch (the
   lists would duplicate) or when the log failed (no ref). `Collect` pays those
-  reads only where a sync branch is declared.
+  reads, and the two marking rev-lists, only where a sync branch is declared.
 - **One-sided commits take their group's colour; shared ones stay neutral.**
   `Collect` marks each commit (`Commit.OneSided`) by sha membership in the
   other side's set — two bounded `rev-list --max-count` calls, never a position

@@ -139,9 +139,12 @@ func oneSidedShas(ctx context.Context, dir, rng string) map[string]bool {
 	return shas
 }
 
-// markOneSided matches by prefix: the log writes abbreviated shas, rev-list prints full ones.
+// markOneSided matches by prefix: the log writes abbreviated shas, rev-list prints full ones. An empty parsed sha would prefix-match everything, so it is skipped.
 func markOneSided(commits []Commit, shas map[string]bool) {
 	for i := range commits {
+		if commits[i].Sha == "" {
+			continue
+		}
 		for sha := range shas {
 			if strings.HasPrefix(sha, commits[i].Sha) {
 				commits[i].OneSided = true
