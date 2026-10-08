@@ -839,9 +839,9 @@ func TestFilesBoxSharesTheDividerWithCommits(t *testing.T) {
 	m.width, m.height = 150, 45
 	m = cursorOn(t, m, "/tmp/api")
 	lay := m.layout()
-	if lay.panelWidth != 60 || lay.filesWidth != 60 || lay.tableWidth != 89 || lay.cardWidth != 89 {
+	if lay.panelWidth != 60 || lay.filesWidth != 60 || lay.tableWidth != 89 || lay.detailWidth != 89 {
 		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 60/60/89/89",
-			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.cardWidth)
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.detailWidth)
 	}
 	out := m.renderDashboard()
 	if a, b := boxLeftColumn(t, out, "commits · api"), boxLeftColumn(t, out, "files (1)"); a != b {
@@ -857,9 +857,9 @@ func TestFilesBoxSharesTheCapWithCommits(t *testing.T) {
 	m.width, m.height = 120, 40
 	m = cursorOn(t, m, "/tmp/api")
 	lay := m.layout()
-	if lay.panelWidth != 31 || lay.filesWidth != 31 || lay.tableWidth != 88 || lay.cardWidth != 88 {
+	if lay.panelWidth != 31 || lay.filesWidth != 31 || lay.tableWidth != 88 || lay.detailWidth != 88 {
 		t.Fatalf("widths = commits %d / files %d / repos %d / detail %d, want 31/31/88/88",
-			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.cardWidth)
+			lay.panelWidth, lay.filesWidth, lay.tableWidth, lay.detailWidth)
 	}
 }
 
@@ -878,8 +878,8 @@ func TestNoCommitsPanelButFilesBoxKeepsTheShare(t *testing.T) {
 	if lay.tableWidth != 118 {
 		t.Errorf("repos box = %d, want the full 118", lay.tableWidth)
 	}
-	if lay.filesWidth != 48 || lay.cardWidth != 69 {
-		t.Errorf("files/detail = %d/%d, want 48/69", lay.filesWidth, lay.cardWidth)
+	if lay.filesWidth != 48 || lay.detailWidth != 69 {
+		t.Errorf("files/detail = %d/%d, want 48/69", lay.filesWidth, lay.detailWidth)
 	}
 	out := stripANSI(m.View().Content)
 	if strings.Contains(out, "╭ commits ") {
@@ -908,7 +908,7 @@ func TestFilesBoxTitleAndLines(t *testing.T) {
 			t.Errorf("the files box does not paint %q:\n%s", want, files)
 		}
 	}
-	detail := boxColumns(t, out, "api", m.layout().cardWidth-2)
+	detail := boxColumns(t, out, "api", m.layout().detailWidth-2)
 	if !strings.Contains(detail, "path") || !strings.Contains(detail, "activity") {
 		t.Errorf("the detail box does not paint the fields head:\n%s", detail)
 	}
@@ -926,7 +926,7 @@ func TestWorktreesLiveInTheDetailBoxOnly(t *testing.T) {
 	m.width, m.height = 150, 45
 	m = cursorOn(t, m, "/tmp/api")
 	out := stripANSI(m.View().Content)
-	detail := boxColumns(t, out, "api", m.layout().cardWidth-2)
+	detail := boxColumns(t, out, "api", m.layout().detailWidth-2)
 	if !strings.Contains(detail, "worktrees (2)") || !strings.Contains(detail, "feat/x") {
 		t.Errorf("the detail box does not list the worktrees:\n%s", detail)
 	}

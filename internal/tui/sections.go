@@ -36,7 +36,7 @@ func (m Model) layout() layout {
 	}
 	// The width split lives here too: the height search stays height-only and every pane reads its
 	// width from this single value, so a degradation decision cannot disagree with what is painted.
-	lay.cardWidth = m.width
+	lay.detailWidth = m.width
 	lay.cardSplit = m.width-2 >= cardLeftWidth+cardSepWidth+cardRightWidth
 	// The commits box and the files box share one width: the lists column's share plus the files
 	// box's own borders, capped so the table keeps all its columns. Below the floor the panel drops.
@@ -53,11 +53,11 @@ func (m Model) layout() layout {
 	// the panel is on; with the panel off the files box keeps the card's share of the width.
 	if lay.cardSplit {
 		if lay.showPanel {
-			lay.cardWidth = lay.tableWidth
+			lay.detailWidth = lay.tableWidth
 			lay.filesWidth = lay.panelWidth
 		} else {
 			lay.filesWidth = share + 2
-			lay.cardWidth = m.width - 1 - lay.filesWidth
+			lay.detailWidth = m.width - 1 - lay.filesWidth
 		}
 	}
 	return lay
@@ -306,8 +306,8 @@ func (m *Model) detailBand(title string, r row, rows int, lay layout) string {
 		m.fitCmdInput(m.width)
 		return m.section(title, fitLines(m.renderDetail(r, rows, m.width, lay.cardSplit), rows), m.width)
 	}
-	m.fitCmdInput(lay.cardWidth)
-	detail := m.section(title, fitLines(m.renderDetail(r, rows, lay.cardWidth, true), rows), lay.cardWidth)
+	m.fitCmdInput(lay.detailWidth)
+	detail := m.section(title, fitLines(m.renderDetail(r, rows, lay.detailWidth, true), rows), lay.detailWidth)
 	return joinPanes(detail, m.filesSection(r, rows, lay.filesWidth))
 }
 

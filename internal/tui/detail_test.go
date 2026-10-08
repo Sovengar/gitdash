@@ -197,7 +197,7 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 
 	// Literal widths, not the same max(...) the card computes: a derived expectation moves with the mutant.
 	// At width 120 the detail box is 88 wide (inner 86), so the path clips at 78 and the argv at 88-30 = 58.
-	out := stripANSI(m.renderDetail(r, 40, m.layout().cardWidth, m.layout().cardSplit))
+	out := stripANSI(m.renderDetail(r, 40, m.layout().detailWidth, m.layout().cardSplit))
 	for _, c := range []struct {
 		that string
 		want string
@@ -222,7 +222,7 @@ func TestCardClipsEachFieldAItsWidth(t *testing.T) {
 		return s
 	}())
 	m2.width = 120
-	outWT := stripANSI(m2.renderDetail(r2, 40, m2.layout().cardWidth, m2.layout().cardSplit))
+	outWT := stripANSI(m2.renderDetail(r2, 40, m2.layout().detailWidth, m2.layout().cardSplit))
 	if want := truncate("wt/"+long, 74); !strings.Contains(outWT, want) { // inner - 2 - wtBranchWidth
 		t.Errorf("the worktree path is not clipped to its width (%q…):\n%s", want[:20], outWT)
 	}
@@ -291,8 +291,8 @@ func TestCardSplitDividerFollowsTheWidth(t *testing.T) {
 		if !lay.cardSplit {
 			t.Fatalf("width=%d: the band did not split", c.width)
 		}
-		if lay.cardWidth != c.detail || lay.filesWidth != c.files {
-			t.Errorf("width=%d: detail/files = %d/%d, want %d/%d", c.width, lay.cardWidth, lay.filesWidth, c.detail, c.files)
+		if lay.detailWidth != c.detail || lay.filesWidth != c.files {
+			t.Errorf("width=%d: detail/files = %d/%d, want %d/%d", c.width, lay.detailWidth, lay.filesWidth, c.detail, c.files)
 		}
 	}
 }
