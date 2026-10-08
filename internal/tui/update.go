@@ -154,6 +154,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	// The render answers through the events channel, so the pump is rearmed; it measures its own duration (a capture can be measured, a handoff cannot) and needs no recollect: git-sim draws, it does not mutate the repo.
+	case visualDoneMsg:
+		delete(m.running, msg.path)
+		cmdlog.RecordExec(cmdlog.Entry{
+			Repo:   m.nameOf(msg.path),
+			Dir:    msg.path,
+			Class:  cmdlog.ClassAction,
+			Action: "visual",
+			Argv:   msg.argv,
+			Exit:   execExit(msg.err),
+			Dur:    msg.dur,
+		})
+		switch {
+		case msg.err != nil:
+			m.toasts.showError(fmt.Sprintf("visual %s: %v", msg.sub, msg.err))
+		case msg.openErr != nil:
+			m.toasts.showWarning(fmt.Sprintf("visual %s: image kept at %s (%v)", msg.sub, msg.image, msg.openErr))
+		default:
+			m.toasts.showSuccess(fmt.Sprintf("visual %s — opened %s", msg.sub, filepath.Base(msg.image)))
+		}
+		return m.withPump(nil)
+
 	case cmdResultMsg:
 		delete(m.running, msg.path)
 		m.lastCmd[msg.path] = cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
@@ -309,7 +331,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if o.needsUpstream && armed.upstream == "" {
 				return m, m.toastCmd(toastWarning, "no upstream")
 			}
-			// git-sim aborts when the ref is already in HEAD, which is exactly what behind == 0 says, so handing over the terminal to read that would throw the repo off the dashboard; the value comes from the last fetch, hence naming the fetch key.
+			// git-sim aborts when the ref is already in HEAD, which is exactly what behind == 0 says, so the render is refused instead of burning a couple of seconds on a simulation git-sim will reject; the value comes from the last fetch, hence naming the fetch key.
 			if o.needsUpstream && armed.behind == 0 {
 				return m, m.toastCmd(toastWarning, fmt.Sprintf(
 					"%s already in HEAD — nothing to simulate (%s to fetch)",

@@ -177,6 +177,7 @@ config → discovery (marker walk) → gitstatus (subprocess per repo, pool)
 | `internal/forge` | Pure (no I/O): `RepoRef` + `ParseRemoteURL` (remote → forge/host/project, with the subfolder prefix), `WebURL`, `ForgeForHost`/`PublicHosts` (public hosts) and `BuildCreateArgv`/`CreateBin`/`PromptEnv` (the argv of `gh pr create` / `glab mr create`). The execution is NOT here: it is `internal/forge/tool` (Runner with a 30 s deadline and an `Error` carrying the exit code) |
 | `internal/cache` | `repos.json` to paint instantly on startup; validated by the marker's existence; corrupt = silent |
 | `internal/cmdlog` | Bounded in-memory ring (500) of what ran: `intent` entries (key) and `exec` entries (process with argv, exit, duration and result). Global with a no-op default; only the TUI installs it (`tui.New`) |
+| `internal/sim` | Runs git-sim in the background, captured (`--output-only-path`, 60s timeout, auto-open forced off) and answers with the image path; `Keep`/`Prune` bound the image cache under `~/.cache/gitdash/git-sim` |
 | `internal/tui` | `app.go` (model + background pipelines), `update.go` (Update/View/keys), `table.go` (rows/order/cells/grouping), `layout.go` + `sections.go` (the single height+width budget and the pane composition), `detail.go` (split card, no commits), `proverlay.go` (PR form) + `prcreate.go` (its execution), `cmdlogpanel.go` (the log panel), `styles.go` |
 | `internal/group` | Arrangement of the 2-level grouped view (vroom style): `Arrange` + `IsPrimaryHeader`/`IsSecondaryHeader` |
 | `internal/testutil` | helpers to create real git fixture repos in `t.TempDir()` (bare origin, upstream push, worktrees, branches) |
@@ -500,11 +501,11 @@ Panel rules (`internal/tui/cmdlogpanel.go`):
 git-sim **aborts with code 1** when the ref you pass is already contained in
 HEAD: `merge.py` and `rebase.py` print `Branch 'origin/main' is already included
 in the history of active branch 'main'` and exit. That is not a gitdash bug, it
-is the correct answer, but reproducing it on screen costs a full terminal handoff
-to read an error the snapshot already anticipated: `Status.Behind == 0` **is**
-the condition git-sim checks (`git branch --contains <ref>`).
+is the correct answer, but reproducing it costs a doomed manim render (~2s) plus
+a toast to read an error the snapshot already anticipated: `Status.Behind == 0`
+**is** the condition git-sim checks (`git branch --contains <ref>`).
 
-That is why the selector blocks with a toast before handing over the terminal, and
+That is why the selector blocks with a toast before launching the render, and
 why `armedVisual` captures `behind` **when arming**, along with the path and the
 upstream: the guard has to be decided on the chosen row, not on whatever is under
 the cursor when the second key arrives.
@@ -521,6 +522,42 @@ the cursor when the second key arrives.
   fix it. The dashboard's hints are painted the same way (label without key,
   `HintBarLines` prepends it); a toast does not go through there, and it is the
   only place where the key is written by hand.
+
+## Design gotcha: the visual preview's render (`internal/sim`)
+
+The render is **not a terminal handoff** (that is what prdash's loader does, and
+it is the better shape): gitdash used to lend the terminal to git-sim, whose
+manim output polluted the screen, and git-sim's own auto-open showed the image.
+Now `internal/sim.Runner.Render` captures it in the background and the TUI keeps
+the screen (the card's `running` flag is the spinner). Decisions that are not
+evident:
+
+- **`--output-only-path` is the only way back.** The process is captured, so the
+  image path on stdout (its LAST non-empty line) is all we get; a `--quiet`
+  alongside it would void the path and is never passed. Failures keep git-sim's
+  FIRST non-empty stderr line plus the exit code in a `sim.Error` (`git-sim -C
+  <dir> <args>: <msg> (exit N)`), and a 60s timeout with a 250ms pipe-close grace
+  bounds a hang (manim on a big history is seconds, never minutes).
+- **git-sim's own auto-open is forced off** (`sim.env` sets
+  `git_sim_auto_open=false` and drops any user `git_sim_*`): its desktop-viewer
+  call can hang a captured process forever without a display, and the viewer is
+  ours — `openImageViewer` starts `xdg-open` detached (Start + Release, never
+  Wait: the viewer's lifetime is the user's). A rendered image with no viewer is
+  a WARNING carrying the kept path, not an error.
+- **`--no-animate` is NOT passed**: verified against the installed 0.3.5, it
+  changes nothing (the mp4 is rendered either way, same duration), and the argv
+  is user-visible in the log, so it must say what actually matters.
+- **`sim.Keep` moves the image out and deletes git-sim's per-repo subtree.** The
+  layout is `<media>/git-sim_media/<repo basename>/{images,texts,videos}` with
+  timestamped image names; a render also leaves an animated 1080p mp4 and a
+  dozen svg texts nobody opens, so the subtree goes after the copy and the cache
+  keeps the last 20 renders (`Prune`). The sequence is IN the kept name
+  (`<repo>-<unixnano>.jpg`), so pruning never stats a file a concurrent render
+  could be replacing, and deleting the subtree is safe because `m.running` allows
+  only one visual per repo.
+- **The duration IS measured** (unlike the handoffs, which go with `Dur = 0`):
+  the goroutine wraps only the render, and `visualDoneMsg` carries it to the
+  command log.
 
 ## Design gotcha: opening a PR/MR (`O`)
 
@@ -654,10 +691,12 @@ block. Decisions that are not evident:
 - **Every git exec goes through `runGit`/`runGitCombined`** (`gitstatus`), which
   measure and record. If you add a new git verb outside them, it does not appear
   in the log. The 6 `exec.Command`s of `tui/app.go` (editor, lazygit, `pull_ai`,
-  visual, `!`, shell) are outside: they are recorded by hand, in `execDoneMsg`
+  xdg-open, `!`, shell) are outside: they are recorded by hand, in `execDoneMsg`
   (handoffs, on return) and in `openCmdCmd` (the `!`, which does measure
   duration). Handoffs go with `Dur = 0`: measuring them would require storing the
-  start in the model. `gh`/`glab` are not git: they leave through
+  start in the model. git-sim is outside app.go too: it leaves through
+  `internal/sim` (`Runner.Render`), and the visual exec is recorded by hand from
+  `visualDoneMsg` (measured, like the `!`). `gh`/`glab` are not git: they leave through
   `forge/tool.Runner` and `prCreateCmd` records them, also by hand (and it DOES
   measure).
 - **`gitstatus.Fetch` takes the `cmdlog.Class` from the caller**: `git fetch

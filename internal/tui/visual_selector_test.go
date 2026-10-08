@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gitdash/internal/cmdlog"
 	"gitdash/internal/discovery"
@@ -114,9 +115,9 @@ func TestVisualResolvesAboutTheArmed(t *testing.T) {
 	m, _ = press(m, "v")
 	m = cursorOn(t, m, "/tmp/dirty-api")
 
-	m, cmd := press(m, "p")
-	if cmd == nil {
-		t.Fatal("the variant launched nothing")
+	m, _ = press(m, "p")
+	if m.visualArmed != nil {
+		t.Error("the selector is still armed after the variant")
 	}
 	if m.running["/tmp/old-clean"] != "visual" {
 		t.Errorf("running = %q, want visual in /tmp/old-clean", m.running["/tmp/old-clean"])
@@ -133,15 +134,12 @@ func TestVisualDispatchesEachVariant(t *testing.T) {
 		m = cursorOn(t, m, "/tmp/behind-web")
 		m, _ = press(m, "v")
 
-		m, cmd := press(m, key)
+		m, _ = press(m, key)
 		if m.visualArmed != nil {
 			t.Errorf("v%s left the selector armed", key)
 		}
 		if m.running["/tmp/behind-web"] != "visual" {
 			t.Errorf("v%s → running = %q, want visual", key, m.running["/tmp/behind-web"])
-		}
-		if cmd == nil {
-			t.Errorf("v%s returned no tea.Cmd", key)
 		}
 	}
 }
@@ -153,9 +151,9 @@ func TestVisualArgvVariants(t *testing.T) {
 		upstream string
 		want     []string
 	}{
-		{"pull", "origin/main", []string{"git-sim", "--media-dir", dir, "pull"}},
-		{"merge", "origin/main", []string{"git-sim", "--media-dir", dir, "merge", "origin/main"}},
-		{"rebase", "origin/main", []string{"git-sim", "--media-dir", dir, "rebase", "origin/main"}},
+		{"pull", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "pull"}},
+		{"merge", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "merge", "origin/main"}},
+		{"rebase", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "rebase", "origin/main"}},
 	}
 	for _, c := range cases {
 		got := visualArgv(c.sub, c.upstream, dir)
@@ -165,12 +163,18 @@ func TestVisualArgvVariants(t *testing.T) {
 	}
 }
 
-func TestVisualArgvWithoutFlagsOfPreview(r *testing.T) {
+// The render is captured, so the printed path is the only way back out of git-sim (a --quiet would void it, and --animate only feeds the video nobody opens).
+func TestVisualArgvCapturesThePath(t *testing.T) {
 	dir := "/cache/gitdash/git-sim"
 	for _, o := range visualOptions {
-		for _, arg := range visualArgv(o.sub, "origin/main", dir) {
-			if arg == "-d" || arg == "--animate" || arg == "--output-only-path" {
-				r.Errorf("the %q variant includes %q in the argv", o.sub, arg)
+		argv := visualArgv(o.sub, "origin/main", dir)
+		joined := strings.Join(argv, " ")
+		if !strings.Contains(joined, "--output-only-path") {
+			t.Errorf("the %q variant does not ask for the image path: %s", o.sub, joined)
+		}
+		for _, arg := range argv {
+			if arg == "--quiet" || arg == "--animate" {
+				t.Errorf("the %q variant includes %q in the argv: %s", o.sub, arg, joined)
 			}
 		}
 	}
@@ -220,8 +224,8 @@ func TestVisualWithoutUpstream(t *testing.T) {
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/no-up-cli")
 	m, _ = press(m, "v")
-	m, cmd := press(m, "p")
-	if cmd == nil || m.running["/tmp/no-up-cli"] != "visual" {
+	m, _ = press(m, "p")
+	if m.running["/tmp/no-up-cli"] != "visual" {
 		t.Errorf("p no-upstream did not launch: running=%v", m.running)
 	}
 }
@@ -261,8 +265,8 @@ func TestVisualPullNotBlocksWithBehindZero(t *testing.T) {
 	m = cursorOn(t, m, "/tmp/old-clean")
 	m, _ = press(m, "v")
 
-	m, cmd := press(m, "p")
-	if cmd == nil || m.running["/tmp/old-clean"] != "visual" {
+	m, _ = press(m, "p")
+	if m.running["/tmp/old-clean"] != "visual" {
 		t.Errorf("p with behind 0 did not launch: running=%v", m.running)
 	}
 }
@@ -387,12 +391,12 @@ func TestVisualAndPanelOfTheLog(t *testing.T) {
 	}
 }
 
-func TestVisualExecDoneRecords(t *testing.T) {
+func TestVisualDoneRecords(t *testing.T) {
 	m, rec := logModel(t)
 	path := "/tmp/old-clean"
-	argv := []string{"git-sim", "--media-dir", "/cache/gitdash/git-sim", "merge", "origin/main"}
+	argv := []string{"git-sim", "--output-only-path", "--media-dir", "/cache/gitdash/git-sim", "merge", "origin/main"}
 
-	updated, _ := m.Update(execDoneMsg{path: path, action: "visual", argv: argv, err: nil})
+	updated, _ := m.Update(visualDoneMsg{path: path, sub: "merge", argv: argv, err: nil, dur: 3 * time.Second})
 	_ = updated.(Model)
 
 	var got *cmdlog.Entry
@@ -409,8 +413,8 @@ func TestVisualExecDoneRecords(t *testing.T) {
 	if !reflect.DeepEqual(got.Argv, argv) {
 		t.Errorf("argv = %#v, want %#v", got.Argv, argv)
 	}
-	if got.Dur != 0 {
-		t.Errorf("Dur = %v, want 0 (handoff)", got.Dur)
+	if got.Dur != 3*time.Second {
+		t.Errorf("Dur = %v, want the measured render (a capture can be measured, a handoff cannot)", got.Dur)
 	}
 	if got.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", got.Exit)
@@ -457,9 +461,9 @@ func TestVisualNotBlocksForRebaseInCourse(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snapBehind(1)})
 	m = cursorOn(t, m, dir)
 	m, _ = press(m, "v")
-	m, cmd := press(m, "m")
-	if cmd == nil || m.running[dir] != "visual" {
-		t.Errorf("the rebase in progress blocked the preview: running=%v cmd=%v", m.running, cmd != nil)
+	m, _ = press(m, "m")
+	if m.running[dir] != "visual" {
+		t.Errorf("the rebase in progress blocked the preview: running=%v", m.running)
 	}
 }
 
@@ -467,7 +471,7 @@ func TestVisualNotBlocksForRebaseInCourse(t *testing.T) {
 func TestVisualArgvSubUnknownNotInventsRef(t *testing.T) {
 	dir := "/cache/gitdash/git-sim"
 	got := visualArgv("squash", "origin/main", dir)
-	want := []string{"git-sim", "--media-dir", dir, "squash"}
+	want := []string{"git-sim", "--output-only-path", "--media-dir", dir, "squash"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("visualArgv(%q) = %#v, want %#v", "squash", got, want)
 	}
@@ -479,5 +483,180 @@ func TestVisualHalfDirWithoutCacheDirGivesError(t *testing.T) {
 	t.Setenv("HOME", "")
 	if dir, err := visualMediaDir(); err == nil {
 		t.Errorf("visualMediaDir = %q, want an error with no cache directory", dir)
+	}
+}
+
+// The render answers through the events channel (one event per tea.Cmd), so the test reads it directly instead of sleeping on a race.
+func waitVisual(t *testing.T, ch chan event) visualDoneMsg {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		dm, ok := ev.(visualDoneMsg)
+		if !ok {
+			t.Fatalf("event = %T, want visualDoneMsg", ev)
+		}
+		return dm
+	case <-time.After(10 * time.Second):
+		t.Fatal("the visual render never answered")
+	}
+	return visualDoneMsg{}
+}
+
+// The stubs answer with files the test controls: git-sim prints an image path that exists, and xdg-open records the path it was given. Both come first in the PATH, which is kept otherwise.
+func writeVisualStubs(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	image := filepath.Join(t.TempDir(), "render.jpg")
+	if err := os.WriteFile(image, []byte("jpg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GS_IMAGE", image)
+	openLog := filepath.Join(t.TempDir(), "opened.log")
+	t.Setenv("OPEN_LOG", openLog)
+	for name, script := range map[string]string{
+		"git-sim":  "#!/bin/sh\necho \"$GS_IMAGE\"\n",
+		"xdg-open": "#!/bin/sh\necho \"$1\" >> \"$OPEN_LOG\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	return openLog
+}
+
+// A model on a real directory (the render chdirs into it) with a fake behind snapshot: the variant only needs the row's path and upstream, and a real fixture repo would make the test read the machine's gitconfig.
+func visualBehindModel(t *testing.T) Model {
+	t.Helper()
+	dir := t.TempDir()
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)}, map[string]gitstatus.Snapshot{dir: snapBehind(1)})
+	return cursorOn(t, m, dir)
+}
+
+// xdg-open is started and never waited for (its lifetime is the user's, not the TUI's), so the test polls for the stub's record instead of assuming the process already wrote it.
+func waitForOpen(t *testing.T, openLog, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(openLog); err == nil && strings.Contains(string(data), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(openLog)
+	t.Fatalf("xdg-open = %q, want it to receive %q", data, want)
+}
+
+// The whole chain with real processes: the render is captured, the image is kept out of git-sim's subtree, xdg-open receives it, and the TUI never suspends (the command the key press returns is nil).
+func TestVisualRenderOpensTheKeptImage(t *testing.T) {
+	openLog := writeVisualStubs(t)
+	m := visualBehindModel(t)
+	dir := m.projects[0].Path
+	m, _ = press(m, "v")
+
+	m, cmd := press(m, "m")
+	if cmd != nil {
+		t.Error("the variant returned a command: the render is a goroutine and the TUI must not suspend")
+	}
+	if m.running[dir] != "visual" {
+		t.Fatalf("running = %v, want the repo busy while git-sim renders", m.running)
+	}
+
+	dm := waitVisual(t, m.events)
+	if dm.err != nil || dm.openErr != nil {
+		t.Fatalf("render/open failed: err=%v openErr=%v", dm.err, dm.openErr)
+	}
+	if dm.dur <= 0 {
+		t.Error("dur = 0: the render's duration is measured (a capture can be, a handoff cannot)")
+	}
+	if _, err := os.Stat(dm.image); err != nil {
+		t.Errorf("the kept image is not there: %v", err)
+	}
+	waitForOpen(t, openLog, dm.image)
+
+	updated, _ := m.Update(dm)
+	if got := lastToast(updated.(Model)); !strings.Contains(got, "opened") {
+		t.Errorf("toast = %q, want it to say the image was opened", got)
+	}
+}
+
+// git-sim aborts when the simulated ref is already in HEAD: the verdict must reach the toast with git-sim's own message and the repo must not stay busy.
+func TestVisualRenderFailureToastsGitSimsVerdict(t *testing.T) {
+	bin := t.TempDir()
+	stub := "#!/bin/sh\necho \"git-sim error: Branch 'origin/main' is already included\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git-sim"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	m := visualBehindModel(t)
+	dir := m.projects[0].Path
+	m, _ = press(m, "v")
+	m, _ = press(m, "m")
+
+	dm := waitVisual(t, m.events)
+	updated, _ := m.Update(dm)
+	mm := updated.(Model)
+	if _, busy := mm.running[dir]; busy {
+		t.Error("the failed render left the repo busy")
+	}
+	if got := lastToast(mm); !strings.Contains(got, "already included") {
+		t.Errorf("toast = %q, want git-sim's verdict", got)
+	}
+}
+
+// git-sim can print a path and leave no image behind: the verdict reaches the toast instead of promising an image that is not there.
+func TestVisualWithoutTheRenderedImageToasts(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "git-sim"), []byte("#!/bin/sh\necho \"$GS_IMAGE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GS_IMAGE", filepath.Join(t.TempDir(), "never-written.jpg"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	m := visualBehindModel(t)
+	m, _ = press(m, "v")
+	m, _ = press(m, "m")
+
+	dm := waitVisual(t, m.events)
+	if dm.err == nil {
+		t.Fatal("a printed path with no image gave nil")
+	}
+	updated, _ := m.Update(dm)
+	mm := updated.(Model)
+	last := mm.toasts.toasts[len(mm.toasts.toasts)-1]
+	if last.level != toastError || !strings.Contains(last.text, "visual merge") {
+		t.Errorf("toast = %+v, want the visual error naming the variant", last)
+	}
+}
+
+// A rendered image with no viewer is a warning, not an error: the path travels in the toast so the image can be opened by hand. The PATH carries only git-sim (nothing else runs: the render never touches git), so the real xdg-open cannot answer for the missing one.
+func TestVisualWithoutOpenerWarnsWithTheImagePath(t *testing.T) {
+	bin := t.TempDir()
+	image := filepath.Join(t.TempDir(), "render.jpg")
+	if err := os.WriteFile(image, []byte("jpg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GS_IMAGE", image)
+	if err := os.WriteFile(filepath.Join(bin, "git-sim"), []byte("#!/bin/sh\necho \"$GS_IMAGE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	m := visualBehindModel(t)
+	m, _ = press(m, "v")
+	m, _ = press(m, "m")
+
+	dm := waitVisual(t, m.events)
+	if dm.err != nil {
+		t.Fatalf("the render failed: %v", dm.err)
+	}
+	if dm.openErr == nil {
+		t.Fatal("without xdg-open the opener should have failed")
+	}
+	updated, _ := m.Update(dm)
+	if got := lastToast(updated.(Model)); !strings.Contains(got, dm.image) {
+		t.Errorf("toast = %q, want the kept image's path (%q) to open it by hand", got, dm.image)
 	}
 }
