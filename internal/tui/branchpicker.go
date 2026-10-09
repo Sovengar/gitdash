@@ -251,4 +251,3 @@ func branchWindow(n, cursor, visible int) int {
 	}
 	return min(max(0, cursor-visible+1), n-visible)
 }
-

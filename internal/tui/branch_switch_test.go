@@ -474,6 +474,38 @@ func TestBranchesMsgDroppedForClosedPicker(t *testing.T) {
 	}
 }
 
+func TestBranchesMsgAcceptedForOpenPicker(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", nil, "main")
+	m.picker.loading = true
+	updated, _ := m.Update(branchesMsg{path: "/tmp/old-clean", mode: pickerModeCurrent, branches: pickerBranches("main", "feature")})
+	m = updated.(Model)
+	if m.picker == nil {
+		t.Fatal("the matching answer closed the picker")
+	}
+	if m.picker.loading {
+		t.Error("the picker still shows loading after the list arrived")
+	}
+	if len(m.picker.branches) != 2 {
+		t.Errorf("branches = %d, want 2", len(m.picker.branches))
+	}
+	if m.picker.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", m.picker.cursor)
+	}
+}
+
+func TestPickerFilterResizesWithTerminal(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main"), "main")
+	m = resize(m, 40, 20)
+	if m.picker == nil {
+		t.Fatal("the resize closed the picker")
+	}
+	if m.width != 40 {
+		t.Errorf("width = %d, want 40", m.width)
+	}
+}
+
 func TestPickerOverlayKeepsTheDashboardBehind(t *testing.T) {
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
