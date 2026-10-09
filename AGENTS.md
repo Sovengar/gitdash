@@ -130,8 +130,20 @@ Scope, counts and inputs:
 - The scope is the **committed** diff against the merge-base; a `git diff` that
   cannot be computed is an error, not an empty scope.
 - Two counts, and they are different numbers: `WATCH_LINES` (every mutant considered
-  = the supervisor's denominator) and `EXPECTED_MEASURED` (in-scope only = what the
-  verdict compares against the report).
+  = the supervisor's denominator) and `EXPECTED_MEASURED` (in-scope `RUNNABLE` only
+  = what the verdict compares against the report's `mutants_total`, which is
+  `killed + lived + notViable`). `SKIPPED` leaves the scope and `NOT COVERED` sits
+  in no cover block, so neither can be measured and neither belongs in the denominator.
+- The gitconfig is neutralised (`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` → `/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`): gremlins computes its `--diff` ranges with a plain
+  `git diff` run with the AMBIENT config, so a dev's `diff.algorithm`/
+  `diff.interhunkcontext` would make the local loop measure a different mutant set
+  than CI's defaults. Hermetic by construction — no env prefix to remember.
+- `NOT COVERED` is published, never silently dropped: the verdict says how many and
+  why (Go cover starts a case clause's block after the colon, so a mutant on the
+  condition sits in no block at any test count), and a diff whose in-scope mutants
+  are all uncoverable is the green "nothing measurable" instead of the impossible red
+  it used to be (pre-count N, measured none, and no lever: the allowlist knows `LIVED`).
 - "Nothing to mutate" comes from the prior count, never from a missing report; a
   `_test.go`-only diff still produces `report.json`, with total 0.
 - The coefficient is `ceil(CAP / elapsed)`, `elapsed` measured on the dry-run;
