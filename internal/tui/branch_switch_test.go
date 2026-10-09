@@ -365,6 +365,65 @@ func TestBranchSyncWritesMarkerAndRefreshes(t *testing.T) {
 	}
 }
 
+func TestBranchSyncWritesTheRemoteRefAsPicked(t *testing.T) {
+	dir, origin := testutil.NewRepo(t, true)
+	testutil.NewBranch(t, dir, "feature")
+	testutil.PushUpstreamCommits(t, origin, 2, "up")
+	testutil.FetchLocal(t, dir)
+	marker := "# keep\nname = \"demo\"\nsync_branch = \"main\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitdash.toml"), []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t,
+		[]discovery.Project{{Path: dir, Name: "demo", HasRepo: true, SyncBranch: "main"}},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
+	m.picker = pickerOn(dir, pickerModeSync, "s",
+		[]gitstatus.Branch{{Name: "origin/main", Remote: true, HasUpstream: true}}, "feature")
+
+	m, cmd := press(m, "enter")
+	if m.picker != nil {
+		t.Fatal("the picker stayed open after selecting")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "origin/main") {
+		t.Errorf("notification = %v, want the full remote ref", cmd())
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, ".gitdash.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# keep\nname = \"demo\"\nsync_branch = \"origin/main\"\n"
+	if string(raw) != want {
+		t.Errorf("marker =\n%q\nwant the picked ref\n%q", string(raw), want)
+	}
+	if m.projects[0].SyncBranch != "origin/main" {
+		t.Errorf("in-memory sync branch = %q, want origin/main", m.projects[0].SyncBranch)
+	}
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev := <-m.events:
+			sm, ok := ev.(statusMsg)
+			if !ok || sm.path != dir {
+				continue
+			}
+			if sm.snap.SyncBranch != "origin/main" {
+				t.Errorf("snapshot sync branch = %q, want origin/main", sm.snap.SyncBranch)
+			}
+			if !sm.snap.SyncKnown {
+				t.Errorf("snapshot did not resolve the remote sync ref: %+v", sm.snap)
+			}
+			if len(sm.snap.SyncCommits) == 0 {
+				t.Errorf("snapshot has no sync commits for the remote ref")
+			}
+			return
+		case <-deadline:
+			t.Fatal("the sync-branch write did not refresh the snapshot")
+		}
+	}
+}
+
 func TestOpenBranchPickerFetchesTheList(t *testing.T) {
 	dir, origin := testutil.NewRepo(t, true)
 	testutil.NewBranch(t, dir, "feature")

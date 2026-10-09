@@ -106,11 +106,11 @@ func (m Model) selectPickerBranch() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	b := list[p.cursor]
-	target := checkoutTarget(b)
 
 	if p.mode == pickerModeCurrent {
 		// The intent is the confirming key, not the one that armed the selector (same rule as the worktree removal).
 		m.recordPickerIntent(p, "checkout")
+		target := checkoutTarget(b)
 		if target == p.current {
 			m.picker = nil
 			return m, m.toastCmd(toastInfo, fmt.Sprintf("already on %s", target))
@@ -119,15 +119,17 @@ func (m Model) selectPickerBranch() (tea.Model, tea.Cmd) {
 		return m, m.startActionArgs(p.path, "checkout", [][]string{{"checkout", target}})
 	}
 
+	// The marker keeps the ref AS PICKED: a remote entry must stay `origin/X`, since the sync
+	// comparison resolves it with rev-list/log and `X` alone may not exist locally.
 	m.recordPickerIntent(p, "branch_sync")
-	err := discovery.SetMarkerSyncBranch(p.path, m.cfg.Marker, target)
+	err := discovery.SetMarkerSyncBranch(p.path, m.cfg.Marker, b.Name)
 	m.picker = nil
 	if err != nil {
 		return m, m.toastCmd(toastError, fmt.Sprintf("marker write failed: %v", err))
 	}
-	m.setSyncBranch(p.path, target)
+	m.setSyncBranch(p.path, b.Name)
 	m.recollectCmd(p.path)
-	return m, m.toastCmd(toastSuccess, fmt.Sprintf("sync branch %s → %s", m.nameOf(p.path), target))
+	return m, m.toastCmd(toastSuccess, fmt.Sprintf("sync branch %s → %s", m.nameOf(p.path), b.Name))
 }
 
 func (m *Model) recordPickerIntent(p *branchPicker, action string) {

@@ -69,7 +69,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Armed prefix** — `b` captures the cursor's path; the next key picks the variant. Any other key cancels and runs its normal action.
 - **Variants** — `c` checkout (change the checked-out branch), `s` sync ref (change the repo's sync branch).
 - **Branch picker** — the variant opens a floating centered modal over the dashboard (the table and stats stay visible); the list is read on demand.
-- **Scope** — local branches (upstream and no-upstream flagged), plus origin's remote-tracking branches (`origin/*`); a remote entry checks out its local name.
+- **Scope** — local branches (upstream and no-upstream flagged), plus origin's remote-tracking branches (`origin/*`); a remote entry is checked out by its local name, and `bs` stores it as the full `origin/X` ref (the marker's ref must resolve).
 - **Navigation** — `↑`/`↓` move (and `j`/`k` while the filter is empty); a text input filters as you type; `enter` selects, `esc` cancels.
 - **Current branch** — selecting the branch already checked out is a no-op toast; no process runs.
 - **Sync ref persistence** — `bs` rewrites only the `sync_branch` line of the repo's `.gitdash.toml` (comments and the `[ai]` prompt stay byte-identical) and refreshes the project and snapshot.
