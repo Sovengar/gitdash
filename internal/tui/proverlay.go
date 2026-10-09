@@ -378,7 +378,7 @@ func (m Model) handlePRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-// Runes and backspace edit the FILTER only (the committed value is never edited character by character); up/down move the highlight; enter commits the highlighted ref, or the typed text when there is no match. The pane keys are consumed before the widget so arrows never move the form's fields.
+// Runes and backspace edit the FILTER only (the committed value is never edited character by character); up/down move the highlight; enter commits the highlighted ref, or the typed text when there is no match, and advances to the next field. The pane keys are consumed before the widget so arrows never move the form's fields.
 func (m *Model) prPickerKey(f prField, msg tea.KeyPressMsg, key string) tea.Cmd {
 	p := m.pr.picker(f)
 	refs := m.pr.filteredRefs(f)
@@ -388,17 +388,24 @@ func (m *Model) prPickerKey(f prField, msg tea.KeyPressMsg, key string) tea.Cmd 
 	case "down":
 		p.cursor = min(max(0, len(refs)-1), p.cursor+1)
 	case "enter":
-		switch {
-		case len(refs) > 0:
+		committed := false
+		if len(refs) > 0 {
 			p.value = refs[clampHighlight(len(refs), p.cursor)].Name
-		case strings.TrimSpace(p.filter.Value()) != "":
+			committed = true
+		} else if strings.TrimSpace(p.filter.Value()) != "" {
 			// The escape hatch for refs outside the list: a detached sha or a fork's owner:branch.
 			p.value = strings.TrimSpace(p.filter.Value())
+			committed = true
 		}
 		p.filter.SetValue("")
 		p.filter.CursorEnd()
 		p.cursor = indexOfRef(m.pr.filteredRefs(f), p.value)
 		p.scroll = 0
+		if !committed {
+			return nil
+		}
+		// Committing and moving on is one gesture: enter advances exactly like tab, so there is no second field order to learn.
+		return m.prFocus(m.pr.focus.next(1))
 	default:
 		in, cmd := p.filter.Update(msg)
 		p.filter = in

@@ -1193,6 +1193,14 @@ func TestPROverlayPickerArrowsAndEnterCommit(t *testing.T) {
 	if got := names(m.pr.filteredRefs(prFieldBase)); len(got) != 3 {
 		t.Errorf("the pane did not return to the full list: %v", got)
 	}
+	if m.pr.focus != prFieldHead {
+		t.Errorf("enter did not advance to the next field: focus = %d, want %d", m.pr.focus, prFieldHead)
+	}
+	// And from head the next stop is the draft toggle, the field after it in the tab order.
+	m, _ = press(m, "enter")
+	if m.pr.focus != prFieldDraft {
+		t.Errorf("enter from head did not reach the draft: focus = %d, want %d", m.pr.focus, prFieldDraft)
+	}
 }
 
 func TestPROverlayPickerHighlightClamped(t *testing.T) {
@@ -1224,6 +1232,25 @@ func TestPROverlayPickerTypedRefUsedVerbatimOnNoMatch(t *testing.T) {
 
 	if got := m.pr.base.value; got != "deadbeef" {
 		t.Errorf("value = %q, want the typed text used verbatim", got)
+	}
+	if m.pr.focus != prFieldHead {
+		t.Errorf("the verbatim commit did not advance: focus = %d, want %d", m.pr.focus, prFieldHead)
+	}
+}
+
+// Nothing to commit (the list is still loading and nothing is typed) leaves enter a no-op: the focus does not move on a commit that never happened.
+func TestPROverlayPickerEnterWithoutACommitStays(t *testing.T) {
+	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
+	m = focusField(t, m, prFieldBase)
+	before := m.pr.base.value
+
+	m, _ = press(m, "enter")
+
+	if m.pr.focus != prFieldBase {
+		t.Errorf("enter without a commit moved the focus: %d, want %d", m.pr.focus, prFieldBase)
+	}
+	if got := m.pr.base.value; got != before {
+		t.Errorf("the value changed without a commit: %q, want %q", got, before)
 	}
 }
 
