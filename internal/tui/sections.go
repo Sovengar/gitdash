@@ -25,7 +25,7 @@ func (m Model) layout() layout {
 		formMin = prMinBodyLines()
 	}
 	lay := computeLayout(m.height, m.searchActive || m.search != "", m.keybindsLines(), m.promptLine() != "", formMin)
-	if m.logOpen || m.pr != nil || m.picker != nil {
+	if m.logOpen || m.pr != nil {
 		// The log and the form REPLACE the table and the card disappears, so the total number of terminal lines is what has to be conserved: the column header and the whole card go back to the body's height, otherwise the panel measures 3 lines short and the keybinds move up.
 		freed := 1
 		if lay.previewLines > 0 {
@@ -82,8 +82,6 @@ func (m Model) promptLine() string {
 		return m.visualPrompt()
 	case m.branchArmed != nil:
 		return m.branchArmedPrompt()
-	case m.picker != nil:
-		return m.branchPrompt()
 	case m.pr != nil:
 		return m.prPrompt()
 	case m.logOpen:

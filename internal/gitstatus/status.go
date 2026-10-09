@@ -222,19 +222,62 @@ func RemoteURL(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// The branch picker's read: on demand only, and through runGit so it is auditable like every other git call.
-func LocalBranches(ctx context.Context, dir string) ([]string, error) {
-	out, err := runGit(ctx, dir, cmdlog.ClassRead, "branch", "--format=%(refname:short)")
+// Branch is one picker entry: a local branch with its upstream/current flags, or an origin
+// remote-tracking branch (checked out through its local name).
+type Branch struct {
+	Name        string
+	Remote      bool
+	Current     bool
+	HasUpstream bool
+}
+
+// Branches reads the local branches (with upstream and current marks) and origin's remote-tracking
+// refs in two reads, on demand only and through runGit so both are auditable like every other git call.
+func Branches(ctx context.Context, dir string) ([]Branch, error) {
+	out, err := runGit(ctx, dir, cmdlog.ClassRead, "branch", "--format=%(refname:short)%00%(upstream:short)%00%(HEAD)")
 	if err != nil {
 		return nil, err
 	}
-	var branches []string
-	for _, l := range strings.Split(string(out), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			branches = append(branches, l)
+	branches := parseLocalBranches(string(out))
+	// A failed remote listing only loses the origin/* entries: the locals are still worth showing.
+	rout, _ := runGit(ctx, dir, cmdlog.ClassRead, "branch", "--remotes", "--format=%(refname:short)")
+	return append(branches, parseOriginRemotes(string(rout))...), nil
+}
+
+func parseLocalBranches(out string) []Branch {
+	var branches []Branch
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
 		}
+		parts := strings.Split(line, "\x00")
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			continue
+		}
+		b := Branch{Name: name}
+		if len(parts) > 1 {
+			b.HasUpstream = strings.TrimSpace(parts[1]) != ""
+		}
+		if len(parts) > 2 {
+			b.Current = strings.TrimSpace(parts[2]) == "*"
+		}
+		branches = append(branches, b)
 	}
-	return branches, nil
+	return branches
+}
+
+func parseOriginRemotes(out string) []Branch {
+	var branches []Branch
+	for _, line := range strings.Split(out, "\n") {
+		name := strings.TrimSpace(line)
+		// origin/HEAD is a symref to the default branch, not a checkoutable ref.
+		if !strings.HasPrefix(name, "origin/") || name == "origin/HEAD" {
+			continue
+		}
+		branches = append(branches, Branch{Name: name, Remote: true, HasUpstream: true})
+	}
+	return branches
 }
 
 // Uses --git-path because in a worktree .git is a file and the rebase state lives under .git/worktrees/<name>/.

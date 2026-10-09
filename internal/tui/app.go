@@ -85,7 +85,7 @@ type notifyMsg struct {
 // The picker's branch list arrives asynchronously (a git read off the Update goroutine), so the mode is echoed back: a late list for a picker that was closed/reopened for the other variant must be dropped.
 type branchesMsg struct {
 	path, mode string
-	branches   []string
+	branches   []gitstatus.Branch
 	err        string
 }
 
@@ -600,18 +600,25 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 
 // The list is read off the Update goroutine and published as an event; the picker opens immediately in a loading state instead of blocking the frame.
 func (m *Model) openBranchPicker(path, mode, variant string) tea.Cmd {
-	m.picker = &branchPicker{path: path, mode: mode, variant: variant, loading: true, current: m.states[path].Status.Branch}
+	in := textinput.New()
+	in.Prompt = ""
+	in.Placeholder = "filter…"
+	in.SetWidth(pickerInputWidth(m.width))
+	m.picker = &branchPicker{
+		path: path, mode: mode, variant: variant, loading: true,
+		current: m.states[path].Status.Branch, filter: in,
+	}
 	appCtx := m.ctx
 	events := m.events
 	go func() {
-		branches, err := gitstatus.LocalBranches(appCtx, path)
+		branches, err := gitstatus.Branches(appCtx, path)
 		errStr := ""
 		if err != nil {
 			errStr = gitstatus.FailureReason("", err)
 		}
 		sendEvent(appCtx, events, branchesMsg{path: path, mode: mode, branches: branches, err: errStr})
 	}()
-	return nil
+	return m.picker.filter.Focus()
 }
 
 func (m *Model) recollectCmd(path string) tea.Cmd {

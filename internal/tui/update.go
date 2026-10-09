@@ -22,6 +22,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toasts.showWarning("terminal too small — closed the PR form")
 		}
 		m.prFit()
+		if m.picker != nil {
+			m.picker.filter.SetWidth(pickerInputWidth(m.width))
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -270,7 +273,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// The picker is modal like the form: it is checked before the armed states because it is already a decision taken, and its keys must not fall through to the table.
 	if m.picker != nil {
-		if out, cmd, handled := m.handlePickerKey(key); handled {
+		if out, cmd, handled := m.handlePickerKey(msg); handled {
 			return out, cmd
 		}
 	}
@@ -694,7 +697,12 @@ func (m Model) removePrompt() string {
 
 func (m Model) View() tea.View {
 	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
-	content := overlayToasts(m.renderDashboard(), m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
+	base := m.renderDashboard()
+	// The picker floats over the dashboard instead of replacing it: the table and stats stay visible around the modal.
+	if m.picker != nil {
+		base = overlayCentered(base, m.pickerOverlay(m.width, m.height), m.width, m.height)
+	}
+	content := overlayToasts(base, m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
@@ -708,9 +716,6 @@ func (m Model) renderDashboard() string {
 	}
 	if m.pr != nil {
 		return m.compose(lay, m.prSection(lay.bodyLines), "")
-	}
-	if m.picker != nil {
-		return m.compose(lay, m.branchSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
 	table := m.tableSection(lay.bodyLines, entries, lay.tableWidth)

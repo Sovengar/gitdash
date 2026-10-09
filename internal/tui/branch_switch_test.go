@@ -7,17 +7,37 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
 	"gitdash/internal/cmdlog"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/testutil"
 )
 
-func pickerOn(path, mode, variant string, branches []string, current string) *branchPicker {
+func pickerBranches(names ...string) []gitstatus.Branch {
+	out := make([]gitstatus.Branch, 0, len(names))
+	for _, n := range names {
+		out = append(out, gitstatus.Branch{Name: n, HasUpstream: true})
+	}
+	return out
+}
+
+func pickerOn(path, mode, variant string, branches []gitstatus.Branch, current string) *branchPicker {
+	in := textinput.New()
+	in.Prompt = ""
+	in.Placeholder = "filter…"
+	in.SetWidth(pickerInputWidth(120))
+	in.Focus()
 	return &branchPicker{
 		path: path, mode: mode, variant: variant,
-		branches: branches, current: current,
+		branches: branches, current: current, filter: in,
 	}
+}
+
+func localBranch(name string) gitstatus.Branch {
+	return gitstatus.Branch{Name: name, HasUpstream: true}
 }
 
 func branchIntent(action string) *cmdlog.Entry {
@@ -120,17 +140,30 @@ func TestBranchKeyIsRebindable(t *testing.T) {
 	}
 }
 
-func TestPickerNavigationAndEsc(t *testing.T) {
+func TestPickerArrowAndJKNavigation(t *testing.T) {
 	m := newPullModel(t)
-	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", []string{"main", "feature"}, "main")
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
 
-	m, _ = press(m, "j")
+	m, _ = press(m, "down")
 	if m.picker.cursor != 1 {
-		t.Errorf("j moved the cursor to %d, want 1", m.picker.cursor)
+		t.Errorf("down moved the cursor to %d, want 1", m.picker.cursor)
 	}
 	m, _ = press(m, "down")
 	if m.picker.cursor != 1 {
 		t.Errorf("down ran past the last branch: cursor = %d", m.picker.cursor)
+	}
+	m, _ = press(m, "up")
+	if m.picker.cursor != 0 {
+		t.Errorf("up moved the cursor to %d, want 0", m.picker.cursor)
+	}
+	// j/k keep navigating while the filter is empty.
+	m, _ = press(m, "j")
+	if m.picker.cursor != 1 {
+		t.Errorf("j with an empty filter moved the cursor to %d, want 1", m.picker.cursor)
+	}
+	m, _ = press(m, "k")
+	if m.picker.cursor != 0 {
+		t.Errorf("k with an empty filter moved the cursor to %d, want 0", m.picker.cursor)
 	}
 	m, _ = press(m, "esc")
 	if m.picker != nil {
@@ -138,9 +171,79 @@ func TestPickerNavigationAndEsc(t *testing.T) {
 	}
 }
 
+func TestPickerFiltersAsYouType(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("alpha", "beta", "gamma"), "alpha")
+
+	m, _ = press(m, "b")
+	m, _ = press(m, "e")
+	m, _ = press(m, "t")
+	if got := m.picker.filter.Value(); got != "bet" {
+		t.Fatalf("filter = %q, want bet", got)
+	}
+	list := m.picker.filtered()
+	if len(list) != 1 || list[0].Name != "beta" {
+		t.Fatalf("filtered = %v, want only beta", list)
+	}
+	// Backspace reopens the list (three times: "bet" → "be" still matches beta).
+	for range 3 {
+		m, _ = press(m, "backspace")
+	}
+	if len(m.picker.filtered()) != len(m.picker.branches) {
+		t.Errorf("backspace did not reopen the list: %v", m.picker.filtered())
+	}
+}
+
+func TestPickerEnterUsesTheFilteredSelection(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	testutil.NewBranch(t, dir, "feature")
+	testutil.Checkout(t, dir, "main")
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
+	m.picker = pickerOn(dir, pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
+
+	m, _ = press(m, "f")
+	m, _ = press(m, "e")
+	m, _ = press(m, "enter")
+	if m.picker != nil {
+		t.Error("the picker stayed open after selecting")
+	}
+	if m.running[dir] != "checkout" {
+		t.Fatalf("enter did not launch the checkout: running = %v", m.running)
+	}
+	acc, _ := collectAction(t, m)
+	if acc.err != "" {
+		t.Fatalf("checkout failed: %q", acc.err)
+	}
+	if acc.cmd != "git checkout feature" {
+		t.Errorf("resolved argv = %q, want git checkout feature", acc.cmd)
+	}
+}
+
+func TestPickerRemoteBranchChecksOutTheLocalName(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	testutil.NewBranch(t, dir, "other")
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("other")})
+	m.picker = pickerOn(dir, pickerModeCurrent, "c", []gitstatus.Branch{
+		localBranch("other"),
+		{Name: "origin/main", Remote: true, HasUpstream: true},
+	}, "other")
+
+	m, _ = press(m, "down")
+	m, _ = press(m, "enter")
+	if m.running[dir] != "checkout" {
+		t.Fatalf("enter did not launch the checkout: running = %v", m.running)
+	}
+	acc, _ := collectAction(t, m)
+	if acc.cmd != "git checkout main" {
+		t.Errorf("resolved argv = %q, want the local name (git checkout main)", acc.cmd)
+	}
+}
+
 func TestPickerEnterOnCurrentBranchIsNoOp(t *testing.T) {
 	m := newPullModel(t)
-	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", []string{"main", "feature"}, "main")
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
 
 	m, cmd := press(m, "enter")
 	if m.picker != nil {
@@ -163,8 +266,9 @@ func TestPickerEnterCheckoutRuns(t *testing.T) {
 	testutil.Checkout(t, dir, "main")
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
-	m.picker = pickerOn(dir, pickerModeCurrent, "c", []string{"feature", "main"}, "main")
+	m.picker = pickerOn(dir, pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
 
+	m, _ = press(m, "down")
 	m, _ = press(m, "enter")
 	if m.picker != nil {
 		t.Error("the picker stayed open after selecting")
@@ -191,7 +295,7 @@ func TestPickerEnterCheckoutRuns(t *testing.T) {
 
 func TestPickerEnterWhileLoadingIsNoOp(t *testing.T) {
 	m := newPullModel(t)
-	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", loading: true}
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", loading: true, filter: textinput.New()}
 	m, _ = press(m, "enter")
 	if m.picker == nil {
 		t.Error("loading enter closed the picker, want a no-op")
@@ -210,7 +314,7 @@ func TestBranchSyncWritesMarkerAndRefreshes(t *testing.T) {
 	m := newTestModel(t,
 		[]discovery.Project{{Path: dir, Name: "demo", HasRepo: true, SyncBranch: "main"}},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
-	m.picker = pickerOn(dir, pickerModeSync, "s", []string{"develop", "main"}, "feature")
+	m.picker = pickerOn(dir, pickerModeSync, "s", pickerBranches("develop", "main"), "feature")
 
 	m, cmd := press(m, "enter")
 	if m.picker != nil {
@@ -262,9 +366,11 @@ func TestBranchSyncWritesMarkerAndRefreshes(t *testing.T) {
 }
 
 func TestOpenBranchPickerFetchesTheList(t *testing.T) {
-	dir, _ := testutil.NewRepo(t, false)
+	dir, origin := testutil.NewRepo(t, true)
 	testutil.NewBranch(t, dir, "feature")
 	testutil.Checkout(t, dir, "main")
+	testutil.PushUpstreamCommits(t, origin, 1, "up")
+	testutil.FetchLocal(t, dir)
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
 
@@ -283,9 +389,15 @@ func TestOpenBranchPickerFetchesTheList(t *testing.T) {
 			if bm.err != "" {
 				t.Fatalf("branch fetch failed: %s", bm.err)
 			}
-			got := strings.Join(bm.branches, ",")
-			if !strings.Contains(got, "main") || !strings.Contains(got, "feature") {
-				t.Errorf("branches = %v, want main and feature", bm.branches)
+			names := make([]string, 0, len(bm.branches))
+			for _, b := range bm.branches {
+				names = append(names, b.Name)
+			}
+			got := strings.Join(names, ",")
+			for _, want := range []string{"main", "feature", "origin/main"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("branches = %v, want %q", names, want)
+				}
 			}
 			return
 		case <-deadline:
@@ -296,67 +408,53 @@ func TestOpenBranchPickerFetchesTheList(t *testing.T) {
 
 func TestBranchesMsgDroppedForClosedPicker(t *testing.T) {
 	m := newPullModel(t)
-	updated, _ := m.Update(branchesMsg{path: "/tmp/old-clean", mode: pickerModeCurrent, branches: []string{"main"}})
+	updated, _ := m.Update(branchesMsg{path: "/tmp/old-clean", mode: pickerModeCurrent, branches: pickerBranches("main")})
 	m = updated.(Model)
 	if m.picker != nil {
 		t.Error("a branches message created a picker")
 	}
 }
 
-func TestPickerPromptAndListInTheDashboard(t *testing.T) {
+func TestPickerOverlayKeepsTheDashboardBehind(t *testing.T) {
 	m := newPullModel(t)
 	m = cursorOn(t, m, "/tmp/old-clean")
-	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", []string{"main", "feature"}, "main")
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
 
 	out := stripANSI(m.View().Content)
-	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "enter checkout") {
-		t.Errorf("the picker prompt is not in the keybinds section:\n%s", kb)
+	// The table stays visible around the modal, and the modal floats as its own box.
+	if !strings.Contains(out, "repos") || !strings.Contains(out, "old-clean") {
+		t.Errorf("the dashboard is not behind the overlay:\n%s", out)
 	}
-	box := sectionContent(t, out, "branches · old-clean")
-	if !strings.Contains(box, "feature") {
-		t.Errorf("the branch list is not painted:\n%s", box)
+	if !strings.Contains(out, "╭ branches · old-clean") {
+		t.Errorf("the modal box is not painted:\n%s", out)
 	}
-	if !strings.Contains(box, "main (current)") {
-		t.Errorf("the current branch is not marked:\n%s", box)
+	if !strings.Contains(out, "feature") || !strings.Contains(out, "main (current)") {
+		t.Errorf("the branch list is not painted:\n%s", out)
+	}
+	if !strings.Contains(out, "enter select") || !strings.Contains(out, "filter") {
+		t.Errorf("the modal does not show its legend:\n%s", out)
+	}
+	// The hint bar is not replaced by the modal.
+	if kb := sectionContent(t, out, "keybinds"); strings.Contains(kb, "enter select") {
+		t.Errorf("the modal legend leaked into the keybinds section:\n%s", kb)
 	}
 }
 
-func TestPickerPromptSyncMode(t *testing.T) {
+func TestPickerOverlayLabelsAndEmptyStates(t *testing.T) {
 	m := newPullModel(t)
-	if got := m.branchArmedPrompt(); got != "" {
-		t.Errorf("branchArmedPrompt without a selector = %q, want empty", got)
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom", filter: textinput.New()}
+	if box := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n")); !strings.Contains(box, "branch list failed") {
+		t.Errorf("error overlay = %q, want the failure wording", box)
 	}
-	if got := m.branchPrompt(); got != "" {
-		t.Errorf("branchPrompt without a picker = %q, want empty", got)
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", loading: true, filter: textinput.New()}
+	if box := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n")); !strings.Contains(box, "loading branches") {
+		t.Errorf("loading overlay = %q, want the loading wording", box)
 	}
-	m.picker = pickerOn("/tmp/old-clean", pickerModeSync, "s", []string{"main"}, "main")
-	if got := m.branchPrompt(); !strings.Contains(got, "set sync ref") {
-		t.Errorf("sync-mode prompt = %q, want the sync wording", got)
-	}
-	out := stripANSI(m.View().Content)
-	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "enter set sync ref") {
-		t.Errorf("the sync-mode prompt is not in the keybinds section:\n%s", kb)
-	}
-}
-
-func TestPickerUpAndUnhandledKeys(t *testing.T) {
-	m := newPullModel(t)
-	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", []string{"main", "feature"}, "main")
-	m.picker.cursor = 1
-	m, _ = press(m, "k")
-	if m.picker.cursor != 0 {
-		t.Errorf("k did not move the cursor up: %d", m.picker.cursor)
-	}
-	// An unhandled key is swallowed, not forwarded to the table.
-	if out, _, handled := m.handlePickerKey("x"); !handled || out.(Model).picker == nil {
-		t.Error("an unhandled key closed or leaked past the picker")
-	}
-	// The quit keys keep their course so the terminal is never trapped.
-	if _, _, handled := m.handlePickerKey("q"); handled {
-		t.Error("q was consumed by the picker, want it to reach the quit routing")
-	}
-	if _, _, handled := m.handlePickerKey("ctrl+c"); handled {
-		t.Error("ctrl+c was consumed by the picker, want it to reach the quit routing")
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c",
+		branches: []gitstatus.Branch{{Name: "main", HasUpstream: true}, {Name: "feature"}}, current: "main", filter: textinput.New()}
+	box := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n"))
+	if !strings.Contains(box, "feature (no upstream)") {
+		t.Errorf("no-upstream branch is not labelled:\n%s", box)
 	}
 }
 
@@ -372,34 +470,76 @@ func TestPickerWindowFollowsTheCursor(t *testing.T) {
 	}
 }
 
-func TestBranchSectionEmptyAndError(t *testing.T) {
+func TestPickerCTRLCPassesThrough(t *testing.T) {
 	m := newPullModel(t)
-	if got := m.branchSection(6); got != "" {
-		t.Errorf("branchSection without a picker = %q, want empty", got)
-	}
-	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom"}
-	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "branch list failed") {
-		t.Errorf("error section = %q, want the failure wording", box)
-	}
-	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", branches: nil}
-	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "no local branches") {
-		t.Errorf("empty section = %q, want the empty wording", box)
-	}
-	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", loading: true}
-	if box := stripANSI(m.branchSection(6)); !strings.Contains(box, "loading branches") {
-		t.Errorf("loading section = %q, want the loading wording", box)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main"), "main")
+	msg := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	if _, _, handled := m.handlePickerKey(msg); handled {
+		t.Error("ctrl+c was consumed by the picker, want it to reach the quit routing")
 	}
 }
 
 func TestPickerEnterOnFailedListIsNoOp(t *testing.T) {
 	m := newPullModel(t)
-	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom", branches: []string{"main"}}
+	m.picker = &branchPicker{path: "/tmp/old-clean", mode: pickerModeCurrent, variant: "c", err: "boom",
+		branches: pickerBranches("main"), filter: textinput.New()}
 	m, _ = press(m, "enter")
 	if m.picker == nil {
 		t.Error("an enter on a failed list closed the picker, want a no-op")
 	}
 	if len(m.running) != 0 {
 		t.Errorf("an enter on a failed list launched a process: %v", m.running)
+	}
+}
+
+func TestCheckoutTargetStripsTheRemotePrefix(t *testing.T) {
+	if got := checkoutTarget(gitstatus.Branch{Name: "origin/feature", Remote: true}); got != "feature" {
+		t.Errorf("checkoutTarget(remote) = %q, want feature", got)
+	}
+	if got := checkoutTarget(gitstatus.Branch{Name: "main"}); got != "main" {
+		t.Errorf("checkoutTarget(local) = %q, want main", got)
+	}
+}
+
+func TestPickerNilGuardsAndLabels(t *testing.T) {
+	m := newPullModel(t)
+	if got := m.branchArmedPrompt(); got != "" {
+		t.Errorf("branchArmedPrompt without a selector = %q, want empty", got)
+	}
+	if out, cmd := m.selectPickerBranch(); out.(Model).picker != nil || cmd != nil {
+		t.Error("selectPickerBranch without a picker did something")
+	}
+	if got := m.pickerOverlay(120, 30); got != nil {
+		t.Errorf("pickerOverlay without a picker = %v, want nil", got)
+	}
+	if got := branchLabel(gitstatus.Branch{Name: "origin/main", Remote: true}, "local"); got != "origin/main (remote)" {
+		t.Errorf("remote label = %q, want the remote wording", got)
+	}
+}
+
+func TestPickerOverlaySaysWhenNothingMatches(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("alpha", "beta"), "alpha")
+	m, _ = press(m, "z")
+	if box := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n")); !strings.Contains(box, "no matching branches") {
+		t.Errorf("empty filter overlay = %q, want the no-match wording", box)
+	}
+	// enter with nothing matching is a no-op, not a close.
+	if out, _ := m.selectPickerBranch(); out.(Model).picker == nil {
+		t.Error("enter on an empty list closed the picker")
+	}
+}
+
+func TestOverlayCenteredGuards(t *testing.T) {
+	if got := overlayCentered("base", nil, 10, 3); got != "base" {
+		t.Errorf("empty block = %q, want the base", got)
+	}
+	if got := overlayCentered("base", []string{"x"}, 0, 3); got != "base" {
+		t.Errorf("zero width = %q, want the base", got)
+	}
+	// height beyond the base clamps to the base's own height (the block still lands).
+	if got := overlayCentered("a\nb", []string{"x"}, 5, 99); !strings.Contains(got, "x") {
+		t.Errorf("height clamp = %q, want the block drawn", got)
 	}
 }
 
@@ -410,7 +550,7 @@ func TestBranchSyncMarkerWriteFails(t *testing.T) {
 	}
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
-	m.picker = pickerOn(dir, pickerModeSync, "s", []string{"develop"}, "main")
+	m.picker = pickerOn(dir, pickerModeSync, "s", pickerBranches("develop"), "main")
 
 	m, cmd := press(m, "enter")
 	if m.picker != nil {
