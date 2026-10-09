@@ -81,3 +81,18 @@ func TestParseOriginRemotesSkipsHeadAndOtherRemotes(t *testing.T) {
 		t.Errorf("remotes = %+v, want only origin/main", got)
 	}
 }
+
+// git always prints three NUL-separated fields, but the guards have to survive a short line instead
+// of indexing a field that is not there: one field (no NUL) and two fields are both valid.
+func TestParseLocalBranchesShortLines(t *testing.T) {
+	got := parseLocalBranches("solo\npaired\x00origin/paired\n")
+	if len(got) != 2 {
+		t.Fatalf("parsed %d branches, want 2 (one field, then two): %+v", len(got), got)
+	}
+	if got[0].Name != "solo" || got[0].HasUpstream || got[0].Current {
+		t.Errorf("one-field line = %+v, want a plain branch with no upstream", got[0])
+	}
+	if got[1].Name != "paired" || !got[1].HasUpstream || got[1].Current {
+		t.Errorf("two-field line = %+v, want an upstream and no current mark", got[1])
+	}
+}

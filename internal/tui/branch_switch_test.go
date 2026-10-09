@@ -561,6 +561,153 @@ func TestPickerWindowFollowsTheCursor(t *testing.T) {
 	}
 }
 
+// The existing navigation test never presses the keys AT the edges, which is exactly where the
+// clamps decide: up/k at the first row must not go negative, j at the last must not run past it.
+func TestPickerNavigationClampsAtBothEdges(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
+
+	m, _ = press(m, "up")
+	if m.picker.cursor != 0 {
+		t.Errorf("up at the first row = %d, want 0", m.picker.cursor)
+	}
+	m, _ = press(m, "k")
+	if m.picker.cursor != 0 {
+		t.Errorf("k at the first row = %d, want 0", m.picker.cursor)
+	}
+	m, _ = press(m, "j")
+	if m.picker.cursor != 1 {
+		t.Fatalf("j from the first row = %d, want 1", m.picker.cursor)
+	}
+	m, _ = press(m, "j")
+	if m.picker.cursor != 1 {
+		t.Errorf("j at the last row = %d, want 1", m.picker.cursor)
+	}
+	m, _ = press(m, "down")
+	if m.picker.cursor != 1 {
+		t.Errorf("down at the last row = %d, want 1", m.picker.cursor)
+	}
+}
+
+// Literal widths: 40-6=34 sits between the 24 floor and the 64 cap, so the subtraction is the only
+// term that decides, and 34-4=30 pins the input's own subtraction.
+func TestPickerWidthsAtTheClamps(t *testing.T) {
+	if got := pickerBoxWidth(40); got != 34 {
+		t.Errorf("pickerBoxWidth(40) = %d, want 34", got)
+	}
+	if got := pickerBoxWidth(20); got != 24 {
+		t.Errorf("pickerBoxWidth(20) = %d, want the 24 floor", got)
+	}
+	if got := pickerBoxWidth(200); got != 64 {
+		t.Errorf("pickerBoxWidth(200) = %d, want the 64 cap", got)
+	}
+	if got := pickerInputWidth(40); got != 30 {
+		t.Errorf("pickerInputWidth(40) = %d, want 30", got)
+	}
+}
+
+// The row budget is height minus the chrome; a small height is the only place where that
+// subtraction decides instead of the 12-row cap, so the box's line count pins it.
+func TestPickerOverlayRowBudget(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("a", "b", "c", "d", "e"), "a")
+	// height 6 - 4 chrome = 2 rows: the filter, 2 branch lines and the hint, plus the two borders.
+	if got := len(m.pickerOverlay(40, 6)); got != 6 {
+		t.Errorf("overlay at height 6 = %d lines, want 6 (2 rows + chrome)", got)
+	}
+
+	many := make([]string, 15)
+	for i := range many {
+		many[i] = "b" + string(rune('a'+i))
+	}
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches(many...), "ba")
+	// 15 branches but the 12-row cap binds: 1 filter + 12 rows + 1 hint + 2 borders.
+	if got := len(m.pickerOverlay(40, 30)); got != 16 {
+		t.Errorf("overlay with 15 branches = %d lines, want 16 (12-row cap)", got)
+	}
+}
+
+// The inner width is the box width minus the 6 chrome cells: a name longer than that is truncated
+// to exactly that many runes, which is what makes the subtraction observable.
+func TestPickerRowsTruncateToTheComputedInnerWidth(t *testing.T) {
+	m := newPullModel(t)
+	m.width = 40 // pickerBoxWidth(40)=34, inner = 34-6 = 28
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches(strings.Repeat("x", 60)), "main")
+
+	rows := m.branchRows(m.picker.filtered(), 1)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	got := stripANSI(rows[0])
+	if n := len([]rune(got)); n != 4+28 {
+		t.Errorf("painted row = %d runes, want 32 (28-char truncation + the 4-cell prefix): %q", n, got)
+	}
+}
+
+// With the window scrolled (offset > 0) the marker must follow the cursor by OFFSET+i; the marker
+// and its row are asserted so both the arithmetic and the equality mutation are held down.
+func TestPickerRowsMarkOnlyTheCursorRow(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c",
+		pickerBranches("b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9"), "b0")
+	m.picker.cursor = 9
+
+	rows := m.branchRows(m.picker.filtered(), 5)
+	marks := 0
+	for i, r := range rows {
+		if strings.Contains(r, "▸") {
+			marks++
+			if i != 4 {
+				t.Errorf("the cursor mark is on row %d, want 4 (window offset 5 + cursor 9)", i)
+			}
+		}
+	}
+	if marks != 1 {
+		t.Errorf("cursor marks = %d, want exactly 1", marks)
+	}
+}
+
+// Only the current branch is dimmed, and the ANSI is checked before stripANSI: the style is applied
+// to the truncated text, so the exact rendered run is what identifies it.
+func TestPickerRowsDimOnlyTheCurrentBranch(t *testing.T) {
+	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main", "feature"), "main")
+
+	rows := m.branchRows(m.picker.filtered(), 2)
+	if !strings.Contains(rows[0], styleDim.Render("main (current)")) {
+		t.Errorf("the current branch is not dimmed: %q", rows[0])
+	}
+	if strings.Contains(rows[1], styleDim.Render("feature")) {
+		t.Errorf("a non-current branch is dimmed: %q", rows[1])
+	}
+}
+
+// A failed `git branch` listing has to reach the picker as an error, not be swallowed by the
+// err==nil arm of the goroutine.
+func TestOpenBranchPickerSurfacesTheListFailure(t *testing.T) {
+	dir := t.TempDir() // not a repo: git branch fails
+	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
+		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
+
+	m.openBranchPicker(dir, pickerModeCurrent, "c")
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev := <-m.events:
+			bm, ok := ev.(branchesMsg)
+			if !ok {
+				continue
+			}
+			if bm.err == "" {
+				t.Fatal("a failed branch listing did not surface an error to the picker")
+			}
+			return
+		case <-deadline:
+			t.Fatal("the picker never answered the failed listing")
+		}
+	}
+}
+
 func TestPickerCTRLCPassesThrough(t *testing.T) {
 	m := newPullModel(t)
 	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "c", pickerBranches("main"), "main")
