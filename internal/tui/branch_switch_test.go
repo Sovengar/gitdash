@@ -518,13 +518,13 @@ func TestPickerOverlayLabelsAndEmptyStates(t *testing.T) {
 }
 
 func TestPickerWindowFollowsTheCursor(t *testing.T) {
-	if got := pickerWindow(3, 1, 5); got != 0 {
+	if got := branchWindow(3, 1, 5); got != 0 {
 		t.Errorf("a list that fits = offset %d, want 0", got)
 	}
-	if got := pickerWindow(10, 9, 5); got != 5 {
+	if got := branchWindow(10, 9, 5); got != 5 {
 		t.Errorf("cursor at the tail = offset %d, want 5", got)
 	}
-	if got := pickerWindow(10, 0, 5); got != 0 {
+	if got := branchWindow(10, 0, 5); got != 0 {
 		t.Errorf("cursor at the head = offset %d, want 0", got)
 	}
 }

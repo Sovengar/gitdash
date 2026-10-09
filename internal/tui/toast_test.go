@@ -518,3 +518,58 @@ func TestToastUpdateUsesTheClockReal(t *testing.T) {
 		t.Errorf("update left %d toasts, want 0 (the expired one has to go)", len(tm.toasts))
 	}
 }
+
+// The row pin is the point: with the block of 2 on a canvas of 8 it lands on rows 3-4 (top = (8-2)/2), and a top computed with the sign flipped would paint it two rows lower.
+func TestOverlayCenteredSplicesAtTheMiddleRows(t *testing.T) {
+	base := strings.Join([]string{"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"}, "\n")
+
+	got := strings.Split(overlayCentered(base, []string{"BOX", "two"}, 20, 8), "\n")
+
+	if len(got) != 8 {
+		t.Fatalf("the canvas changed height: %d rows", len(got))
+	}
+	if got[3] != "l3BOX" || got[4] != "l4two" {
+		t.Errorf("rows 3-4 = %q / %q, want the block spliced there", got[3], got[4])
+	}
+	if got[0] != "l0" || got[7] != "l7" {
+		t.Errorf("the rows outside the block changed: %q / %q", got[0], got[7])
+	}
+}
+
+// The column pin is the point: with a 20-wide canvas and a 3-wide block the box starts at cell 8 (x = (20-3)/2) and the tail keeps the base's cells 12-20, so a centering with the sign flipped, the division moved or a tail one cell off cannot pass.
+func TestOverlayCenteredPlacesTheBlockAtTheMiddleColumns(t *testing.T) {
+	base := strings.Join([]string{
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+		strings.Repeat(".", 20),
+	}, "\n")
+
+	got := strings.Split(overlayCentered(base, []string{"BOX"}, 20, 5), "\n")
+
+	want := strings.Repeat(".", 8) + "BOX" + strings.Repeat(".", 9)
+	if got[2] != want {
+		t.Errorf("row 2 = %q, want the block at the middle columns %q", got[2], want)
+	}
+}
+
+// Every degenerate input is identity: an empty block iterates zero rows and a canvas of zero clips the count to zero, so nothing can be painted where there is no room.
+func TestOverlayCenteredDegenerateIsIdentity(t *testing.T) {
+	base := "l0\nl1\nl2"
+	block := []string{"BOX"}
+	for _, c := range []struct {
+		name string
+		w, h int
+		blk  []string
+	}{
+		{"no block", 40, 3, nil},
+		{"no width", 0, 3, block},
+		{"no height", 40, 0, block},
+		{"negative height", 40, -1, block},
+	} {
+		if got := overlayCentered(base, c.blk, c.w, c.h); got != base {
+			t.Errorf("%s changed the canvas: %q", c.name, got)
+		}
+	}
+}

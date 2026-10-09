@@ -6,7 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"gitdash/internal/cmdlog"
 	"gitdash/internal/discovery"
@@ -204,7 +203,7 @@ func (m Model) pickerOverlay(width, height int) []string {
 		if len(list) == 0 {
 			content = append(content, styleHint.Render("  no matching branches"))
 		} else {
-			content = append(content, m.pickerRows(list, rowsAvail)...)
+			content = append(content, m.branchRows(list, rowsAvail)...)
 		}
 	}
 	content = append(content, styleHint.Render("  ↑/↓ move · type filter · enter select · esc cancel"))
@@ -213,9 +212,9 @@ func (m Model) pickerOverlay(width, height int) []string {
 	return strings.Split(box, "\n")
 }
 
-func (m Model) pickerRows(list []gitstatus.Branch, rows int) []string {
+func (m Model) branchRows(list []gitstatus.Branch, rows int) []string {
 	width := max(1, pickerBoxWidth(m.width)-6)
-	offset := pickerWindow(len(list), m.picker.cursor, rows)
+	offset := branchWindow(len(list), m.picker.cursor, rows)
 	out := make([]string, 0, rows)
 	for i, b := range list[offset:min(offset+rows, len(list))] {
 		mark := " "
@@ -246,30 +245,10 @@ func branchLabel(b gitstatus.Branch, current string) string {
 }
 
 // Keeps the cursor in the window without storing an offset: the window only has to follow navigation.
-func pickerWindow(n, cursor, visible int) int {
+func branchWindow(n, cursor, visible int) int {
 	if n <= visible {
 		return 0
 	}
 	return min(max(0, cursor-visible+1), n-visible)
 }
 
-// ANSI-safe centered splice (same technique as overlayToasts): the block is drawn centered over the
-// base, which stays visible around it.
-func overlayCentered(base string, block []string, width, height int) string {
-	if len(block) == 0 || width <= 0 {
-		return base
-	}
-	lines := strings.Split(base, "\n")
-	if height <= 0 || height > len(lines) {
-		height = len(lines)
-	}
-	block = clampBlock(block, width)
-	bw := blockWidth(block)
-	x := max(0, (width-bw)/2)
-	y := max(0, (height-len(block))/2)
-	for j, b := range block[:min(len(block), max(0, len(lines)-y))] {
-		row := y + j
-		lines[row] = ansi.Truncate(lines[row], x, "") + b + ansi.TruncateLeft(lines[row], x+bw, "")
-	}
-	return strings.Join(lines, "\n")
-}

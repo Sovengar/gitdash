@@ -194,6 +194,21 @@ func splitWidth(s string, maxWidth int) (string, string) {
 	return s, ""
 }
 
+// overlayCentered paints a block over the base, centered both ways: the render overlay is not a toast (it is not an event, it lives until the render answers) and not a view mode (the dashboard must stay visible behind it), and only a splice keeps both. Every degenerate input falls back to identity: clampBlock bounds every line to the width, x and the top floor at zero and the row count clips to the canvas.
+func overlayCentered(base string, block []string, width, height int) string {
+	block = clampBlock(block, width)
+	lines := strings.Split(base, "\n")
+	bw := blockWidth(block)
+	h := min(height, len(lines))
+	x := max(0, (width-bw)/2)
+	top := max(0, (h-len(block))/2)
+	for j, b := range block[:max(0, min(len(block), h-top))] {
+		y := top + j
+		lines[y] = ansi.Truncate(lines[y], x, "") + b + ansi.TruncateLeft(lines[y], x+bw, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // The splice is ANSI-safe: it is clipped by cells with ansi.Truncate/TruncateLeft and each block is bounded to the terminal width so nothing overflows; when they do not fit, the most recent toast wins.
 func overlayToasts(base string, blocks [][]string, width, height, reserved int) string {
 	if len(blocks) == 0 || width <= 0 {
@@ -223,9 +238,37 @@ func overlayToasts(base string, blocks [][]string, width, height, reserved int) 
 		}
 		for j, b := range block[:min(len(block), max(0, len(lines)-top))] {
 			y := top + j
-			lines[y] = ansi.Truncate(lines[y], x, "") + b + ansi.TruncateLeft(lines[y], x+bw, "")
+			lines[y] = spliceLine(lines[y], b, x)
 		}
 		bottom = top - 2
+	}
+	return strings.Join(lines, "\n")
+}
+
+// One ANSI-safe horizontal splice: the block replaces the x..x+width cells of the line and the rest is rebuilt around it, so the line's total width is preserved.
+func spliceLine(line, block string, x int) string {
+	return ansi.Truncate(line, x, "") + block + ansi.TruncateLeft(line, x+ansi.StringWidth(block), "")
+}
+
+// The modal is centred over the dashboard by the same splice primitive the toasts use: the dashboard is rendered normally and the modal's lines replace the cells they cover. A modal that does not fit whole is left un-spliced.
+func spliceModal(base, modal string, width, height int) string {
+	if modal == "" || width <= 0 {
+		return base
+	}
+	block := strings.Split(modal, "\n")
+	mh := len(block)
+	lines := strings.Split(base, "\n")
+	if height <= 0 || height > len(lines) {
+		height = len(lines)
+	}
+	x := max(0, (width-blockWidth(block))/2)
+	y := max(0, (height-mh)/2)
+	for j, b := range block {
+		yy := y + j
+		if yy >= len(lines) {
+			break
+		}
+		lines[yy] = spliceLine(lines[yy], b, x)
 	}
 	return strings.Join(lines, "\n")
 }

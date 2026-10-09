@@ -26,6 +26,12 @@ type FileEntry struct {
 	Path string
 }
 
+// A branch offered by the PR form's pickers: local (`refs/heads`) or remote-tracking (`refs/remotes`).
+type Ref struct {
+	Name   string
+	Remote bool
+}
+
 type Commit struct {
 	Sha     string
 	When    int64
@@ -209,6 +215,27 @@ func ParseLog(out string) []Commit {
 		})
 	}
 	return commits
+}
+
+// Local and remote-tracking refs from `for-each-ref`, in git's refname order (locals then remotes,
+// alphabetical). `refs/remotes/<remote>/HEAD` is a symbolic ref, not a branch: offering it would
+// build a submission against a name git cannot resolve as a head.
+func ParseRefs(out string) []Ref {
+	var refs []Ref
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "refs/heads/"):
+			refs = append(refs, Ref{Name: strings.TrimPrefix(line, "refs/heads/")})
+		case strings.HasPrefix(line, "refs/remotes/"):
+			name := strings.TrimPrefix(line, "refs/remotes/")
+			if strings.HasSuffix(name, "/HEAD") {
+				continue
+			}
+			refs = append(refs, Ref{Name: name, Remote: true})
+		}
+	}
+	return refs
 }
 
 func ParseWorktrees(out, mainPath string) []Worktree {

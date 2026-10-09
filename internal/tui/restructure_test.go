@@ -762,18 +762,19 @@ func TestCardSplitListBudgetBoundary(t *testing.T) {
 	}
 }
 
-func TestPROverlayReplacesTheWholeBody(t *testing.T) {
+// The form floats over the dashboard: it does NOT replace the body any more, so the commits panel and the card stay painted behind it.
+func TestPROverlayFloatsInsteadOfReplacing(t *testing.T) {
 	m := openPROverlay(t, newPROverlayModel(t, "/tmp/dirty-api"))
 	m.width = 119
 	if !formPainted(t, m) {
 		t.Fatal("the PR form is not painted")
 	}
 	flat := stripANSI(m.renderDashboard())
-	if strings.Contains(flat, "╭ commits · ") {
-		t.Errorf("the commits panel is drawn with the PR overlay open:\n%s", flat)
+	if !strings.Contains(flat, "╭ commits · ") {
+		t.Errorf("the commits panel is not painted behind the PR overlay:\n%s", flat)
 	}
-	if strings.Contains(flat, "╭ dirty-api ") {
-		t.Errorf("the card is drawn with the PR overlay open:\n%s", flat)
+	if !strings.Contains(flat, "╭ dirty-api ") {
+		t.Errorf("the card is not painted behind the PR overlay:\n%s", flat)
 	}
 }
 

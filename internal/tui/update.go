@@ -157,6 +157,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	// The render answers through the events channel, so the pump is rearmed; it measures its own duration (a capture can be measured, a handoff cannot) and needs no recollect: git-sim draws, it does not mutate the repo. The overlay clears only for the repo that answered: another render can still be in flight.
+	case visualDoneMsg:
+		delete(m.running, msg.path)
+		if m.visualBusy != nil && m.visualBusy.path == msg.path {
+			m.visualBusy = nil
+		}
+		cmdlog.RecordExec(cmdlog.Entry{
+			Repo:   m.nameOf(msg.path),
+			Dir:    msg.path,
+			Class:  cmdlog.ClassAction,
+			Action: "visual",
+			Argv:   msg.argv,
+			Exit:   execExit(msg.err),
+			Dur:    msg.dur,
+		})
+		switch {
+		case msg.err != nil:
+			m.toasts.showError(fmt.Sprintf("visual %s: %v", msg.sub, msg.err))
+		case msg.openErr != nil:
+			m.toasts.showWarning(fmt.Sprintf("visual %s: image kept at %s (%v)", msg.sub, msg.image, msg.openErr))
+		default:
+			m.toasts.showSuccess(fmt.Sprintf("visual %s — opened %s", msg.sub, filepath.Base(msg.image)))
+		}
+		return m.withPump(nil)
+
 	case cmdResultMsg:
 		delete(m.running, msg.path)
 		m.lastCmd[msg.path] = cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
@@ -185,6 +210,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Its own message (and not an effect of the submit key) so accepting and executing stay two steps: the submission is observable in m.prPending with no process having left.
 	case prStartMsg:
 		return m, m.prCreateCmd()
+
+		// Its own message so the bounded read is attributed: a late answer from a previous form is dropped when there is no modal or it moved to another repo.
+	case prRefsMsg:
+		if m.pr != nil && m.pr.path == msg.path {
+			m.pr.refs = msg.refs
+			m.pr.refsErr = msg.err
+			m.pr.refsReady = true
+		}
+		return m.withPump(nil)
 
 		// reject != "" means nothing ran, so there is no exec to record and no state to recollect: only the warning, which says what is missing.
 	case prResultMsg:
@@ -330,7 +364,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if o.needsUpstream && armed.upstream == "" {
 				return m, m.toastCmd(toastWarning, "no upstream")
 			}
-			// git-sim aborts when the ref is already in HEAD, which is exactly what behind == 0 says, so handing over the terminal to read that would throw the repo off the dashboard; the value comes from the last fetch, hence naming the fetch key.
+			// git-sim aborts when the ref is already in HEAD, which is exactly what behind == 0 says, so the render is refused instead of burning a couple of seconds on a simulation git-sim will reject; the value comes from the last fetch, hence naming the fetch key.
 			if o.needsUpstream && armed.behind == 0 {
 				return m, m.toastCmd(toastWarning, fmt.Sprintf(
 					"%s already in HEAD — nothing to simulate (%s to fetch)",
@@ -430,6 +464,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cancel()
 		return m, tea.Quit
 	case "esc":
+		// Dropping the overlay does NOT cancel the render: it is view state (the truth of "in flight" is m.running), and the completion must still record in the log and toast.
+		m.visualBusy = nil
 		return m, nil
 	case "up", "k":
 		m.cursor = max(0, m.cursor-1)
@@ -696,26 +732,29 @@ func (m Model) removePrompt() string {
 }
 
 func (m Model) View() tea.View {
-	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
+	// The order is dashboard → modal splice → toasts → visual render overlay: the form floats over the dashboard and the toasts over it, while the "in flight" spinner is the topmost layer (it is what is happening now).
 	base := m.renderDashboard()
+	if modal := m.prModal(); modal != "" {
+		base = spliceModal(base, modal, m.width, m.height)
+	}
+	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
 	// The picker floats over the dashboard instead of replacing it: the table and stats stay visible around the modal.
 	if m.picker != nil {
 		base = overlayCentered(base, m.pickerOverlay(m.width, m.height), m.width, m.height)
 	}
 	content := overlayToasts(base, m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
+	// The render overlay goes LAST, on top of the toasts too: it is what is happening NOW, and a completion toast of another repo must not hide it.
+	content = overlayCentered(content, m.visualOverlayLines(), m.width, m.height)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
 
-// With the log or the PR overlay open the body is not the table but the log or the form (layout already gave back its height): both are views you go to look at, so they replace the table instead of sharing space with it.
+// With the log panel open the body is the log (layout already gave back its height): it is a view you go to look at, so it replaces the table instead of sharing space with it. The PR form no longer replaces anything: it floats over the dashboard, which paints normally behind it.
 func (m Model) renderDashboard() string {
 	lay := m.layout()
 	if m.logOpen {
 		return m.compose(lay, m.logSection(lay.bodyLines), "")
-	}
-	if m.pr != nil {
-		return m.compose(lay, m.prSection(lay.bodyLines), "")
 	}
 	entries := m.entries()
 	table := m.tableSection(lay.bodyLines, entries, lay.tableWidth)
