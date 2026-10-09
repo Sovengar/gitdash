@@ -234,6 +234,20 @@ INVERT_NEGATIVES internal/tui/cmdlogpanel.go:85
 # requirement is "reserve the cursor's cell", i.e. >= 1), but its mutant no longer
 # comes out as a survivor: the composition ties it down just the same.
 
+# --- internal/tui/branchpicker.go ----------------------------------------
+CONDITIONALS_BOUNDARY internal/tui/branchpicker.go:249
+#   `if n <= visible` of branchWindow. The only input where the mutated `n < visible` differs is
+#   n == visible, and there the fall-through is `min(max(0, cursor-visible+1), n-visible)` with
+#   n-visible == 0, so the min is 0 for any first term: exactly what the guard returns. Both paths
+#   are the identity 0 on every input, so no test can tell them apart.
+ARITHMETIC_BASE internal/tui/branchpicker.go:252
+INVERT_NEGATIVES internal/tui/branchpicker.go:252
+#   The second term of the window's min: `min(max(0, cursor-visible+1), n-visible)`. cursor is
+#   always bounded to [0, n-1] (navigation clamps it, filtering resets it to 0), so the first term
+#   is <= n-visible whenever it is positive and 0 otherwise: the min never picks the second term.
+#   With `n+visible` that term is even larger, so no window can change size. Same class as the
+#   cmdlogpanel/picker defensive second clamps: a bound on an already-bounded value.
+
 # --- internal/tui/picker.go ----------------------------------------------
 CONDITIONALS_BOUNDARY internal/tui/picker.go:40
 #   `if n <= 0 || cursor < 0` of clampHighlight, on the `cursor < 0` boundary.

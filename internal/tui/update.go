@@ -22,6 +22,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toasts.showWarning("terminal too small — closed the PR form")
 		}
 		m.prFit()
+		if m.picker != nil {
+			m.picker.filter.SetWidth(pickerInputWidth(m.width))
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -193,6 +196,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toasts.show(msg.text, msg.level)
 		return m, nil
 
+	case branchesMsg:
+		// A late list for a picker that was closed or reopened for the other variant is dropped: mode and path have to still match.
+		if m.picker == nil || m.picker.path != msg.path || m.picker.mode != msg.mode {
+			return m.withPump(nil)
+		}
+		m.picker.loading = false
+		m.picker.branches = msg.branches
+		m.picker.err = msg.err
+		m.picker.cursor = 0
+		return m.withPump(nil)
+
 		// Its own message (and not an effect of the submit key) so accepting and executing stay two steps: the submission is observable in m.prPending with no process having left.
 	case prStartMsg:
 		return m, m.prCreateCmd()
@@ -291,6 +305,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// The picker is modal like the form: it is checked before the armed states because it is already a decision taken, and its keys must not fall through to the table.
+	if m.picker != nil {
+		if out, cmd, handled := m.handlePickerKey(msg); handled {
+			return out, cmd
+		}
+	}
+
 	// esc cancels ALL in-flight removals, not just one: it clears the whole token map so any late result is discarded without re-arming the forced level or touching the banner.
 	if key == "esc" && len(m.removeTokens) > 0 {
 		clear(m.removeTokens)
@@ -360,6 +381,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Like the pull selector: the bodily keys c/s are resolved before the normal routing (s is sync), and any other key cancels and follows its course.
+	if m.branchArmed != nil {
+		armed := *m.branchArmed
+		m.branchArmed = nil
+		if o, ok := branchOptionForKey(key); ok {
+			return m, m.openBranchPicker(armed.path, o.mode, o.key)
+		}
+	}
+
 	// The panel's keys are consulted before the normal routing (like armed states) because j/k collide with table navigation; every other key continues normally, since the panel is a view mode and not a modal.
 	if m.logOpen {
 		if m.handleLogKey(key, m.layout().bodyLines) {
@@ -424,7 +454,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// `a` is the panel's own filter here and no selector is armed (its warning would not be painted and the key would be shadowed), and `pr` is guarded too because opening the form behind the panel would not draw it.
 	if m.logOpen {
 		switch m.actionForKey(key) {
-		case "pull", "visual", "pr":
+		case "pull", "visual", "pr", "branch":
 			return m, nil
 		}
 	}
@@ -502,6 +532,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pr":
 		// Like `pull` and `visual` it does not execute: the key only collects the parameters and the form's submit launches gh/glab.
 		return m.openPR()
+	case "branch":
+		// The switch-branch key arms a submenu; the second key (c/s) opens the branch picker, so nothing runs yet.
+		if r, ok := m.selected(); ok && !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
+		} else if ok {
+			m.branchArmed = &armedBranch{path: r.project.Path}
+			return m, nil
+		}
 	case "sync":
 		// Sync executes directly (no selector): it always reconciles with the repo's sync branch, unlike `pull`, whose variant is a choice.
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
@@ -583,6 +621,7 @@ var commandActions = map[string]bool{
 	"sync":    true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
 	"command": true, "worktree_remove": true, "visual": true, "pr": true,
+	"branch": true,
 }
 
 func launchesCommand(action string) bool { return commandActions[action] }
@@ -593,6 +632,7 @@ var rowActions = map[string]bool{
 	"sync":   true,
 	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
 	"visual": true, "pr": true,
+	"branch": true,
 }
 
 // Outcomes that belong in a toast instead of the card's last-action block: sync prints git's rebase/apply/drop lines, which the transient toast summarizes while `l` keeps the whole audit.
@@ -698,6 +738,10 @@ func (m Model) View() tea.View {
 		base = spliceModal(base, modal, m.width, m.height)
 	}
 	// No "if there are toasts" guard: overlayToasts is already a no-op on an empty list, and duplicating the check was one more place where a ">=" could hide the difference between painting nothing and painting over the base.
+	// The picker floats over the dashboard instead of replacing it: the table and stats stay visible around the modal.
+	if m.picker != nil {
+		base = overlayCentered(base, m.pickerOverlay(m.width, m.height), m.width, m.height)
+	}
 	content := overlayToasts(base, m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	// The render overlay goes LAST, on top of the toasts too: it is what is happening NOW, and a completion toast of another repo must not hide it.
 	content = overlayCentered(content, m.visualOverlayLines(), m.width, m.height)
