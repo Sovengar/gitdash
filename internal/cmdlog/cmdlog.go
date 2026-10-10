@@ -61,11 +61,11 @@ type Recorder struct {
 	seq   int
 }
 
-func New(cap int) *Recorder {
-	if cap <= 0 {
-		cap = DefaultCap
+func New(size int) *Recorder {
+	if size <= 0 {
+		size = DefaultCap
 	}
-	return &Recorder{buf: make([]Entry, cap)}
+	return &Recorder{buf: make([]Entry, size)}
 }
 
 func (r *Recorder) add(e Entry) {

@@ -139,7 +139,7 @@ func MarkerPrompt(dir, marker, action string) (string, error) {
 	}
 	var meta markerMeta
 	if err := toml.Unmarshal(raw, &meta); err != nil {
-		return "", fmt.Errorf("marker: %v", err)
+		return "", fmt.Errorf("marker: %w", err)
 	}
 	return meta.AI[action].Prompt, nil
 }
@@ -151,7 +151,7 @@ func parseMarker(path string) (markerMeta, error) {
 		return meta, err
 	}
 	if err := toml.Unmarshal(raw, &meta); err != nil {
-		return meta, fmt.Errorf("marker: %v", err)
+		return meta, fmt.Errorf("marker: %w", err)
 	}
 	return meta, nil
 }

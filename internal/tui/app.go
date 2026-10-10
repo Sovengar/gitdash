@@ -854,7 +854,8 @@ func runShellCmd(ctx context.Context, dir, shell, command string) (string, int) 
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
 		code := 1
-		if ee, ok := err.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		}
 		return out.String(), code

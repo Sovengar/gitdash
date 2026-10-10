@@ -469,10 +469,10 @@ func TestScoreSortsForAttention(t *testing.T) {
 		prev, cur := groups[i-1], groups[i]
 		for _, a := range prev.states {
 			for _, b := range cur.states {
-				if State(b).Score() >= State(a).Score() {
+				if b.Score() >= a.Score() {
 					t.Errorf("%s (%v, %d) does not come BEFORE %s (%v, %d)",
-						a, prev.name, State(a).Score(),
-						b, cur.name, State(b).Score())
+						a, prev.name, a.Score(),
+						b, cur.name, b.Score())
 				}
 			}
 		}

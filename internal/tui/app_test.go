@@ -1071,14 +1071,14 @@ func TestAcquireSlot(t *testing.T) {
 // With concurrency=1 the first fetch holds the only slot for 30s; `exec` and not `sleep & wait` because a grandchild keeps stdout's pipe and Output() never returns (measured), and `shimFlag` is the shim's only signal that the slot is taken since recordExec runs when the process ENDS.
 func waitForSlowGit(t *testing.T, shimFlag string) {
 	t.Helper()
-	real, err := exec.LookPath("git")
+	gitBin, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git not available")
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"fetch\" ]; then touch \"" + shimFlag + "\"; exec sleep 30; fi\n" +
-		"exec " + real + " \"$@\"\n"
+		"exec " + gitBin + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
