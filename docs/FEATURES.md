@@ -19,6 +19,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [PR/MR creation](#prmr-creation) | Floating modal with branch pickers → `gh pr create` / `glab mr create` | `O`, `ctrl+s`, `ctrl+t` |
 | [Visual preview](#visual-preview) | git-sim pull/merge/rebase simulation | `v` then `p`/`m`/`r` |
 | [Fetch](#fetch) | Fetch one repo or all (batched, concurrent) | `f` / `F` |
+| [Rescan & recollect](#rescan--recollect) | Re-walk the roots or re-read the cursor repo's git state | `r` / `R` |
 | [Editor & lazygit](#editor--lazygit) | Open `$EDITOR` or `lazygit` in the repo | `e` / `g` |
 | [Command input](#command-input) | Run `$SHELL -c` in the repo; empty = interactive shell | `!` |
 | [Command log](#command-log) | Session timeline of intents and execs | `l`, `a` |
@@ -111,6 +112,11 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 - **Auto fetch** — after every scan/rescan if `[fetch] auto = true`; batched with `[fetch] concurrency` and `[fetch] timeout`.
 - **Manual** — `f` fetches the cursor's repo; `F` fetches all repos with an upstream.
+
+## Rescan & recollect
+
+- **Rescan** — `r` re-walks the roots for markers (refused with a toast while a scan is already running).
+- **Recollect** — `R` re-reads the git state of the cursor's repo without a full scan.
 
 ## Editor & lazygit
 

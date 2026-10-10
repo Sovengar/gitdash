@@ -44,7 +44,7 @@ tmux new-session -d -s gd 'XDG_CONFIG_HOME=<tmp> bin/gitdash' && sleep 3 && tmux
 changes already made causes false symptoms (e.g. "it finds no repos" because of
 the marker's rename).
 
-## New feature → docs/FEATURES.md
+## New feature → docs/FEATURES.md + skill
 
 Any **new feature** — and any user-visible change to an existing one — must be
 documented in `docs/FEATURES.md` **in the same change** (create the file if it does
@@ -52,6 +52,11 @@ not exist yet): add or update its entry with what it does and how it is
 triggered (key, flag or command). A feature that is not in `docs/FEATURES.md` does
 not exist for the next reader. Keep it a concise inventory, not a tutorial: the
 details live in `README.md` and `docs/adr/`.
+
+The same change must also update the global skill
+**`~/.agents/skills/gitdash/SKILL.md`** — trigger, keys, flags, config keys and
+`--print` output that changed. The skill is the runtime contract agents load
+before working on gitdash; a feature absent from it does not exist for them.
 
 ## CI and `main`'s protection
 
