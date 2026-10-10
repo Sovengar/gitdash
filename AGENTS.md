@@ -30,7 +30,7 @@ go mod tidy                                        # after adding deps
 
 ```bash
 make coverage-check                                # coverage profile + gate (diff at 100%, total with a floor)
-make mutate-all                                    # mutation testing of the whole module, tuned to this machine
+make mutate-all                                    # manual, only if needed; the gate itself runs in CI
 bash scripts/mutate_test.sh                        # the gate's red paths (<1s)
 bash scripts/watchdog_test.sh                      # the mutation supervisor (also a CI step)
 ./scripts/gen-fixtures.sh                          # regenerates testdata/playground
@@ -94,8 +94,6 @@ Runs on non-draft PRs. The job always reports — no `needs:`, no measurement `i
 no `continue-on-error` — which is what makes it a required check, and its name is
 exactly `Mutation` because the `protect-main` ruleset demands that text.
 
-Mutation policy: make mutate-all
-
 The gate lives in `scripts/mutate.sh` (measure **and** decide in one step); the
 workflow only brings paths, refs and budget. Green means the mutation was measured
 and no new survivor is left untested: *"could not measure"* is red, and so is an
@@ -153,7 +151,9 @@ Scope, counts and inputs:
   judges the expiries.
 - `jq` is a precondition and the report is parsed before it is read: empty output
   read as "zero new survivors" is the green this check forbids.
-- Local loops: `make mutate-all` (whole module) and `make mutate-all-diff` (diff).
+- Mutation runs in CI (the `Mutation` job, the required check). Locally it is
+  never automatic: run it manually, only when needed, with `make mutate-all`
+  (whole module) or `make mutate-all-diff` (diff).
 
 What the gate does NOT cover: only the PR's diff (the whole module is the manual
 loop), it cannot say *what* expired a mutant, and there is no local equivalent of

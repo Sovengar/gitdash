@@ -97,17 +97,13 @@ smoke: build ## Smoke tests the TUI in tmux with an isolated config and the fixt
 tidy: ## go mod tidy
 	go mod tidy
 
-# Mutation testing (gremlins). Everything lives in scripts/mutate.sh: warm-up, denominator,
-# coefficient, forbidden flags, supervisor and verdict. These targets are the local loop;
-# the required check calls the script directly. Budgets default from the script's scope table,
-# MUTATE_* overrides them (mandatory under --ci), and MUTATE_BASE is shared with coverage-check.
-mutate-all: ## Mutation testing locally, with the budget tuned to this machine (~10min)
+mutate-all:
 	@scripts/mutate.sh --run
 
-mutate-all-diff: ## Like mutate-all but only the diff vs main (daily loop, <1min)
+mutate-all-diff:
 	@scripts/mutate.sh --diff
 
-mutate-dry: ## Warm up and enumerate the mutants without mutating any (the budget that would apply)
+mutate-dry:
 	@scripts/mutate.sh --diff --dry
 
 clean: ## Deletes the artefacts in bin/
