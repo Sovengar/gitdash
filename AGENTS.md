@@ -30,7 +30,7 @@ go mod tidy                                        # after adding deps
 
 ```bash
 make coverage-check                                # coverage profile + gate (diff at 100%, total with a floor)
-make mutate-all                                    # mutation testing of the whole module, tuned to this machine
+make mutate-all                                    # manual, only if needed; the gate itself runs in CI
 bash scripts/mutate_test.sh                        # the gate's red paths (<1s)
 bash scripts/watchdog_test.sh                      # the mutation supervisor (also a CI step)
 ./scripts/gen-fixtures.sh                          # regenerates testdata/playground
@@ -94,8 +94,6 @@ Runs on non-draft PRs. The job always reports — no `needs:`, no measurement `i
 no `continue-on-error` — which is what makes it a required check, and its name is
 exactly `Mutation` because the `protect-main` ruleset demands that text.
 
-Mutation policy: make mutate-all
-
 The gate lives in `scripts/mutate.sh` (measure **and** decide in one step); the
 workflow only brings paths, refs and budget. Green means the mutation was measured
 and no new survivor is left untested: *"could not measure"* is red, and so is an
@@ -130,8 +128,20 @@ Scope, counts and inputs:
 - The scope is the **committed** diff against the merge-base; a `git diff` that
   cannot be computed is an error, not an empty scope.
 - Two counts, and they are different numbers: `WATCH_LINES` (every mutant considered
-  = the supervisor's denominator) and `EXPECTED_MEASURED` (in-scope only = what the
-  verdict compares against the report).
+  = the supervisor's denominator) and `EXPECTED_MEASURED` (in-scope `RUNNABLE` only
+  = what the verdict compares against the report's `mutants_total`, which is
+  `killed + lived + notViable`). `SKIPPED` leaves the scope and `NOT COVERED` sits
+  in no cover block, so neither can be measured and neither belongs in the denominator.
+- The gitconfig is neutralised (`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` → `/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`): gremlins computes its `--diff` ranges with a plain
+  `git diff` run with the AMBIENT config, so a dev's `diff.algorithm`/
+  `diff.interhunkcontext` would make the local loop measure a different mutant set
+  than CI's defaults. Hermetic by construction — no env prefix to remember.
+- `NOT COVERED` is published, never silently dropped: the verdict says how many and
+  why (Go cover starts a case clause's block after the colon, so a mutant on the
+  condition sits in no block at any test count), and a diff whose in-scope mutants
+  are all uncoverable is the green "nothing measurable" instead of the impossible red
+  it used to be (pre-count N, measured none, and no lever: the allowlist knows `LIVED`).
 - "Nothing to mutate" comes from the prior count, never from a missing report; a
   `_test.go`-only diff still produces `report.json`, with total 0.
 - The coefficient is `ceil(CAP / elapsed)`, `elapsed` measured on the dry-run;
@@ -141,7 +151,9 @@ Scope, counts and inputs:
   judges the expiries.
 - `jq` is a precondition and the report is parsed before it is read: empty output
   read as "zero new survivors" is the green this check forbids.
-- Local loops: `make mutate-all` (whole module) and `make mutate-all-diff` (diff).
+- Mutation runs in CI (the `Mutation` job, the required check). Locally it is
+  never automatic: run it manually, only when needed, with `make mutate-all`
+  (whole module) or `make mutate-all-diff` (diff).
 
 What the gate does NOT cover: only the PR's diff (the whole module is the manual
 loop), it cannot say *what* expired a mutant, and there is no local equivalent of
