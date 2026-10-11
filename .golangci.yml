@@ -1,12 +1,13 @@
 # Default set (errcheck, govet, ineffassign, staticcheck, unused) plus linters
 # measured at 0 findings against this repo, so they cost nothing and catch regressions.
 # Skipped on purpose: gosec (G204 fires on every exec.Command, which is the design),
-# gocritic (style churn), forcetypeassert (a panic in a test helper is the wanted failure).
+# gocritic (style churn), forcetypeassert (a panic in a test helper is the wanted failure),
+# dupword (v2.13.2 has no ignore-rules and every hit family-wide is an intended
+# repetition in a comment or test data, so it would only ever report false positives).
 version: "2"
 linters:
   enable:
     - asasalint
-    - dupword
     - errorlint
     - makezero
     - misspell
