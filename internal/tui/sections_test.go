@@ -502,14 +502,14 @@ func TestRemoveWorktreePromptVisibleInShortTerminal(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.height = 6 // without the armed warning, keybinds hides at this height
 
-	if strings.Contains(stripANSI(m.View().Content), "remove worktree") {
+	if strings.Contains(stripANSI(m.View().Content), "detach worktree") {
 		t.Fatal("precondition: with nothing armed there should be no prompt")
 	}
 
 	m, _ = press(m, "w")
 	m, _ = press(m, "d")
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? d to confirm") {
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "detach worktree wt-a? branch a stays — d to confirm") {
 		t.Errorf("the prompt is not visible on a short terminal:\n%s", out)
 	}
 }

@@ -52,7 +52,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Ungrouped** — repos without a primary go to a `(ungrouped)` section at the end.
 - **Worktree subrows** — expanded with `enter` on a repo row; navigable and operable (all repo actions run against the worktree path); branch shown, state cells left empty.
 - **Orphan worktrees** — visible as `[wt]` rows only when the main repo is not discovered.
-- **Worktree removal** — `w` then `d` on a subrow arms a confirmation; a second `d` runs `git worktree remove`; dirty worktree arms a `--force` level.
+- **Worktree removal** — `w` then `d` on a subrow arms a confirmation; a second `d` detaches it (`git worktree remove`, **the branch stays**). `w` then `D` is the destructive variant: the same removal plus `git branch -d`. Arming reads the worktree (`git status --porcelain`, on demand), so a dirty one asks **before** git refuses: `has changes — d to delete anyway, esc to cancel`, and the confirmation then runs with `--force`. An unmerged branch escalates the same way to `-D` on its own failure. A detached worktree has no branch, so `D` warns instead of arming.
 
 ## Pull selector
 

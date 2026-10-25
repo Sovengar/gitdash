@@ -61,10 +61,20 @@ type actionMsg struct {
 // gen is the attempt token: a result whose token is no longer current is discarded (cancelled with esc or superseded).
 type worktreeRemovedMsg struct {
 	parent, wtPath, name string
-	output, err          string
-	force                bool
-	gen                  int
-	cmd                  string
+	branch               string
+	deleteBranch         bool
+	// wtGone says the worktree step already succeeded, so the branch step is the only one left; it is also what tells which step failed.
+	wtGone, forceWT, forceBR bool
+	key                      string
+	output, err              string
+	gen                      int
+	cmd                      string
+}
+
+// The answer to "is this worktree dirty?", asked when the removal is armed so the question reaches the user BEFORE git refuses. It carries the key and the target because the answer arrives late and may no longer apply.
+type worktreeDirtyMsg struct {
+	parent, wtPath, key string
+	dirty               bool
 }
 
 // action and argv travel so the command log can record what was launched: a handoff captures no output, so the argv is all that is left.
@@ -216,12 +226,26 @@ type visualFlight struct {
 	path, sub string
 }
 
+// The confirm key is part of the state: `d` detaches (the branch survives) and `D` deletes the branch after the removal, so the same key twice is the confirmation and a different one only re-arms.
 type armedRemoval struct {
 	wtPath string
 	parent string
 	name   string
-	force  bool
+	branch string
+	key    string
+	wtGone bool
+	// Two escalation levels: a dirty worktree (--force) and an unmerged branch (-D) are different failures, and one being forced does not force the other.
+	forceWT bool
+	forceBR bool
 }
+
+const (
+	removalKeyDetach = "d"
+	removalKeyBranch = "D"
+)
+
+// A detached worktree has no branch to delete, so D degrades to a plain detach instead of promising something it cannot do.
+func (a armedRemoval) deletesBranch() bool { return a.key == removalKeyBranch && a.branch != "" }
 
 func (a armedRemoval) matches(parent, wtPath string) bool {
 	return filepath.Clean(a.parent) == filepath.Clean(parent) &&
@@ -597,32 +621,60 @@ func (m *Model) busyActionCmd(path string) tea.Cmd {
 }
 
 // It does not use recollectCmd because that guard would collide with the running flag of this very action; on success it also publishes the parent's snapshot so the sub-row disappears.
-func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, token int) tea.Cmd {
-	if cmd := m.busyActionCmd(parent); cmd != nil {
+func (m *Model) removeWorktreeCmd(a armedRemoval, token int) tea.Cmd {
+	if cmd := m.busyActionCmd(a.parent); cmd != nil {
 		return cmd
 	}
-	m.running[parent] = "worktree_remove"
+	m.running[a.parent] = "worktree_remove"
 	appCtx := m.ctx
 	events := m.events
-	syncBranch, syncFallback := m.syncOf(parent)
+	syncBranch, syncFallback := m.syncOf(a.parent)
 	go func() {
 		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
 		defer cancel()
-		out, err := gitstatus.RemoveWorktree(ctx, parent, wtPath, withForce)
-		errStr := ""
-		if err != nil {
-			errStr = gitstatus.FailureReason(out, err)
+		msg := worktreeRemovedMsg{
+			parent: a.parent, wtPath: a.wtPath, name: a.name, branch: a.branch,
+			deleteBranch: a.deletesBranch(), wtGone: a.wtGone,
+			forceWT: a.forceWT, forceBR: a.forceBR, key: a.key, gen: token,
+			cmd: "git " + strings.Join(gitstatus.RemoveWorktreeArgv(a.wtPath, a.forceWT), " "),
 		}
-		sendEvent(appCtx, events, worktreeRemovedMsg{
-			parent: parent, wtPath: wtPath, name: name,
-			output: out, err: errStr, force: withForce, gen: token,
-			cmd: "git " + strings.Join(gitstatus.RemoveWorktreeArgv(wtPath, withForce), " "),
-		})
-		if err == nil {
-			sendEvent(appCtx, events, statusMsg{path: parent, snap: gitstatus.Collect(appCtx, parent, syncBranch, syncFallback)})
+		var out strings.Builder
+		// The branch goes only after the worktree: while it is checked out, git refuses to delete it.
+		if !a.wtGone {
+			o, err := gitstatus.RemoveWorktree(ctx, a.parent, a.wtPath, a.forceWT)
+			out.WriteString(o)
+			if err != nil {
+				msg.output, msg.err = out.String(), gitstatus.FailureReason(o, err)
+				sendEvent(appCtx, events, msg)
+				return
+			}
+			msg.wtGone = true
 		}
+		if msg.deleteBranch {
+			o, err := gitstatus.DeleteBranch(ctx, a.parent, a.branch, a.forceBR)
+			out.WriteString(o)
+			msg.cmd += " && git " + strings.Join(gitstatus.DeleteBranchArgv(a.branch, a.forceBR), " ")
+			if err != nil {
+				msg.output, msg.err = out.String(), gitstatus.FailureReason(o, err)
+				sendEvent(appCtx, events, msg)
+				return
+			}
+		}
+		msg.output = out.String()
+		sendEvent(appCtx, events, msg)
+		sendEvent(appCtx, events, statusMsg{path: a.parent, snap: gitstatus.Collect(appCtx, a.parent, syncBranch, syncFallback)})
 	}()
 	return nil
+}
+
+// A tea.Cmd does its work off the Update goroutine, so the read costs no frame; it travels as a direct message and not through the events channel, which is why it needs no pump rearm.
+func (m *Model) worktreeDirtyCmd(a armedRemoval) tea.Cmd {
+	appCtx := m.ctx
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(appCtx, actionTimeout())
+		defer cancel()
+		return worktreeDirtyMsg{parent: a.parent, wtPath: a.wtPath, key: a.key, dirty: gitstatus.WorktreeDirty(ctx, a.wtPath)}
+	}
 }
 
 // The list is read off the Update goroutine and published as an event; the picker opens immediately in a loading state instead of blocking the frame.

@@ -491,13 +491,13 @@ func TestHintBarSkipsActionsWithoutKey(t *testing.T) {
 
 func TestKeyByActionInvertsTheMap(t *testing.T) {
 	cfg := Defaults()
-	cfg.Keybindings["fold"] = "w"
+	cfg.Keybindings["fold"] = "z"
 	inv := cfg.KeyByAction()
 	if len(inv) == 0 {
 		t.Fatal("KeyByAction = empty")
 	}
-	if got := inv["w"]; got != "fold" {
-		t.Errorf("KeyByAction()[\"w\"] = %q, want fold", got)
+	if got := inv["z"]; got != "fold" {
+		t.Errorf("KeyByAction()[\"z\"] = %q, want fold", got)
 	}
 	if _, ok := inv["enter"]; ok {
 		t.Error("the default fold key (enter) is still in the inverted map after redefining it")

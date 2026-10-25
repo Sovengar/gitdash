@@ -99,6 +99,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.withPump(nil)
 
+	case worktreeDirtyMsg:
+		// The answer only escalates, and only while that exact target is still armed: the arm may have been confirmed, cancelled or replaced while the read was in flight, and a late "clean" must not remove a level that a real refusal armed.
+		if msg.dirty && m.armed != nil && m.armed.key == msg.key && m.armed.matches(msg.parent, msg.wtPath) {
+			m.armed.forceWT = true
+		}
+		return m, nil
+
 	case worktreeRemovedMsg:
 		tok, inflight := m.removeTokens[msg.parent]
 		switch {
@@ -124,21 +131,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if targetsArmed {
 				m.armed = nil
 			}
-			m.toasts.showSuccess("worktree removed " + msg.name)
+			if msg.deleteBranch {
+				m.toasts.showSuccess(fmt.Sprintf("worktree removed %s, branch %s deleted", msg.name, msg.branch))
+			} else {
+				m.toasts.showSuccess("worktree removed " + msg.name)
+			}
 			return m.withPump(nil)
 		}
-		m.toasts.showError(fmt.Sprintf("worktree remove failed %s: %s", msg.name, msg.err))
+		if msg.wtGone {
+			m.toasts.showError(fmt.Sprintf("branch delete failed %s: %s", msg.branch, msg.err))
+		} else {
+			m.toasts.showError(fmt.Sprintf("worktree remove failed %s: %s", msg.name, msg.err))
+		}
 		if !targetsArmed {
 			return m.withPump(nil)
 		}
-		if msg.force {
-			m.armed = nil
-		} else {
-			m.armed = &armedRemoval{
-				wtPath: msg.wtPath, parent: msg.parent,
-				name: msg.name, force: true,
-			}
+		// Each step escalates once and only on its own failure: a forced worktree does not force the branch, and the other way round.
+		failed := &armedRemoval{
+			wtPath: msg.wtPath, parent: msg.parent, name: msg.name,
+			branch: msg.branch, key: msg.key, wtGone: msg.wtGone,
 		}
+		switch {
+		case msg.wtGone && !msg.forceBR:
+			failed.forceBR = true
+		case !msg.wtGone && !msg.forceWT:
+			failed.forceWT = true
+		default:
+			m.armed = nil
+			return m.withPump(nil)
+		}
+		m.armed = failed
 		return m.withPump(nil)
 
 	case execDoneMsg:
@@ -322,8 +344,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// An armed removal has priority over everything (including the esc that closes the detail and the search/command inputs); any other key disarms and continues on its normal course.
 	if m.armed != nil {
 		switch {
-		case key == "d":
-			return m.handleWorktreeRemove()
+		case key == removalKeyDetach || key == removalKeyBranch:
+			return m.handleWorktreeRemove(key)
 		case key == "esc":
 			m.armed = nil
 			return m, nil
@@ -390,8 +412,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if o, ok := branchOptionForKey(key); ok {
 			return m, m.openBranchPicker(armed.path, armed.refreshPath, o.mode, o.key)
 		}
-		if key == "d" {
-			return m.handleWorktreeRemove()
+		if key == removalKeyDetach || key == removalKeyBranch {
+			return m.handleWorktreeRemove(key)
 		}
 	}
 
@@ -713,13 +735,17 @@ func (m Model) actionForKey(key string) string {
 	return ""
 }
 
-func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
+func (m Model) handleWorktreeRemove(key string) (tea.Model, tea.Cmd) {
 	e, ok := m.selectedEntry()
 	if !ok || e.kind != kindWorktree || e.parent == "" || e.wt.Path == "" {
 		m.armed = nil
 		return m, m.toastCmd(toastInfo, "select a worktree")
 	}
-	if m.armed != nil && m.armed.matches(e.parent, e.wt.Path) {
+	if key == removalKeyBranch && e.wt.Branch == "" {
+		m.armed = nil
+		return m, m.toastCmd(toastInfo, "detached worktree — no branch to delete")
+	}
+	if m.armed != nil && m.armed.key == key && m.armed.matches(e.parent, e.wt.Path) {
 		if cmd := m.busyActionCmd(m.armed.parent); cmd != nil {
 			return m, cmd
 		}
@@ -735,18 +761,21 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 			Class:  cmdlog.ClassAction,
 			Repo:   filepath.Base(armed.wtPath),
 			Dir:    armed.wtPath,
-			Key:    "d",
+			Key:    key,
 			Action: "worktree_remove",
 		})
-		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
+		return m, m.removeWorktreeCmd(armed, m.removeGen)
 	}
-	// A worktree other than the armed one is never removed, neither on re-arming nor on a first press.
+	// Another worktree, or the other key, only re-arms: changing the decision never executes the previous one.
 	m.armed = &armedRemoval{
 		wtPath: e.wt.Path,
 		parent: e.parent,
 		name:   filepath.Base(e.wt.Path),
+		branch: e.wt.Branch,
+		key:    key,
 	}
-	return m, nil
+	// Arming asks git whether there is something to lose, so the confirmation arrives with the force level already set instead of after a refusal.
+	return m, m.worktreeDirtyCmd(*m.armed)
 }
 
 // Resolved by key (p/r/f/m/a) and not with arrows: the set is short and fixed, and a navigable list would cost two extra keystrokes for the variant used 90% of the time.
@@ -786,11 +815,22 @@ func (m Model) removePrompt() string {
 	if m.armed == nil {
 		return ""
 	}
-	key := "d"
-	if m.armed.force {
-		return fmt.Sprintf("remove worktree %s? has changes — %s to force, esc to cancel", m.armed.name, key)
+	a := *m.armed
+	// The forced level names the step that failed: the worktree (--force) or the branch (-D).
+	if a.wtGone {
+		return fmt.Sprintf("branch %s is not merged — %s to delete anyway, esc to cancel", a.branch, a.key)
 	}
-	return fmt.Sprintf("remove worktree %s? %s to confirm, esc to cancel", m.armed.name, key)
+	verb := "detach worktree " + a.name
+	if a.deletesBranch() {
+		verb = fmt.Sprintf("delete worktree %s and branch %s", a.name, a.branch)
+	}
+	if a.forceWT {
+		return fmt.Sprintf("%s? has changes — %s to delete anyway, esc to cancel", verb, a.key)
+	}
+	if !a.deletesBranch() && a.branch != "" {
+		return fmt.Sprintf("%s? branch %s stays — %s to confirm, esc to cancel", verb, a.branch, a.key)
+	}
+	return fmt.Sprintf("%s? %s to confirm, esc to cancel", verb, a.key)
 }
 
 func (m Model) View() tea.View {

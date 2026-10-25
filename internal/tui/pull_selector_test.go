@@ -106,7 +106,7 @@ func TestSelectorNotArmsWithoutRepo(t *testing.T) {
 		}
 	}
 	if idx < 0 {
-		t.Skip("the fixture has no row without a repo")
+		t.Fatal("the fixture has no row without a repo")
 	}
 	m.cursor = idx
 	m, _ = press(m, "p")

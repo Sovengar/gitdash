@@ -206,6 +206,17 @@ func TestRemoveWorktreeArgv(t *testing.T) {
 	}
 }
 
+func TestDeleteBranchArgv(t *testing.T) {
+	got := strings.Join(append([]string{"git"}, DeleteBranchArgv("feat/x", false)...), " ")
+	if want := "git branch -d feat/x"; got != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+	got = strings.Join(append([]string{"git"}, DeleteBranchArgv("feat/x", true)...), " ")
+	if want := "git branch -D feat/x"; got != want {
+		t.Errorf("forced argv = %q, want %q", got, want)
+	}
+}
+
 func TestExecWithoutRecorderNotBreaks(t *testing.T) {
 	cmdlog.SetRecorder(nil)
 	dir, _ := testutil.NewRepo(t, true)

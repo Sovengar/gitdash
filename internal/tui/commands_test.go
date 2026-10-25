@@ -811,7 +811,9 @@ func TestRemoveWorktreeWithParentBusyWarns(t *testing.T) {
 	m := &mm
 	m.running = map[string]string{"/tmp/api": "pull"}
 
-	cmd := m.removeWorktreeCmd("/tmp/api", "/tmp/api-wt", "api-wt", false, 1)
+	cmd := m.removeWorktreeCmd(armedRemoval{
+		parent: "/tmp/api", wtPath: "/tmp/api-wt", name: "api-wt", branch: "feat/x", key: removalKeyBranch,
+	}, 1)
 	if cmd == nil {
 		t.Fatal("removeWorktreeCmd with the parent busy returned nil, want a notice")
 	}

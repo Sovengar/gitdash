@@ -332,6 +332,28 @@ func RemoveWorktreeArgv(wtPath string, withForce bool) []string {
 	return append(args, wtPath)
 }
 
+// Runs against the parent repo, which is the one that owns the branch; -d is git's ancestry test
+// against that repo's HEAD, which is why -D exists as the exaggerated level.
+func DeleteBranch(ctx context.Context, repoDir, branch string, withForce bool) (string, error) {
+	return runGitCombined(ctx, repoDir, cmdlog.ClassAction, DeleteBranchArgv(branch, withForce)...)
+}
+
+func DeleteBranchArgv(branch string, withForce bool) []string {
+	flag := "-d"
+	if withForce {
+		flag = "-D"
+	}
+	return []string{"branch", flag, branch}
+}
+
+// On demand and never inside Collect: a worktree with untracked or modified files is exactly what
+// `git worktree remove` refuses, and only the removal needs to know it beforehand.
+// An unreadable worktree reads as clean, so the removal itself reports the real reason.
+func WorktreeDirty(ctx context.Context, wtPath string) bool {
+	out, err := runGitCombined(ctx, wtPath, cmdlog.ClassRead, "status", "--porcelain")
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
 // LC_ALL=C so git error messages stay recognizable (diverged, no upstream) regardless of the user's locale.
 func gitEnv() []string {
 	env := os.Environ()

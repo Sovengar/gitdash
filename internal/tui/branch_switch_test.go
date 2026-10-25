@@ -106,7 +106,7 @@ func TestWorktreePromptVisibleInKeybinds(t *testing.T) {
 	m, _ = press(m, "w")
 	out := stripANSI(m.View().Content)
 	kb := sectionContent(t, out, "keybinds")
-	if !strings.Contains(kb, "worktree old-clean: c create worktree") || !strings.Contains(kb, "d remove") {
+	if !strings.Contains(kb, "worktree old-clean: c create worktree") || !strings.Contains(kb, "d detach") || !strings.Contains(kb, "D detach+branch") {
 		t.Errorf("the armed worktree prompt is not in the keybinds section:\n%s", kb)
 	}
 }
@@ -214,7 +214,7 @@ func TestWorktreeActionsNotArmWithoutRepo(t *testing.T) {
 		}
 	}
 	if idx < 0 {
-		t.Skip("the fixture has no row without a repo")
+		t.Fatal("the fixture has no row without a repo")
 	}
 	m.cursor = idx
 	m, _ = press(m, "w")

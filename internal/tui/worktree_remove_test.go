@@ -41,7 +41,8 @@ func armedOver(t *testing.T, m Model, e tableEntry, force bool) Model {
 	t.Helper()
 	m.armed = &armedRemoval{
 		wtPath: e.wt.Path, parent: e.parent,
-		name: filepath.Base(e.wt.Path), force: force,
+		name: filepath.Base(e.wt.Path), branch: e.wt.Branch,
+		key: removalKeyDetach, forceWT: force,
 	}
 	return m
 }
@@ -88,7 +89,7 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	if m.armed.wtPath != "/tmp/wt-a" || m.armed.name != "wt-a" {
 		t.Errorf("armed = %+v, want wt-a", m.armed)
 	}
-	if m.armed.force {
+	if m.armed.forceWT {
 		t.Error("the first arming must not force")
 	}
 	if m.armed.parent != p.Path {
@@ -97,8 +98,12 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	if len(m.running) != 0 {
 		t.Errorf("there must be no running actions: %v", m.running)
 	}
-	if cmd != nil {
-		t.Error("arming must not launch any Cmd")
+	// Arming launches the dirty read: the question about losing work has to arrive with the confirmation, not after git refuses. The path does not exist here, which is also the "cannot tell" branch: it reads as clean.
+	if cmd == nil {
+		t.Fatal("arming must launch the dirty check")
+	}
+	if msg, ok := cmd().(worktreeDirtyMsg); !ok || msg.dirty || msg.wtPath != "/tmp/wt-a" || msg.key != removalKeyDetach {
+		t.Errorf("dirty check = %#v, want a clean answer for wt-a", msg)
 	}
 	if m.cursor != before {
 		t.Errorf("the cursor changed: %d, want %d", m.cursor, before)
@@ -249,7 +254,7 @@ func TestRemoveWorktreeFailureArmsForce(t *testing.T) {
 	})
 	m = updated.(Model)
 
-	if m.armed == nil || !m.armed.force {
+	if m.armed == nil || !m.armed.forceWT {
 		t.Fatalf("the force was not armed: %+v", m.armed)
 	}
 	if m.armed.wtPath != "/tmp/wt-a" {
@@ -286,7 +291,7 @@ func TestRemoveWorktreeForceExecutes(t *testing.T) {
 		if !ok {
 			t.Fatalf("first event = %T, want worktreeRemovedMsg", ev)
 		}
-		if !msg.force {
+		if !msg.forceWT {
 			t.Error("the run did not use force")
 		}
 	case <-time.After(5 * time.Second):
@@ -302,7 +307,7 @@ func TestRemoveWorktreeForceFailureDisarms(t *testing.T) {
 
 	updated, _ := m.Update(worktreeRemovedMsg{
 		parent: p.Path, wtPath: "/tmp/wt-a", name: "wt-a",
-		err: "fatal: cannot do it", force: true, gen: 9,
+		err: "fatal: cannot do it", forceWT: true, gen: 9,
 	})
 	m = updated.(Model)
 
@@ -443,20 +448,27 @@ func TestRemoveWorktreePromptRender(t *testing.T) {
 	m, _ = press(m, "w")
 	m, _ = press(m, "d")
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? d to confirm, esc to cancel") {
-		t.Errorf("the confirmation warning is missing from keybinds:\n%s", out)
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "detach worktree wt-a? branch a stays — d to confirm, esc to cancel") {
+		t.Errorf("the detach warning is missing from keybinds:\n%s", out)
+	}
+
+	// The other key re-arms with the destructive variant: the same prompt has to say that the branch goes too.
+	m, _ = press(m, "D")
+	out = stripANSI(m.View().Content)
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "delete worktree wt-a and branch a? D to confirm, esc to cancel") {
+		t.Errorf("the delete-branch warning is missing from keybinds:\n%s", out)
 	}
 
 	e, _ := m.selectedEntry()
 	m = armedOver(t, m, e, true)
 	out = stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? has changes — d to force, esc to cancel") {
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "detach worktree wt-a? has changes — d to delete anyway, esc to cancel") {
 		t.Errorf("forced warning missing from keybinds:\n%s", out)
 	}
 
 	m, _ = press(m, "esc")
 	out = stripANSI(m.View().Content)
-	if strings.Contains(out, "remove worktree") {
+	if strings.Contains(out, "detach worktree") {
 		t.Error("the warning is still visible after cancelling")
 	}
 	if !strings.Contains(sectionContent(t, out, "keybinds"), "j/k move") {
@@ -562,7 +574,7 @@ func TestRemoveWorktreeLateResultDoesNotClobberOtherArmed(t *testing.T) {
 	})
 	m = updated.(Model)
 
-	if m.armed == nil || m.armed.name != "wt-b" || m.armed.force {
+	if m.armed == nil || m.armed.name != "wt-b" || m.armed.forceWT {
 		t.Errorf("A's late result overwrote B's arming: %+v", m.armed)
 	}
 }
@@ -624,9 +636,9 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 
 	waitEvent(t, &m, func(ev event) bool {
 		mm, ok := ev.(worktreeRemovedMsg)
-		return ok && mm.err != "" && !mm.force
+		return ok && mm.err != "" && !mm.forceWT
 	})
-	if m.armed == nil || !m.armed.force {
+	if m.armed == nil || !m.armed.forceWT {
 		t.Fatalf("the force was not armed after the dirty failure: %+v", m.armed)
 	}
 
@@ -708,7 +720,7 @@ func TestRemoveWorktreeConcurrentParentsNotLeak(t *testing.T) {
 	if m.removeTokens["/tmp/pb"] != tokB {
 		t.Errorf("altered token of B: %v", m.removeTokens)
 	}
-	if m.armed == nil || !m.armed.force || m.armed.name != "pa-wt" {
+	if m.armed == nil || !m.armed.forceWT || m.armed.name != "pa-wt" {
 		t.Errorf("A's outcome not applied: %+v", m.armed)
 	}
 
@@ -857,5 +869,233 @@ func TestRemoveTokensIsInitializesInTheSecondLevel(t *testing.T) {
 	}
 	if m.removeTokens[parent] == 0 {
 		t.Errorf("the deletion attempt was not recorded: removeTokens = %v", m.removeTokens)
+	}
+}
+
+func TestRemoveWorktreeDArmsBranchDeletion(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+
+	m, _ = press(m, "w")
+	m, _ = press(m, "D")
+
+	if m.armed == nil {
+		t.Fatal("w D did not arm")
+	}
+	if m.armed.key != removalKeyBranch || !m.armed.deletesBranch() || m.armed.branch != "a" {
+		t.Errorf("armed = %+v, want D over branch a", m.armed)
+	}
+	if len(m.running) != 0 {
+		t.Errorf("arming launched something: %v", m.running)
+	}
+	if m.armed.parent != p.Path {
+		t.Errorf("parent = %q, want %q", m.armed.parent, p.Path)
+	}
+}
+
+// Changing the decision is not confirming it: d then D arms the destructive variant and runs nothing.
+func TestRemoveWorktreeOtherKeyRearmsWithoutExecuting(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+
+	m, _ = press(m, "D")
+
+	if m.running[p.Path] != "" {
+		t.Errorf("d then D executed instead of re-arming: %v", m.running)
+	}
+	if m.armed == nil || m.armed.key != removalKeyBranch {
+		t.Errorf("armed = %+v, want the branch variant", m.armed)
+	}
+
+	m, _ = press(m, "d")
+	if m.running[p.Path] != "" || m.armed == nil || m.armed.key != removalKeyDetach {
+		t.Errorf("D then d executed or lost the re-arming: running=%v armed=%+v", m.running, m.armed)
+	}
+}
+
+// A detached worktree has no branch, so D refuses instead of arming a deletion git cannot do.
+func TestRemoveWorktreeDetachedBranchRefused(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-det")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-det")
+	testutil.Detach(t, wtDir)
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
+	if len(snap.Worktrees) != 1 || snap.Worktrees[0].Branch != "" {
+		t.Fatalf("fixture: %+v", snap.Worktrees)
+	}
+
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	m, _ = press(m, "w")
+	m, cmd := press(m, "D")
+
+	if m.armed != nil {
+		t.Errorf("D armed over a detached worktree: %+v", m.armed)
+	}
+	if len(m.running) != 0 {
+		t.Errorf("D launched the deletion: %v", m.running)
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok || msg.level != toastInfo || !strings.Contains(msg.text, "no branch to delete") {
+		t.Errorf("notice = %+v, want the detached warning", msg)
+	}
+}
+
+// End to end: D removes the worktree AND the branch, and the recorded argv says both.
+func TestRemoveWorktreeAndBranchEndToEnd(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-both")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-both")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
+	if len(snap.Worktrees) != 1 {
+		t.Fatalf("fixture: worktrees = %d, want 1", len(snap.Worktrees))
+	}
+
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	m, _ = press(m, "w")
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+
+	waitEvent(t, &m, func(ev event) bool {
+		sm, ok := ev.(statusMsg)
+		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
+	})
+
+	if branches := gitOutT(t, dir, "branch", "--list", "wt-both"); strings.TrimSpace(branches) != "" {
+		t.Errorf("the branch survived D: %q", branches)
+	}
+	want := "git " + strings.Join(gitstatus.RemoveWorktreeArgv(wtDir, false), " ") +
+		" && git " + strings.Join(gitstatus.DeleteBranchArgv("wt-both", false), " ")
+	if act := m.lastAction[dir]; act.cmd != want {
+		t.Errorf("actionResult.cmd = %q, want %q", act.cmd, want)
+	}
+	last := m.toasts.toasts[len(m.toasts.toasts)-1]
+	if last.level != toastSuccess || !strings.Contains(last.text, "branch wt-both deleted") {
+		t.Errorf("toast = %+v, want the branch in the success", last)
+	}
+}
+
+// The branch step fails on its own (unmerged) after the worktree is already gone, so the escalation has to keep wtGone: retrying must not try to remove the worktree again.
+func TestRemoveWorktreeBranchFailureEscalatesToForce(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-unm")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-unm")
+	gitOutT(t, wtDir, "commit", "--allow-empty", "-m", "only here")
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
+
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	m, _ = press(m, "w")
+	m, _ = press(m, "D")
+	m, _ = press(m, "D")
+
+	waitEvent(t, &m, func(ev event) bool {
+		mm, ok := ev.(worktreeRemovedMsg)
+		return ok && mm.err != "" && mm.wtGone && !mm.forceBR
+	})
+	if m.armed == nil || !m.armed.forceBR || !m.armed.wtGone || m.armed.key != removalKeyBranch {
+		t.Fatalf("the branch force was not armed in the right phase: %+v", m.armed)
+	}
+	if m.armed.branch != "wt-unm" {
+		t.Errorf("armed over %q, want wt-unm", m.armed.branch)
+	}
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "branch wt-unm is not merged — D to delete anyway") {
+		t.Errorf("the not-merged warning is missing:\n%s", out)
+	}
+
+	m, _ = press(m, "D")
+	waitEvent(t, &m, func(ev event) bool {
+		sm, ok := ev.(statusMsg)
+		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
+	})
+	if m.armed != nil {
+		t.Errorf("the success did not disarm: %+v", m.armed)
+	}
+	if branches := gitOutT(t, dir, "branch", "--list", "wt-unm"); strings.TrimSpace(branches) != "" {
+		t.Errorf("the forced delete left the branch: %q", branches)
+	}
+}
+
+// The question is asked BEFORE git refuses: arming reads the worktree, the confirmation carries the force level, and one more press is enough. A pre-check that only served to show the same error would be a subprocess for nothing.
+func TestRemoveWorktreeDirtyAsksBeforeRemoving(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-ask")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-ask")
+	testutil.WriteUntracked(t, wtDir, map[string]string{"wip.txt": "x"})
+	snap := gitstatus.Collect(t.Context(), dir, "main", false)
+
+	p := proj(filepath.Base(dir), dir, true)
+	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
+	m, _ = press(m, "enter")
+	m, _ = press(m, "down")
+	m, _ = press(m, "w")
+	m, cmd := press(m, "d")
+
+	if cmd == nil {
+		t.Fatal("arming did not launch the dirty check")
+	}
+	answer, ok := cmd().(worktreeDirtyMsg)
+	if !ok || !answer.dirty {
+		t.Fatalf("dirty check = %#v, want dirty", answer)
+	}
+	updated, _ := m.Update(answer)
+	m = updated.(Model)
+	if m.armed == nil || !m.armed.forceWT {
+		t.Fatalf("the dirty answer did not arm the force level: %+v", m.armed)
+	}
+	if out := stripANSI(m.View().Content); !strings.Contains(out, "has changes — d to delete anyway, esc to cancel") {
+		t.Errorf("the question is missing from keybinds:\n%s", out)
+	}
+
+	m, _ = press(m, "d")
+	waitEvent(t, &m, func(ev event) bool {
+		sm, ok := ev.(statusMsg)
+		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
+	})
+
+	// The removal needed --force to succeed: without it git refuses a worktree with untracked files.
+	if m.armed != nil {
+		t.Errorf("the success did not disarm: %+v", m.armed)
+	}
+	if branches := gitOutT(t, dir, "branch", "--list", "wt-ask"); !strings.Contains(branches, "wt-ask") {
+		t.Errorf("d deleted the branch: %q", branches)
+	}
+	for _, to := range m.toasts.toasts {
+		if to.level == toastError {
+			t.Errorf("a failure was reported for a question that was answered: %+v", to)
+		}
+	}
+}
+
+// The read is a separate round trip, so it can answer after the decision moved on: only the arm it belongs to may consume it.
+func TestRemoveWorktreeLateDirtyAnswerIgnored(t *testing.T) {
+	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+
+	updated, _ := m.Update(worktreeDirtyMsg{parent: p.Path, wtPath: "/tmp/wt-b", key: removalKeyDetach, dirty: true})
+	m = updated.(Model)
+	if m.armed == nil || m.armed.forceWT {
+		t.Errorf("an answer for another worktree armed the force level: %+v", m.armed)
+	}
+
+	updated, _ = m.Update(worktreeDirtyMsg{parent: p.Path, wtPath: "/tmp/wt-a", key: removalKeyBranch, dirty: true})
+	m = updated.(Model)
+	if m.armed == nil || m.armed.forceWT {
+		t.Errorf("an answer for another key armed the force level: %+v", m.armed)
+	}
+
+	fresh, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
+	updated, _ = fresh.Update(worktreeDirtyMsg{parent: "/tmp/parent-repo", wtPath: "/tmp/wt-a", key: removalKeyDetach, dirty: true})
+	fresh = updated.(Model)
+	if fresh.armed != nil || len(fresh.running) != 0 {
+		t.Errorf("a late answer armed a removal nobody asked for: %+v", fresh.armed)
 	}
 }

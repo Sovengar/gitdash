@@ -140,3 +140,69 @@ func TestRemoveWorktreePrunableFailsGracefully(t *testing.T) {
 		t.Error("FailureReason empty for a non-worktree path")
 	}
 }
+
+// The branch has to outlive `git worktree remove` for this to be reachable at all, so the worktree goes first and only then the branch.
+func TestDeleteBranchAfterRemoval(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-del")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-del")
+	if _, err := RemoveWorktree(t.Context(), dir, wtDir, false); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+
+	if _, err := DeleteBranch(t.Context(), dir, "wt-del", false); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if branches := gitOut(t, dir, "branch", "--list", "wt-del"); strings.TrimSpace(branches) != "" {
+		t.Errorf("the branch survived the safe delete: %q", branches)
+	}
+}
+
+// -d is ancestry, not "no added changes": a branch with its own commit is refused until the forced level, and the refusal is what the UI turns into the second arming.
+func TestDeleteBranchUnmergedNeedsForce(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-unmerged")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-unmerged")
+	gitOut(t, wtDir, "commit", "--allow-empty", "-m", "only here")
+	if _, err := RemoveWorktree(t.Context(), dir, wtDir, false); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+
+	out, err := DeleteBranch(t.Context(), dir, "wt-unmerged", false)
+	if err == nil {
+		t.Fatalf("expected the safe delete to refuse an unmerged branch; out=%q", out)
+	}
+	if FailureReason(out, err) == "" {
+		t.Error("FailureReason empty for the refused safe delete")
+	}
+	if branches := gitOut(t, dir, "branch", "--list", "wt-unmerged"); !strings.Contains(branches, "wt-unmerged") {
+		t.Errorf("the refused delete removed the branch anyway: %q", branches)
+	}
+
+	if _, err := DeleteBranch(t.Context(), dir, "wt-unmerged", true); err != nil {
+		t.Fatalf("DeleteBranch forced: %v", err)
+	}
+	if branches := gitOut(t, dir, "branch", "--list", "wt-unmerged"); strings.TrimSpace(branches) != "" {
+		t.Errorf("the forced delete left the branch: %q", branches)
+	}
+}
+
+// The question the UI asks before removing: a fresh worktree is clean, and anything porcelain reports is what `git worktree remove` would refuse. A path that is not a worktree reads as clean so the removal itself tells the truth.
+func TestWorktreeDirty(t *testing.T) {
+	dir, _ := testutil.NewRepo(t, false)
+	wtDir := filepath.Join(t.TempDir(), "wt-dirty-check")
+	testutil.MakeWorktree(t, dir, wtDir, "wt-dirty-check")
+
+	if WorktreeDirty(t.Context(), wtDir) {
+		t.Error("a fresh worktree reads as dirty")
+	}
+
+	testutil.WriteUntracked(t, wtDir, map[string]string{"untracked.txt": "x"})
+	if !WorktreeDirty(t.Context(), wtDir) {
+		t.Error("an untracked file does not read as dirty, and git refuses to remove it")
+	}
+
+	if WorktreeDirty(t.Context(), filepath.Join(t.TempDir(), "not-a-repo")) {
+		t.Error("a path that is not a repo reads as dirty")
+	}
+}

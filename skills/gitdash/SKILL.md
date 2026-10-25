@@ -28,11 +28,13 @@ Load for gitdash dashboards, multi-repository status, branch checkout, Worktrunk
 | --- | --- |
 | `s` | Switch to a selected branch. With no match, Enter creates it. |
 | `S` | Sync with the configured sync branch. |
-| `w` `c` / `w` `d` | Create a Worktrunk worktree / remove the selected worktree. |
+| `w` `c` / `w` `d` / `w` `D` | Create a Worktrunk worktree / detach the selected worktree keeping its branch / detach it and delete the branch (`git branch -d`, `-D` when unmerged). |
 | `c` `s` | Persist the selected sync ref in `.gitdash.toml`. |
 | `c` `n` | Rename the repo in `.gitdash.toml` (`name`); empty removes the override. |
 
 `w c` needs the `wt` binary. It refreshes the parent repo after Worktrunk exits. Remote `origin/X` selections use `X` so Worktrunk creates or uses local tracking.
+
+`w d` and `w D` are plain git (`git worktree remove` + `git branch -d/-D`), so they work without `wt`. The same key twice confirms; another key only re-arms. Arming checks the worktree with `git status --porcelain`, so a dirty worktree asks first (`d to delete anyway, esc to cancel`) and the confirmation runs with `--force`; an unmerged branch asks the same way before `-D`. `D` on a detached worktree only warns.
 
 ## Batch Rule
 

@@ -53,7 +53,7 @@ func (m Model) branchArmedPrompt() string {
 	for _, o := range branchOptions {
 		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
 	}
-	return fmt.Sprintf("worktree %s: %s · d remove · esc cancel", m.nameOf(m.branchArmed.path), strings.Join(variants, " · "))
+	return fmt.Sprintf("worktree %s: %s · d detach · D detach+branch · esc cancel", m.nameOf(m.branchArmed.path), strings.Join(variants, " · "))
 }
 
 // The modal is not a terminal handoff: keys are read here, the text goes to the filter, and only
