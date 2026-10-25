@@ -204,8 +204,7 @@ config: the precedence of `pull.rebase` and `branch.<name>.rebase` changes acros
 git versions, and what git **did** is in its output.
 
 Results the panel tells apart: `rebase`, `rebase+autostash`, `merge`,
-`fast-forward`, `up-to-date`, `diverged`, `conflict`, `no-upstream`, `pushed`,
-`rejected`, `failed`.
+`fast-forward`, `up-to-date`, `diverged`, `conflict`, `no-upstream`, `failed`.
 
 The log lives **in memory and per session only** (500 entries): it writes no
 file. An intent with no `exec` behind it means the action was rejected later (the
@@ -222,7 +221,7 @@ is where you audit what the AI was asked for.
   indicator and are **expanded/folded with `enter`** on their row. Expanded,
   every worktree of `git worktree list` appears as a **navigable and operable
   subrow** (including the ones with no marker and the ones outside the roots):
-  the cursor can sit on it and *all* repo actions (fetch, pull, push, lazygit,
+  the cursor can sit on it and *all* repo actions (fetch, pull, lazygit,
   editor, recollect and `!`) run against that worktree's path, just like the
   card. The subrow shows its branch (or `(detached)`) and leaves the per-worktree
   state cells empty (no dirty/ahead/behind/sync is invented). The expanded/folded
@@ -231,16 +230,15 @@ is where you audit what the AI was asked for.
   and reveals their parent expanded transiently (without changing what is
   persisted). A worktree stays visible as its own row only when its main repo is
   not discovered (tag `[wt]`).
-- With the cursor on a **worktree subrow**, `D` (the `worktree_remove` action,
-  configurable) deletes the worktree: folder and registration in
-  `.git/worktrees`, **never the branch**. The first `D` arms a persistent
-  confirmation (`remove worktree <name>? D to confirm, esc to cancel`); the
-  second `D` runs `git worktree remove` from the main repo and, on finishing,
+- With the cursor on a **worktree subrow**, `w` then `d` deletes the worktree: folder and registration in
+  `.git/worktrees`, **never the branch**. The first `d` arms a persistent
+  confirmation (`remove worktree <name>? d to confirm, esc to cancel`); the
+  second `d` runs `git worktree remove` from the main repo and, on finishing,
   re-collects the parent so the subrow disappears. If the worktree has
   uncommitted or untracked changes, git fails: the real reason is shown and a
-  second level is armed (`D to force`) that retries with `--force`; a failure of
+  second level is armed (`d to force`) that retries with `--force`; a failure of
   the forced run reports the error and disarms (no loop). `esc` cancels at any
-  point, and any other key disarms. `D` on a repo row, a group header or the
+  point, and any other key disarms. `d` on a repo row, a group header or the
   empty table does nothing (it warns `select a worktree`).
 - If any marker defines `primary_group`, the table is **grouped in two levels**
   (the vroom pattern): each group's block starts at its first member's position

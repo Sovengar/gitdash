@@ -269,28 +269,13 @@ fold = "w"
 	}
 }
 
-func TestDefaultKeybindingsWorktreeRemove(t *testing.T) {
+func TestDefaultKeybindingsWorktree(t *testing.T) {
 	cfg := Defaults()
-	if cfg.KeyFor("worktree_remove") != "D" {
-		t.Errorf("default worktree_remove = %q, want D", cfg.KeyFor("worktree_remove"))
+	if cfg.KeyFor("worktree") != "w" {
+		t.Errorf("default worktree = %q, want w", cfg.KeyFor("worktree"))
 	}
-	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "D remove wt") {
-		t.Errorf("delete hint missing: %v", cfg.HintBarLines())
-	}
-
-	path := write(t, `
-[keybindings]
-worktree_remove = "W"
-`)
-	cfg, warn := LoadFrom(path)
-	if warn != "" {
-		t.Fatalf("unexpected warning: %q", warn)
-	}
-	if cfg.KeyFor("worktree_remove") != "W" {
-		t.Errorf("worktree_remove = %q, want W", cfg.KeyFor("worktree_remove"))
-	}
-	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "W remove wt") {
-		t.Errorf("rebound hint missing: %v", cfg.HintBarLines())
+	if !strings.Contains(strings.Join(cfg.HintBarLines(), "\n"), "w worktree actions") {
+		t.Errorf("worktree hint missing: %v", cfg.HintBarLines())
 	}
 }
 
@@ -338,6 +323,16 @@ fold   = "w"
 	}
 	if cfg.KeyFor("fold") != "w" {
 		t.Errorf("fold = %q, want w", cfg.KeyFor("fold"))
+	}
+}
+
+func TestPushKeybindingIsObsolete(t *testing.T) {
+	cfg, warn := LoadFrom(write(t, "[keybindings]\npush = \"P\"\n"))
+	if _, ok := cfg.Keybindings["push"]; ok {
+		t.Error("push keybinding remained active")
+	}
+	if !strings.Contains(warn, "push") {
+		t.Errorf("warning = %q, want the obsolete push keybinding", warn)
 	}
 }
 
@@ -435,13 +430,13 @@ func TestCommandEmptyNotStepsTheDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path,
-		[]byte("[commands]\npull = \"\"\npush = \"\"\n"), 0o644); err != nil {
+		[]byte("[commands]\npull = \"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := LoadFrom(path)
 
 	def := DefaultCommands()
-	for _, k := range []string{"pull", "push"} {
+	for _, k := range []string{"pull"} {
 		if cfg.Commands[k] != def[k] {
 			t.Errorf("commands[%q] = %q, want the default %q: an empty value is a blank box, not an instruction",
 				k, cfg.Commands[k], def[k])
@@ -600,14 +595,14 @@ func TestHintActionsAllHaveLabel(t *testing.T) {
 
 func TestDefaultKeybindingsSync(t *testing.T) {
 	cfg := Defaults()
-	if got := cfg.KeyFor("sync"); got != "s" {
-		t.Errorf("default sync = %q, want s", got)
+	if got := cfg.KeyFor("sync"); got != "S" {
+		t.Errorf("default sync = %q, want S", got)
 	}
-	if label, ok := hintLabels["sync"]; !ok || label != "sync" {
-		t.Errorf("hintLabels[sync] = %q (%v), want \"sync\"", label, ok)
+	if label, ok := hintLabels["sync"]; !ok || label != "sync branch" {
+		t.Errorf("hintLabels[sync] = %q (%v), want \"sync branch\"", label, ok)
 	}
 	hints := strings.Join(cfg.HintBarLines(), "\n")
-	if !strings.Contains(hints, "s sync") {
+	if !strings.Contains(hints, "S sync branch") {
 		t.Errorf("sync hint missing: %v", cfg.HintBarLines())
 	}
 }

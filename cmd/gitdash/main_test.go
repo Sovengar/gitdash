@@ -345,16 +345,24 @@ func TestMainInSubprocess(t *testing.T) {
 	}
 }
 
-// mainFuncLine locates `func main()` in main.go: the profile is checked by line number, and writing it by hand breaks on any comment change.
+// mainFuncLine locates the first statement of `func main()` in main.go, which is where the
+// coverage block starts: the profile is checked by line number, and writing it by hand breaks on
+// any comment change.
 func mainFuncLine(t *testing.T) int {
 	t.Helper()
 	src, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read main.go: %v", err)
 	}
-	for i, l := range strings.Split(string(src), "\n") {
+	lines := strings.Split(string(src), "\n")
+	for i, l := range lines {
 		if strings.HasPrefix(l, "func main(") {
-			return i + 1
+			for j := i + 1; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) != "" {
+					return j + 1
+				}
+			}
+			break
 		}
 	}
 	t.Fatal("main.go has no func main()")

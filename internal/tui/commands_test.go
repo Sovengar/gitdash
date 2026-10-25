@@ -170,7 +170,7 @@ func TestBangPlaceholderCursorClean(t *testing.T) {
 	}
 }
 
-func TestBangInputVisibleInThePanel(t *testing.T) {
+func TestBangInputFloatsOverThePanel(t *testing.T) {
 	projects, states := fixtureProjects()
 	s := states["/tmp/dirty-api"]
 	for i := 0; i < 20; i++ {
@@ -183,28 +183,17 @@ func TestBangInputVisibleInThePanel(t *testing.T) {
 	}
 	states["/tmp/dirty-api"] = s
 	m := cursorOn(t, newTestModel(t, projects, states), "/tmp/dirty-api")
-	lay := m.layout()
-	if lay.previewLines < detailHeadLines+cmdInputLines {
-		t.Fatalf("precondition: the panel is too small (%d)", lay.previewLines)
-	}
-
 	m, _ = press(m, "!")
 	if !m.cmdOpen {
 		t.Fatal("! did not open the input")
 	}
-	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "dirty-api"))
-	if len(panel) != lay.previewLines {
-		t.Errorf("the panel measures %d lines, want %d (the input must not overflow it)",
-			len(panel), lay.previewLines)
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "╭ command") || !strings.Contains(out, "enter run · esc cancel") {
+		t.Errorf("the command input is not painted as an overlay:\n%s", out)
 	}
-	if last := lastNonEmpty(panel); !strings.HasPrefix(last, "! ") {
-		t.Errorf("the panel's last line is %q, want the input's prompt\n%v", last, panel)
-	}
-	if !strings.HasPrefix(panel[0], "path") || !strings.Contains(panel[0], "/tmp/dirty-api") {
-		t.Errorf("the card's header is missing: %q", panel[0])
-	}
-	if strings.Contains(strings.Join(panel, "\n"), "g lazygit") {
-		t.Errorf("with the input open the footer keybinds come back:\n%v", panel)
+	// The card is still behind the overlay; the prompt no longer occupies its last line.
+	if !strings.Contains(out, "/tmp/dirty-api") {
+		t.Errorf("the card disappeared behind the command overlay:\n%s", out)
 	}
 }
 
@@ -847,14 +836,14 @@ func TestLazygitBusyNamesTheRunningAction(t *testing.T) {
 
 	mm := newTestModel(t, nil, nil)
 	m := &mm
-	m.running = map[string]string{"/tmp/api": "push"}
+	m.running = map[string]string{"/tmp/api": "worktree_switch"}
 
 	msg, ok := m.openLazygitCmd("/tmp/api")().(notifyMsg)
 	if !ok {
 		t.Fatal("openLazygitCmd with the repo busy returned no notice")
 	}
-	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "push") {
-		t.Errorf("notice = %q, want it to name the push in progress", msg.text)
+	if !strings.Contains(msg.text, "already running") || !strings.Contains(msg.text, "worktree_switch") {
+		t.Errorf("notice = %q, want it to name the worktree switch in progress", msg.text)
 	}
 }
 

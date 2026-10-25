@@ -12,9 +12,8 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [Discovery & marker file](#discovery--marker-file) | Walk roots for `.gitdash.toml`; the folder is the repo | `roots`, `marker` config |
 | [Groups & worktrees](#groups--worktrees) | Two-level foldable groups; worktrees as navigable subrows | `enter`, marker `primary_group`/`secondary_group` |
 | [Pull selector](#pull-selector) | Armed prefix key; next key picks the policy variant | `p` then `p`/`r`/`f`/`m`/`a` |
-| [Switch branch](#switch-branch) | Armed prefix key; picker changes the current or the sync branch | `b` then `c`/`s` |
-| [Push](#push) | Push the cursor's repo | `P` |
-| [Sync](#sync) | Fetch + pull --rebase --autostash against the sync branch | `s` |
+| [Switch branch](#switch-branch) | Switch to an existing branch or create one from the branch picker | `s` |
+| [Sync](#sync) | Fetch + pull --rebase --autostash against the sync branch | `S` |
 | [AI pull](#ai-pull) | Hand off to a configured AI command with the marker's prompt | `p` then `a` |
 | [PR/MR creation](#prmr-creation) | Floating modal with branch pickers → `gh pr create` / `glab mr create` | `O`, `ctrl+s`, `ctrl+t` |
 | [Visual preview](#visual-preview) | git-sim pull/merge/rebase simulation | `v` then `p`/`m`/`r` |
@@ -53,7 +52,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Ungrouped** — repos without a primary go to a `(ungrouped)` section at the end.
 - **Worktree subrows** — expanded with `enter` on a repo row; navigable and operable (all repo actions run against the worktree path); branch shown, state cells left empty.
 - **Orphan worktrees** — visible as `[wt]` rows only when the main repo is not discovered.
-- **Worktree removal** — `D` on a subrow arms a confirmation; second `D` runs `git worktree remove`; dirty worktree arms a `--force` level.
+- **Worktree removal** — `w` then `d` on a subrow arms a confirmation; a second `d` runs `git worktree remove`; dirty worktree arms a `--force` level.
 
 ## Pull selector
 
@@ -61,20 +60,22 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Variants** — `p` default (no flags, gitconfig policy wins), `r` rebase+autostash, `f` ff-only, `m` merge, `a` AI pull.
 - **Mid-rebase guard** — a clashing `pull --rebase` is detected; the warning says how to continue/abort, not just "failed".
 
-## Push
-
-- Runs `git push` (configurable via `[commands] push`); records the resolved argv in the command log.
-
 ## Switch branch
 
-- **Armed prefix** — `b` captures the cursor's path; the next key picks the variant. Any other key cancels and runs its normal action.
-- **Variants** — `c` checkout (change the checked-out branch), `s` sync ref (change the repo's sync branch).
+- **Switch/create** — `s` opens the branch picker. Selecting a branch runs `git switch`; filtering to no result shows `Enter to create branch`, which runs `git switch -c <name>`.
+- **Worktree actions** — `w` then `c` opens the same picker to create a worktree through Worktrunk; `w` then `d` removes the worktree under the cursor with confirmation.
+- **Sync** — `S` fetches and reconciles against the configured sync branch. `c` then `s` opens the picker to set that branch in the marker.
 - **Branch picker** — the variant opens a floating centered modal over the dashboard (the table and stats stay visible); the list is read on demand.
-- **Scope** — local branches (upstream and no-upstream flagged), plus origin's remote-tracking branches (`origin/*`); a remote entry is checked out by its local name, and `bs` stores it as the full `origin/X` ref (the marker's ref must resolve).
+- **Scope** — local branches (upstream and no-upstream flagged), plus origin's remote-tracking branches (`origin/*`); a remote entry is checked out by its local name, and `cs` stores it as the full `origin/X` ref (the marker's ref must resolve).
 - **Navigation** — `↑`/`↓` move (and `j`/`k` while the filter is empty); a text input filters as you type; `enter` selects, `esc` cancels.
 - **Current branch** — selecting the branch already checked out is a no-op toast; no process runs.
-- **Sync ref persistence** — `bs` rewrites only the `sync_branch` line of the repo's `.gitdash.toml` (comments and the `[ai]` prompt stay byte-identical) and refreshes the project and snapshot.
-- **Command log** — both variants leave an intent (`key bc` / `key bs`); `checkout` runs through the shared git executor.
+- **Worktrunk** — `wc` hands the selected branch to `wt -C <selected worktree> switch <branch> --no-cd`; a typed new name adds `--create --base=@`. Worktrunk owns the configured path and hooks; new worktrees land under `.worktrees/`. gitdash refreshes the parent repo when it returns.
+- **Sync ref persistence** — `cs` rewrites only the `sync_branch` line of the repo's `.gitdash.toml` (comments and the `[ai]` prompt stay byte-identical) and refreshes the project and snapshot.
+
+## Config (per repo)
+
+- **`c` then `s`** — opens the branch picker to persist the repo's `sync_branch` in the marker.
+- **`c` then `n`** — opens a rename overlay prefilled with the current override; `enter` writes `name` in the marker, empty `enter` removes the key (the folder name wins again), `esc` cancels. Only the `name` line is rewritten: comments and the rest of the file stay byte-identical.
 
 ## Sync
 
@@ -124,7 +125,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## Command input
 
-- `!` opens an input at the end of the detail box; `enter` runs `$SHELL -c <cmd>` in the repo; empty `enter` opens an interactive shell; `esc` cancels.
+- `!` opens a centered command overlay; `enter` runs `$SHELL -c <cmd>` in the repo; empty `enter` opens an interactive shell; `esc` cancels. Completion replaces it with an output overlay; `enter` or `esc` closes it.
 
 ## Command log
 
@@ -135,7 +136,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## Detail card
 
-- **Detail box** — path, branch, upstream, state, sync, activity, worktrees list, diagnostics/last action (with resolved argv), last `!` command.
+- **Detail box** — path, branch, upstream, state, sync, activity, worktrees list, diagnostics/last action (with resolved argv), last `!` command and exit status. Command output stays in its overlay.
 - **Files box** — a peer bordered box titled `files (N)` next to the detail box; one `  <code> <path>` line per file and `… N more` on overflow.
 - **Shared divider** — the detail/files boxes and the repos/commits boxes above share one width split, so the files box and the commits box are the same width.
 - **Empty-files collapse** — with no files on the row there is no files box; the detail box takes the whole band.
@@ -159,8 +160,8 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 ## Config & keybindings
 
 - **XDG TOML** — `~/.config/gitdash/config.toml`; `Load()` never fails (defaults + warning).
-- **Remappable actions** — `[keybindings]` maps action → key; unknown actions warned on load; navigation/universal keys not configurable.
-- **Command templates** — `[commands]` for `pull`, `pull_rebase`, `pull_ff`, `pull_merge`, `push`, `fetch`, `sync`.
+- **Remappable actions** — `[keybindings]` maps `switch`, `sync`, `worktree`, and `config` (plus the other actions) to keys; unknown actions warned on load; navigation/universal keys not configurable.
+- **Command templates** — `[commands]` for `pull`, `pull_rebase`, `pull_ff`, `pull_merge`, `fetch`, `sync`.
 - **Fetch config** — `[fetch]` `auto`, `concurrency`, `timeout`.
 - **AI config** — `[ai.pull] command` (global only; marker contributes only the prompt).
 - **Forge config** — `[forge.<provider>]` with `enabled`, `host`, `api_base`, `clone_base`.

@@ -224,7 +224,7 @@ func (m Model) logOutcomeStyle(e cmdlog.Entry) lipglossStyle {
 		return styleLogIntent
 	}
 	switch e.Outcome {
-	case "rebase", "rebase+autostash", "merge", "fast-forward", "pushed":
+	case "rebase", "rebase+autostash", "merge", "fast-forward":
 		return styleLogOK
 	case "up-to-date":
 		return styleHint

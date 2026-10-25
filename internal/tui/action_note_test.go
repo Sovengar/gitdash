@@ -42,17 +42,17 @@ func TestActionNotePullNotUpstream(t *testing.T) {
 	if !strings.Contains(got, "no tracking information") {
 		t.Errorf("actionNote = %q, want the reason", got)
 	}
-	if !strings.Contains(got, "P publishes it") {
+	if !strings.Contains(got, "lazygit") {
 		t.Errorf("actionNote = %q, want the upstream hint", got)
 	}
 }
 
-func TestActionNotePushNotDivergedHint(t *testing.T) {
-	got := actionNote("push", "repo-c", "git push",
+func TestActionNoteCheckoutNotDivergedHint(t *testing.T) {
+	got := actionNote("checkout", "repo-c", "git checkout feature",
 		"fatal: Not possible to fast-forward, aborting.",
 		"fatal: Not possible to fast-forward, aborting.", false)
 	if strings.Contains(got, "diverged") {
-		t.Errorf("actionNote push = %q, it must not carry the divergence hint", got)
+		t.Errorf("actionNote checkout = %q, it must not carry the divergence hint", got)
 	}
 }
 
@@ -71,10 +71,10 @@ func TestActionNoteRebaseInProgressWins(t *testing.T) {
 	}
 }
 
-func TestActionNotePushIgnoresRebaseFlag(t *testing.T) {
-	got := actionNote("push", "repo-c", "git push", "fatal: x", "fatal: x", true)
+func TestActionNoteCheckoutIgnoresRebaseFlag(t *testing.T) {
+	got := actionNote("checkout", "repo-c", "git checkout feature", "fatal: x", "fatal: x", true)
 	if strings.Contains(got, "mid-rebase") {
-		t.Errorf("actionNote push = %q, it must not mention rebase", got)
+		t.Errorf("actionNote checkout = %q, it must not mention rebase", got)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestActionNoteShowsTheArgvOnlyIfExists(t *testing.T) {
 		}
 	})
 	t.Run("without argv on failure", func(t *testing.T) {
-		got := actionNote("push", "api", "", "", "permission denied", false)
+		got := actionNote("checkout", "api", "", "", "permission denied", false)
 		if strings.Contains(got, "—  ") {
 			t.Errorf("note = %q, want no dangling dash", got)
 		}

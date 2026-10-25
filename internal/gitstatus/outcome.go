@@ -12,8 +12,6 @@ const (
 	outcomeDiverged        = "diverged"
 	outcomeConflict        = "conflict"
 	outcomeNoUpstream      = "no-upstream"
-	outcomePushed          = "pushed"
-	outcomeRejected        = "rejected"
 	outcomeFailed          = "failed"
 )
 
@@ -26,8 +24,6 @@ func Classify(args []string, out string, exitCode int) string {
 	switch args[0] {
 	case "pull", "fetch":
 		return classifySync(low, exitCode)
-	case "push":
-		return classifyPush(low, exitCode)
 	}
 	return ""
 }
@@ -63,17 +59,4 @@ func classifySync(low string, code int) string {
 		return outcomeUpToDate
 	}
 	return ""
-}
-
-func classifyPush(low string, code int) string {
-	if code != 0 {
-		if strings.Contains(low, "rejected") {
-			return outcomeRejected
-		}
-		return outcomeFailed
-	}
-	if strings.Contains(low, "up-to-date") || strings.Contains(low, "up to date") {
-		return outcomeUpToDate
-	}
-	return outcomePushed
 }

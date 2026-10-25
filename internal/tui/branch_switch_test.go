@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,31 +52,69 @@ func branchIntent(action string) *cmdlog.Entry {
 	return found
 }
 
-func TestBranchArmsWithoutRun(t *testing.T) {
+func TestSwitchOpensTheBranchPicker(t *testing.T) {
+	m := cursorOn(t, newPullModel(t), "/tmp/old-clean")
+	m, _ = press(m, "s")
+	if m.picker == nil || m.picker.mode != pickerModeCurrent {
+		t.Fatalf("picker = %+v, want switch picker", m.picker)
+	}
+}
+
+func TestWorktreeActionsCreateAndRemove(t *testing.T) {
+	m := cursorOn(t, newPullModel(t), "/tmp/old-clean")
+	m, _ = press(m, "w")
+	m, _ = press(m, "c")
+	if m.picker == nil || m.picker.mode != pickerModeWorktree {
+		t.Fatalf("wc picker = %+v, want worktree picker", m.picker)
+	}
+}
+
+func TestConfigSyncOpensTheSyncPicker(t *testing.T) {
+	m := cursorOn(t, newPullModel(t), "/tmp/old-clean")
+	m, _ = press(m, "c")
+	m, _ = press(m, "s")
+	if m.picker == nil || m.picker.mode != pickerModeSync {
+		t.Fatalf("cs picker = %+v, want sync picker", m.picker)
+	}
+}
+
+func TestPickerOffersCreationForAnUnknownBranch(t *testing.T) {
 	m := newPullModel(t)
+	m.picker = pickerOn("/tmp/old-clean", pickerModeCurrent, "", pickerBranches("main"), "main")
+	m, _ = press(m, "x")
+	if got := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n")); !strings.Contains(got, "Enter to create branch") {
+		t.Errorf("picker = %q, want create branch hint", got)
+	}
+}
+
+func TestSwitchOpensPickerWithoutRunning(t *testing.T) {
+	m := newPullModel(t)
+	m = cursorOn(t, m, "/tmp/old-clean")
 	before := len(m.running)
-	m, _ = press(m, "b")
-	if m.branchArmed == nil {
-		t.Fatal("b did not arm the selector")
+	m, _ = press(m, "s")
+	if m.picker == nil || m.picker.mode != pickerModeCurrent {
+		t.Fatal("s did not open the switch picker")
 	}
 	if len(m.running) != before {
-		t.Errorf("b launched an action: running = %v", m.running)
+		t.Errorf("s launched an action before selecting: running = %v", m.running)
 	}
 }
 
-func TestBranchSelectorPromptVisibleInKeybinds(t *testing.T) {
+func TestWorktreePromptVisibleInKeybinds(t *testing.T) {
 	m := newPullModel(t)
-	m, _ = press(m, "b")
+	m = cursorOn(t, m, "/tmp/old-clean")
+	m, _ = press(m, "w")
 	out := stripANSI(m.View().Content)
-	if kb := sectionContent(t, out, "keybinds"); !strings.Contains(kb, "c checkout") || !strings.Contains(kb, "s sync ref") {
-		t.Errorf("the armed branch prompt is not in the keybinds section:\n%s", kb)
+	kb := sectionContent(t, out, "keybinds")
+	if !strings.Contains(kb, "worktree old-clean: c create worktree") || !strings.Contains(kb, "d remove") {
+		t.Errorf("the armed worktree prompt is not in the keybinds section:\n%s", kb)
 	}
 }
 
-func TestBranchSelectorKeyNotVariantCancelsAndFollows(t *testing.T) {
+func TestWorktreeSelectorKeyNotVariantCancelsAndFollows(t *testing.T) {
 	m := newPullModel(t)
 	start := m.cursor
-	m, _ = press(m, "b")
+	m, _ = press(m, "w")
 	m, _ = press(m, "j")
 	if m.branchArmed != nil {
 		t.Error("the selector stays armed after a non-variant key")
@@ -85,28 +124,87 @@ func TestBranchSelectorKeyNotVariantCancelsAndFollows(t *testing.T) {
 	}
 }
 
-func TestBranchVariantOpensPicker(t *testing.T) {
-	for key, mode := range map[string]string{"c": pickerModeCurrent, "s": pickerModeSync} {
+func TestKeySequencesOpenTheirPicker(t *testing.T) {
+	for _, tc := range []struct {
+		keys    []string
+		mode    string
+		variant string
+	}{
+		{[]string{"s"}, pickerModeCurrent, ""},
+		{[]string{"w", "c"}, pickerModeWorktree, "c"},
+		{[]string{"c", "s"}, pickerModeSync, "s"},
+	} {
 		m := newPullModel(t)
 		m = cursorOn(t, m, "/tmp/old-clean")
-		m, _ = press(m, "b")
-		m, _ = press(m, key)
-		if m.branchArmed != nil {
-			t.Errorf("b%s left the selector armed", key)
+		for _, key := range tc.keys {
+			m, _ = press(m, key)
+		}
+		if m.branchArmed != nil || m.configArmed != nil {
+			t.Errorf("%v left a selector armed", tc.keys)
 		}
 		if m.picker == nil {
-			t.Fatalf("b%s did not open the picker", key)
+			t.Fatalf("%v did not open the picker", tc.keys)
 		}
-		if m.picker.mode != mode {
-			t.Errorf("b%s mode = %q, want %q", key, m.picker.mode, mode)
+		if m.picker.mode != tc.mode {
+			t.Errorf("%v mode = %q, want %q", tc.keys, m.picker.mode, tc.mode)
 		}
-		if m.picker.variant != key {
-			t.Errorf("b%s variant = %q, want %q", key, m.picker.variant, key)
+		if m.picker.variant != tc.variant {
+			t.Errorf("%v variant = %q, want %q", tc.keys, m.picker.variant, tc.variant)
 		}
 	}
 }
 
-func TestBranchNotArmsWithoutRepo(t *testing.T) {
+func TestPickerWorktreeHandsTheSelectedBranchToWT(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "wt")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(bin))
+
+	m, spy := handoffRecorder(t)
+	m.projects = []discovery.Project{proj("demo", "/tmp/repo", true)}
+	m.states = map[string]gitstatus.Snapshot{"/tmp/repo": snapOnBranch("main")}
+	m.picker = pickerOn("/tmp/repo/.worktrees/demo.old", pickerModeWorktree, "w",
+		[]gitstatus.Branch{{Name: "origin/feature", Remote: true, HasUpstream: true}}, "main")
+	m.picker.refreshPath = "/tmp/repo"
+
+	out, cmd := m.selectPickerBranch()
+	if cmd == nil {
+		t.Fatal("worktree selection returned no handoff")
+	}
+	selected := out.(Model)
+	if got := selected.running["/tmp/repo"]; got != "worktree_switch" {
+		t.Fatalf("running = %q, want worktree_switch", got)
+	}
+	want := []string{"wt", "-C", "/tmp/repo/.worktrees/demo.old", "switch", "feature", "--no-cd"}
+	if !slices.Equal(spy.argv, want) {
+		t.Errorf("wt argv = %q, want %q", spy.argv, want)
+	}
+	if spy.dir != "/tmp/repo/.worktrees/demo.old" {
+		t.Errorf("wt dir = %q, want the selected worktree", spy.dir)
+	}
+
+	updated, _ := selected.Update(spy.finish(nil))
+	selected = updated.(Model)
+	if got := selected.running["/tmp/repo"]; got != "collect" {
+		t.Errorf("refresh running = %q, want collect on the parent repo", got)
+	}
+}
+
+func TestWorktreeSwitchWarnsWithoutWT(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	m, _ := handoffRecorder(t)
+	cmd := m.openWorktreeCmd("/tmp/repo", "/tmp/repo", "feature", false)
+	if cmd == nil {
+		t.Fatal("missing wt returned no warning")
+	}
+	msg, ok := cmd().(notifyMsg)
+	if !ok || !strings.Contains(msg.text, "wt not installed") {
+		t.Errorf("notice = %+v, want wt not installed", msg)
+	}
+}
+
+func TestWorktreeActionsNotArmWithoutRepo(t *testing.T) {
 	m := newPullModel(t)
 	idx := -1
 	for i, e := range m.entries() {
@@ -119,22 +217,22 @@ func TestBranchNotArmsWithoutRepo(t *testing.T) {
 		t.Skip("the fixture has no row without a repo")
 	}
 	m.cursor = idx
-	m, _ = press(m, "b")
+	m, _ = press(m, "w")
 	if m.branchArmed != nil {
 		t.Errorf("the selector armed on a row without a repo: %+v", m.branchArmed)
 	}
 }
 
-func TestBranchKeyIsRebindable(t *testing.T) {
+func TestWorktreeKeyIsRebindable(t *testing.T) {
 	m := newPullModel(t)
-	m.cfg.Keybindings["branch"] = "w"
-	if got := m.cfg.KeyFor("branch"); got != "w" {
-		t.Fatalf("KeyFor(branch) = %q, want the rebound key", got)
+	m.cfg.Keybindings["worktree"] = "W"
+	if got := m.cfg.KeyFor("worktree"); got != "W" {
+		t.Fatalf("KeyFor(worktree) = %q, want the rebound key", got)
 	}
-	if hints := strings.Join(m.cfg.HintBarLines(), "\n"); !strings.Contains(hints, "w branch ▸") {
+	if hints := strings.Join(m.cfg.HintBarLines(), "\n"); !strings.Contains(hints, "W worktree actions ▸") {
 		t.Errorf("the hint bar did not follow the rebind: %v", m.cfg.HintBarLines())
 	}
-	m, _ = press(m, "w")
+	m, _ = press(m, "W")
 	if m.branchArmed == nil {
 		t.Fatal("the rebound key did not arm the selector")
 	}
@@ -208,15 +306,15 @@ func TestPickerEnterUsesTheFilteredSelection(t *testing.T) {
 	if m.picker != nil {
 		t.Error("the picker stayed open after selecting")
 	}
-	if m.running[dir] != "checkout" {
-		t.Fatalf("enter did not launch the checkout: running = %v", m.running)
+	if m.running[dir] != "switch" {
+		t.Fatalf("enter did not launch the switch: running = %v", m.running)
 	}
 	acc, _ := collectAction(t, m)
 	if acc.err != "" {
-		t.Fatalf("checkout failed: %q", acc.err)
+		t.Fatalf("switch failed: %q", acc.err)
 	}
-	if acc.cmd != "git checkout feature" {
-		t.Errorf("resolved argv = %q, want git checkout feature", acc.cmd)
+	if acc.cmd != "git switch feature" {
+		t.Errorf("resolved argv = %q, want git switch feature", acc.cmd)
 	}
 }
 
@@ -232,12 +330,12 @@ func TestPickerRemoteBranchChecksOutTheLocalName(t *testing.T) {
 
 	m, _ = press(m, "down")
 	m, _ = press(m, "enter")
-	if m.running[dir] != "checkout" {
-		t.Fatalf("enter did not launch the checkout: running = %v", m.running)
+	if m.running[dir] != "switch" {
+		t.Fatalf("enter did not launch the switch: running = %v", m.running)
 	}
 	acc, _ := collectAction(t, m)
-	if acc.cmd != "git checkout main" {
-		t.Errorf("resolved argv = %q, want the local name (git checkout main)", acc.cmd)
+	if acc.cmd != "git switch main" {
+		t.Errorf("resolved argv = %q, want the local name (git switch main)", acc.cmd)
 	}
 }
 
@@ -273,23 +371,23 @@ func TestPickerEnterCheckoutRuns(t *testing.T) {
 	if m.picker != nil {
 		t.Error("the picker stayed open after selecting")
 	}
-	if m.running[dir] != "checkout" {
-		t.Fatalf("enter did not launch the checkout: running = %v", m.running)
+	if m.running[dir] != "switch" {
+		t.Fatalf("enter did not launch the switch: running = %v", m.running)
 	}
-	intent := branchIntent("checkout")
-	if intent == nil || intent.Key != "bc" || intent.Dir != dir {
-		t.Errorf("intent = %+v, want key bc on the repo", intent)
+	intent := branchIntent("switch")
+	if intent == nil || intent.Key != "s" || intent.Dir != dir {
+		t.Errorf("intent = %+v, want key s on the repo", intent)
 	}
 	acc, _ := collectAction(t, m)
 	if acc.err != "" {
-		t.Fatalf("checkout failed: %q", acc.err)
+		t.Fatalf("switch failed: %q", acc.err)
 	}
-	if acc.cmd != "git checkout feature" {
-		t.Errorf("resolved argv = %q, want git checkout feature", acc.cmd)
+	if acc.cmd != "git switch feature" {
+		t.Errorf("resolved argv = %q, want git switch feature", acc.cmd)
 	}
 	argvs := execArgvs()
-	if len(argvs) != 1 || strings.Join(argvs[0], " ") != "git checkout feature" {
-		t.Errorf("execs = %v, want only git checkout feature", argvs)
+	if len(argvs) != 1 || strings.Join(argvs[0], " ") != "git switch feature" {
+		t.Errorf("execs = %v, want only git switch feature", argvs)
 	}
 }
 
@@ -339,8 +437,8 @@ func TestBranchSyncWritesMarkerAndRefreshes(t *testing.T) {
 		t.Errorf("the in-memory project kept sync branch %q", m.projects[0].SyncBranch)
 	}
 	intent := branchIntent("branch_sync")
-	if intent == nil || intent.Key != "bs" {
-		t.Errorf("intent = %+v, want key bs", intent)
+	if intent == nil || intent.Key != "cs" {
+		t.Errorf("intent = %+v, want key cs", intent)
 	}
 
 	// The recollect must land so the UI shows the new comparison ref without a restart.
@@ -433,7 +531,7 @@ func TestOpenBranchPickerFetchesTheList(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
 
-	m.openBranchPicker(dir, pickerModeCurrent, "c")
+	m.openBranchPicker(dir, dir, pickerModeCurrent, "c")
 	if m.picker == nil || !m.picker.loading {
 		t.Fatal("the picker did not open in a loading state")
 	}
@@ -689,7 +787,7 @@ func TestOpenBranchPickerSurfacesTheListFailure(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{proj("demo", dir, true)},
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
 
-	m.openBranchPicker(dir, pickerModeCurrent, "c")
+	m.openBranchPicker(dir, dir, pickerModeCurrent, "c")
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
@@ -762,9 +860,14 @@ func TestPickerOverlaySaysWhenNothingMatches(t *testing.T) {
 	if box := stripANSI(strings.Join(m.pickerOverlay(120, 30), "\n")); !strings.Contains(box, "no matching branches") {
 		t.Errorf("empty filter overlay = %q, want the no-match wording", box)
 	}
-	// enter with nothing matching is a no-op, not a close.
-	if out, _ := m.selectPickerBranch(); out.(Model).picker == nil {
-		t.Error("enter on an empty list closed the picker")
+	// enter with a typed non-matching name creates it instead of closing silently.
+	out, _ := m.selectPickerBranch()
+	selected := out.(Model)
+	if selected.picker != nil {
+		t.Error("enter on a typed non-matching name left the picker open")
+	}
+	if selected.running[m.picker.path] != "switch_create" {
+		t.Errorf("running = %v, want switch_create", selected.running)
 	}
 }
 

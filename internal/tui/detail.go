@@ -42,12 +42,7 @@ const cmdInputLines = 2
 
 // The `!` input is ALWAYS painted on the box's last line, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top and a short body is padded; without input there is no footer, the keys are already in keybinds.
 func (m *Model) cardTail(body string, rows int) string {
-	if !m.cmdOpen {
-		return body
-	}
-	bodyRows := max(1, rows-cmdInputLines)
-	lines := rellenaHasta(strings.Split(clipTo(body, bodyRows), "\n"), bodyRows)
-	return strings.Join(lines, "\n") + "\n\n" + m.cmdInput.View()
+	return body
 }
 
 // The card's shape comes from the layout: `split` is lay.cardSplit. Split, the fields and the
@@ -182,9 +177,6 @@ func (m *Model) detailTail(r row, rows, width int) string {
 			verdict = styleError.Render("exit " + cr.exit)
 		}
 		b.WriteString("\n" + key("$ "+truncate(cr.command, max(20, width-30))) + " " + verdict + "\n")
-		if tail := actionTail(cr.output, max(3, rows-12)); tail != "" {
-			b.WriteString(styleHint.Render(indent(tail, "  ")) + "\n")
-		}
 	}
 	return b.String()
 }

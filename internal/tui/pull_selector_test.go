@@ -181,15 +181,3 @@ func TestDetailShowsTheCommandResolved(t *testing.T) {
 		t.Errorf("the detail does not name the variant:\n%s", out)
 	}
 }
-
-func TestDetailPushShowsCommand(t *testing.T) {
-	m := newPullModel(t)
-	m = cursorOn(t, m, "/tmp/old-clean")
-	updated, _ := m.Update(actionMsg{
-		path: "/tmp/old-clean", kind: "push", cmd: "git push", output: "",
-	})
-	m = updated.(Model)
-	if out := stripANSI(m.View().Content); !strings.Contains(out, "git push") {
-		t.Errorf("the detail does not show the executed push:\n%s", out)
-	}
-}

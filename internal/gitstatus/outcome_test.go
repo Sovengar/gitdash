@@ -106,44 +106,6 @@ func TestClassifyPullAndFetch(t *testing.T) {
 	}
 }
 
-func TestClassifyPush(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		out  string
-		code int
-		want string
-	}{
-		{
-			name: "push consumed",
-			out:  "To /tmp/origin.git\n   abc1234..def5678  main -> main\n",
-			want: "pushed",
-		},
-		{
-			name: "nothing to push",
-			out:  "Everything up-to-date\n",
-			want: "up-to-date",
-		},
-		{
-			name: "rejected for not fast-forward",
-			out:  " ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs\n",
-			code: 1,
-			want: "rejected",
-		},
-		{
-			name: "generic failure",
-			out:  "fatal: unable to access 'https://…': Could not resolve host\n",
-			code: 128,
-			want: "failed",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := Classify([]string{"push"}, tc.out, tc.code); got != tc.want {
-				t.Errorf("Classify(push) = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestClassifyIgnoresVerbsWithoutPolicy(t *testing.T) {
 	for _, args := range [][]string{
 		{"worktree", "remove", "/tmp/wt"},

@@ -193,21 +193,21 @@ func DefaultKeybindings() Keybindings {
 		"search":    "/",
 		"fetch":     "f",
 		"fetch_all": "F",
-		"sync":      "s",
+		"sync":      "S",
+		"switch":    "s",
+		"worktree":  "w",
+		"config":    "c",
 		"pull":      "p",
-		"push":      "P",
 		"editor":    "e",
 		"lazygit":   "g",
 		"rescan":    "r",
 		"recollect": "R",
 		// enter is the only fold key: it folds the worktrees under the cursor and the group blocks, since the repo card has its own section and nothing needs a detail view.
-		"fold":            "enter",
-		"command":         "!",
-		"log":             "l",
-		"worktree_remove": "D",
-		"visual":          "v",
-		"pr":              "O",
-		"branch":          "b",
+		"fold":    "enter",
+		"command": "!",
+		"log":     "l",
+		"visual":  "v",
+		"pr":      "O",
 	}
 }
 
@@ -218,7 +218,6 @@ func DefaultCommands() Commands {
 		"pull_rebase": "pull --rebase --autostash",
 		"pull_ff":     "pull --ff-only",
 		"pull_merge":  "pull --no-rebase",
-		"push":        "push",
 		"fetch":       "fetch --prune",
 		// Base argv of `s`; the builder appends `origin <resolved sync>`, so the tail is the repo's and only the policy is configurable.
 		"sync": "pull --rebase --autostash",
@@ -291,35 +290,35 @@ func (c Config) KeyByAction() map[string]string {
 
 // Labels carry the action only, never the key (HintBarLines prepends it), or a rebind would render hints like "w enter fold".
 var hintLabels = map[string]string{
-	"up":              "↑/k",
-	"down":            "↓/j",
-	"dirty":           "dirty",
-	"search":          "filter",
-	"fetch":           "fetch",
-	"fetch_all":       "fetch all",
-	"sync":            "sync",
-	"pull":            "pull ▸",
-	"push":            "push",
-	"lazygit":         "lazygit",
-	"editor":          "edit",
-	"rescan":          "rescan",
-	"recollect":       "recollect",
-	"fold":            "fold",
-	"command":         "cmd",
-	"log":             "log",
-	"quit":            "quit",
-	"worktree_remove": "remove wt",
-	"visual":          "visual",
-	"pr":              "open PR",
-	"branch":          "branch ▸",
+	"up":        "↑/k",
+	"down":      "↓/j",
+	"dirty":     "dirty",
+	"search":    "filter",
+	"fetch":     "fetch",
+	"fetch_all": "fetch all",
+	"sync":      "sync branch",
+	"pull":      "pull ▸",
+	"lazygit":   "lazygit",
+	"editor":    "edit",
+	"rescan":    "rescan",
+	"recollect": "recollect",
+	"fold":      "fold",
+	"command":   "cmd",
+	"log":       "log",
+	"quit":      "quit",
+	"visual":    "visual",
+	"pr":        "open PR",
+	"switch":    "switch/create branch",
+	"worktree":  "worktree actions ▸",
+	"config":    "configs ▸",
 }
 
 // Lives outside HintBarLines so a test can require a label per action: an unlabelled one would render as a bare key ("p "), indistinguishable from a render bug.
 var hintActions = []string{
-	"dirty", "search", "fetch", "fetch_all", "sync", "pull",
-	"push", "lazygit", "editor", "rescan", "recollect",
-	"fold", "command", "log", "quit", "worktree_remove", "visual",
-	"pr", "branch",
+	"dirty", "search", "fetch", "fetch_all", "sync", "switch", "worktree", "config", "pull",
+	"lazygit", "editor", "rescan", "recollect",
+	"fold", "command", "log", "quit", "visual",
+	"pr",
 }
 
 func (c Config) HintBarLines() []string {
@@ -337,7 +336,7 @@ func (c Config) HintBarLines() []string {
 		switch action {
 		case "dirty", "search", "fold", "command":
 			row1 = append(row1, hint)
-		case "fetch", "fetch_all", "sync", "pull", "push", "branch":
+		case "fetch", "fetch_all", "sync", "switch", "worktree", "config", "pull":
 			row2 = append(row2, hint)
 		default:
 			row3 = append(row3, hint)

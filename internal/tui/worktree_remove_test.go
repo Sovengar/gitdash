@@ -79,10 +79,11 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	before := m.cursor
 
-	m, cmd := press(m, "D")
+	m, cmd := press(m, "w")
+	m, cmd = press(m, "d")
 
 	if m.armed == nil {
-		t.Fatal("D did not arm the confirmation")
+		t.Fatal("w d did not arm the confirmation")
 	}
 	if m.armed.wtPath != "/tmp/wt-a" || m.armed.name != "wt-a" {
 		t.Errorf("armed = %+v, want wt-a", m.armed)
@@ -107,8 +108,9 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 func TestRemoveWorktreeSecondPressExecutes(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 
 	if got := m.running[p.Path]; got != "worktree_remove" {
 		t.Fatalf("running[parent] = %q, want worktree_remove", got)
@@ -117,7 +119,8 @@ func TestRemoveWorktreeSecondPressExecutes(t *testing.T) {
 
 func TestRemoveWorktreeEscCancels(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 
 	m, _ = press(m, "esc")
 
@@ -133,7 +136,8 @@ func TestRemoveWorktreeOnRepoRowInfo(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
 
-	m, cmd := press(m, "D")
+	m, cmd := press(m, "w")
+	m, cmd = press(m, "d")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
@@ -155,31 +159,30 @@ func TestRemoveWorktreeOnHeaderOrEmptyInfo(t *testing.T) {
 	if e, _ := m.selectedEntry(); e.kind != kindPrimary {
 		t.Fatalf("precondition: entry = %+v, want a header", e)
 	}
-	m, cmd := press(m, "D")
-	m = applyNotify(m, cmd)
-	if m.armed != nil {
-		t.Error("D on a header must not arm")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	if m.armed != nil || m.branchArmed != nil {
+		t.Error("the removal flow armed on a header")
 	}
-	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
-		last.text != "select a worktree" {
-		t.Errorf("toast header = %+v", last)
+	if len(m.running) != 0 {
+		t.Errorf("the removal flow launched on a header: %v", m.running)
 	}
 
 	empty := newTestModel(t, nil, nil)
-	empty, cmd = press(empty, "D")
-	empty = applyNotify(empty, cmd)
-	if empty.armed != nil {
-		t.Error("D on an empty table must not arm")
+	empty, _ = press(empty, "w")
+	empty, _ = press(empty, "d")
+	if empty.armed != nil || empty.branchArmed != nil {
+		t.Error("the removal flow armed on an empty table")
 	}
-	if last := empty.toasts.toasts[len(empty.toasts.toasts)-1]; last.level != toastInfo ||
-		last.text != "select a worktree" {
-		t.Errorf("empty toast = %+v", last)
+	if len(empty.running) != 0 {
+		t.Errorf("the removal flow launched on an empty table: %v", empty.running)
 	}
 }
 
 func TestRemoveWorktreeCursorMoveDisarms(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	before := m.cursor
 
 	m, _ = press(m, "down")
@@ -190,7 +193,8 @@ func TestRemoveWorktreeCursorMoveDisarms(t *testing.T) {
 		t.Errorf("down did not navigate: cursor=%d, want %d", m.cursor, before+1)
 	}
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	m, _ = press(m, "up")
 	if m.armed != nil {
 		t.Error("up did not disarm")
@@ -202,14 +206,15 @@ func TestRemoveWorktreeCursorMoveDisarms(t *testing.T) {
 
 func TestRemoveWorktreeOtherKeysDisarm(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 
-	m2, _ := press(m, "d")
+	m2, _ := press(m, "v")
 	if m2.armed != nil {
-		t.Error("d did not disarm")
+		t.Error("v did not disarm")
 	}
-	if !m2.onlyDirty {
-		t.Error("d did not apply the dirty filter")
+	if m2.visualArmed == nil {
+		t.Error("v did not arm the visual selector")
 	}
 
 	m3, _ := press(m, "/")
@@ -270,7 +275,7 @@ func TestRemoveWorktreeForceExecutes(t *testing.T) {
 	e, _ := m.selectedEntry()
 	m = armedOver(t, m, e, true)
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 
 	if got := m.running[p.Path]; got != "worktree_remove" {
 		t.Fatalf("running[parent] = %q", got)
@@ -323,8 +328,9 @@ func TestRemoveWorktreeSuccessDisarmsAndRecollects(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
 	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 
 	waitEvent(t, &m, func(ev event) bool {
 		sm, ok := ev.(statusMsg)
@@ -375,11 +381,12 @@ func TestRemoveWorktreeDetachedRow(t *testing.T) {
 	det := gitstatus.Worktree{Path: "/tmp/wt-det", Head: "abc1234"}
 	m, p := removeWtModel(t, "/tmp/parent-repo", det)
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil || m.armed.name != "wt-det" {
 		t.Fatalf("it did not arm over the detached: %+v", m.armed)
 	}
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 	if got := m.running[p.Path]; got != "worktree_remove" {
 		t.Errorf("running = %q, want worktree_remove", got)
 	}
@@ -400,7 +407,8 @@ func TestRemoveWorktreeNotArmedOnMissingParent(t *testing.T) {
 		t.Fatalf("precondition: parent = %q, want empty", e.parent)
 	}
 
-	m, cmd := press(m, "D")
+	m, cmd := press(m, "w")
+	m, cmd = press(m, "d")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
@@ -414,11 +422,13 @@ func TestRemoveWorktreeNotArmedOnMissingParent(t *testing.T) {
 
 func TestRemoveWorktreeArmedRevalidatesSelection(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 
 	m.cursor = 2
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.running[p.Path] != "" {
 		t.Errorf("it deleted the armed worktree despite the selection changing: %v", m.running)
 	}
@@ -430,16 +440,17 @@ func TestRemoveWorktreeArmedRevalidatesSelection(t *testing.T) {
 func TestRemoveWorktreePromptRender(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm, esc to cancel") {
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? d to confirm, esc to cancel") {
 		t.Errorf("the confirmation warning is missing from keybinds:\n%s", out)
 	}
 
 	e, _ := m.selectedEntry()
 	m = armedOver(t, m, e, true)
 	out = stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? has changes — D to force, esc to cancel") {
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? has changes — d to force, esc to cancel") {
 		t.Errorf("forced warning missing from keybinds:\n%s", out)
 	}
 
@@ -453,21 +464,22 @@ func TestRemoveWorktreePromptRender(t *testing.T) {
 	}
 }
 
-func TestRemoveWorktreeBindingOverride(t *testing.T) {
+func TestRemoveWorktreeKeysAreLiteral(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.cfg.Keybindings["worktree_remove"] = "W"
 
-	m, _ = press(m, "D")
-	if m.armed != nil {
-		t.Fatal("D still arms after the rebind")
-	}
 	m, _ = press(m, "W")
+	if m.armed != nil || m.branchArmed != nil {
+		t.Fatal("the removed worktree_remove binding still armed something")
+	}
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil {
-		t.Fatal("W did not arm after the rebind")
+		t.Fatal("w d did not arm the removal")
 	}
-	m, _ = press(m, "W")
+	m, _ = press(m, "d")
 	if got := m.running[p.Path]; got != "worktree_remove" {
-		t.Errorf("W did not run: running = %q", got)
+		t.Errorf("the literal second d did not run: running = %q", got)
 	}
 }
 
@@ -475,12 +487,13 @@ func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	m.running[p.Path] = "pull"
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil {
 		t.Fatal("the arming must not be blocked by the busy parent")
 	}
 
-	m, cmd := press(m, "D")
+	m, cmd := press(m, "d")
 	if got := m.running[p.Path]; got != "pull" {
 		t.Errorf("running = %q, want pull (without launching)", got)
 	}
@@ -498,8 +511,9 @@ func TestRemoveWorktreeBusyParentWarns(t *testing.T) {
 
 func TestRemoveWorktreeEscDuringFlightIgnoresLateFailure(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 
 	if m.armed != nil {
 		t.Fatal("the banner must be cleared when the deletion is launched")
@@ -530,12 +544,14 @@ func TestRemoveWorktreeEscDuringFlightIgnoresLateFailure(t *testing.T) {
 
 func TestRemoveWorktreeLateResultDoesNotClobberOtherArmed(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"), wt("/tmp/wt-b", "b"))
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 	token := m.removeTokens[p.Path]
 
 	m, _ = press(m, "down")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil || m.armed.name != "wt-b" {
 		t.Fatalf("B did not arm: %+v", m.armed)
 	}
@@ -562,21 +578,21 @@ func TestRemoveWorktreeOnSecondaryHeaderInfo(t *testing.T) {
 		t.Fatalf("precondition: entry = %+v, want a secondary header", e)
 	}
 
-	m, cmd := press(m, "D")
-	m = applyNotify(m, cmd)
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 
-	if m.armed != nil {
-		t.Error("D on a secondary header must not arm")
+	if m.armed != nil || m.branchArmed != nil {
+		t.Error("the removal flow armed on a secondary header")
 	}
-	if last := m.toasts.toasts[len(m.toasts.toasts)-1]; last.level != toastInfo ||
-		last.text != "select a worktree" {
-		t.Errorf("toast = %+v, want info 'select a worktree'", last)
+	if len(m.running) != 0 {
+		t.Errorf("the removal flow launched on a secondary header: %v", m.running)
 	}
 }
 
 func TestRemoveWorktreeCommandKeyDisarms(t *testing.T) {
 	m, _ := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 
 	m, _ = press(m, "!")
 
@@ -602,8 +618,9 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p}, map[string]gitstatus.Snapshot{dir: snap})
 	m, _ = press(m, "enter")
 	m, _ = press(m, "down")
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 
 	waitEvent(t, &m, func(ev event) bool {
 		mm, ok := ev.(worktreeRemovedMsg)
@@ -613,7 +630,7 @@ func TestRemoveWorktreeDirtyForceSuccessEndToEnd(t *testing.T) {
 		t.Fatalf("the force was not armed after the dirty failure: %+v", m.armed)
 	}
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 	waitEvent(t, &m, func(ev event) bool {
 		sm, ok := ev.(statusMsg)
 		return ok && sm.path == dir && len(sm.snap.Worktrees) == 0
@@ -656,16 +673,18 @@ func TestRemoveWorktreeConcurrentParentsNotLeak(t *testing.T) {
 	m := twoParentModel(t)
 
 	m.cursor = 1
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 	tokA := m.removeTokens["/tmp/pa"]
 	if tokA == 0 {
 		t.Fatalf("A did not stay in flight: %v", m.removeTokens)
 	}
 
 	m.cursor = 3
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 	tokB := m.removeTokens["/tmp/pb"]
 	if tokB == 0 || tokB == tokA {
 		t.Fatalf("tokens not independent: A=%d B=%d", tokA, tokB)
@@ -709,8 +728,9 @@ func TestRemoveWorktreeEscThenOtherParentNotLeak(t *testing.T) {
 	m := twoParentModel(t)
 
 	m.cursor = 1
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 	tokA := m.removeTokens["/tmp/pa"]
 	if tokA == 0 {
 		t.Fatalf("A did not stay in flight: %v", m.removeTokens)
@@ -722,8 +742,9 @@ func TestRemoveWorktreeEscThenOtherParentNotLeak(t *testing.T) {
 	}
 
 	m.cursor = 3
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 	tokB := m.removeTokens["/tmp/pb"]
 	if tokB == 0 {
 		t.Fatalf("B did not stay in flight: %v", m.removeTokens)
@@ -830,7 +851,7 @@ func TestRemoveTokensIsInitializesInTheSecondLevel(t *testing.T) {
 	m = armedOver(t, m, e, false)
 	m.removeTokens = nil
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 	if m.removeTokens == nil {
 		t.Fatal("removeTokens is still nil after confirming the deletion")
 	}

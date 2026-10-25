@@ -10,6 +10,7 @@ import (
 
 	"gitdash/internal/cache"
 	"gitdash/internal/cmdlog"
+	"gitdash/internal/discovery"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -185,6 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cmdResultMsg:
 		delete(m.running, msg.path)
 		m.lastCmd[msg.path] = cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
+		m.cmdResultOpen = &cmdResult{command: msg.command, output: msg.output, exit: msg.exit}
 		if msg.exit != "0" {
 			m.toasts.showError(fmt.Sprintf("! %s — exit %s", msg.command, msg.exit))
 		} else {
@@ -273,7 +275,7 @@ func actionNote(kind, name, cmd, output, errStr string, rebaseInProgress bool) s
 			note += " — diverged: try the selector's rebase (p then r)"
 		case strings.Contains(errStr, "no tracking information"),
 			strings.Contains(errStr, "no upstream"):
-			note += " — no upstream: P publishes it and sets up tracking"
+			note += " — no upstream: publish it with lazygit and set up tracking"
 		}
 	}
 	return note
@@ -320,7 +322,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// An armed removal has priority over everything (including the esc that closes the detail and the search/command inputs); any other key disarms and continues on its normal course.
 	if m.armed != nil {
 		switch {
-		case m.actionForKey(key) == "worktree_remove":
+		case key == "d":
 			return m.handleWorktreeRemove()
 		case key == "esc":
 			m.armed = nil
@@ -381,12 +383,31 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Like the pull selector: the bodily keys c/s are resolved before the normal routing (s is sync), and any other key cancels and follows its course.
+	// Worktree variants resolve before normal routing because c also configures and d navigates in other contexts.
 	if m.branchArmed != nil {
 		armed := *m.branchArmed
 		m.branchArmed = nil
 		if o, ok := branchOptionForKey(key); ok {
-			return m, m.openBranchPicker(armed.path, o.mode, o.key)
+			return m, m.openBranchPicker(armed.path, armed.refreshPath, o.mode, o.key)
+		}
+		if key == "d" {
+			return m.handleWorktreeRemove()
+		}
+	}
+
+	if m.configArmed != nil {
+		armed := *m.configArmed
+		m.configArmed = nil
+		if key == "s" {
+			return m, m.openBranchPicker(armed.path, armed.refreshPath, pickerModeSync, "s")
+		}
+		if key == "n" {
+			m.nameOpen = true
+			m.namePath = armed.path
+			m.nameInput.SetWidth(pickerInputWidth(m.width))
+			m.nameInput.SetValue(m.nameOverride(armed.path))
+			m.nameInput.CursorEnd()
+			return m, m.nameInput.Focus()
 		}
 	}
 
@@ -426,6 +447,35 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.cmdResultOpen != nil && (key == "esc" || key == "enter") {
+		m.cmdResultOpen = nil
+		return m, nil
+	}
+
+	if m.nameOpen {
+		switch key {
+		case "enter":
+			value := strings.TrimSpace(m.nameInput.Value())
+			path := m.namePath
+			m.nameOpen = false
+			m.nameInput.Blur()
+			m.nameInput.SetValue("")
+			if err := discovery.SetMarkerName(path, m.cfg.Marker, value); err != nil {
+				return m, m.toastCmd(toastError, fmt.Sprintf("marker write failed: %v", err))
+			}
+			m.renameProject(path, value)
+			return m, m.toastCmd(toastSuccess, "renamed "+m.nameOf(path))
+		case "esc":
+			m.nameOpen = false
+			m.nameInput.Blur()
+			return m, nil
+		default:
+			in, cmd := m.nameInput.Update(msg)
+			m.nameInput = in
+			return m, cmd
+		}
+	}
+
 	if m.searchActive {
 		switch key {
 		case "enter":
@@ -454,7 +504,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// `a` is the panel's own filter here and no selector is armed (its warning would not be painted and the key would be shadowed), and `pr` is guarded too because opening the form behind the panel would not draw it.
 	if m.logOpen {
 		switch m.actionForKey(key) {
-		case "pull", "visual", "pr", "branch":
+		case "pull", "visual", "pr", "switch", "worktree", "config":
 			return m, nil
 		}
 	}
@@ -532,12 +582,32 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pr":
 		// Like `pull` and `visual` it does not execute: the key only collects the parameters and the form's submit launches gh/glab.
 		return m.openPR()
-	case "branch":
-		// The switch-branch key arms a submenu; the second key (c/s) opens the branch picker, so nothing runs yet.
+	case "switch":
 		if r, ok := m.selected(); ok && !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
-			m.branchArmed = &armedBranch{path: r.project.Path}
+			refreshPath := r.project.Path
+			if e, selected := m.selectedEntry(); selected && e.kind == kindWorktree && e.parent != "" {
+				refreshPath = e.parent
+			}
+			return m, m.openBranchPicker(r.project.Path, refreshPath, pickerModeCurrent, "")
+		}
+	case "worktree":
+		if r, ok := m.selected(); ok && !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
+		} else if ok {
+			refreshPath := r.project.Path
+			if e, selected := m.selectedEntry(); selected && e.kind == kindWorktree && e.parent != "" {
+				refreshPath = e.parent
+			}
+			m.branchArmed = &armedBranch{path: r.project.Path, refreshPath: refreshPath}
+			return m, nil
+		}
+	case "config":
+		if r, ok := m.selected(); ok && !r.project.HasRepo {
+			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
+		} else if ok {
+			m.configArmed = &armedBranch{path: r.project.Path, refreshPath: r.project.Path}
 			return m, nil
 		}
 	case "sync":
@@ -546,12 +616,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		} else if ok {
 			return m, m.startSyncCmd(r.project.Path)
-		}
-	case "push":
-		if r, ok := m.selected(); ok && !r.project.HasRepo {
-			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
-		} else if ok {
-			return m, m.startActionCmd(r.project.Path, "push")
 		}
 	case "editor":
 		if r, ok := m.selected(); ok {
@@ -578,13 +642,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "fold":
 		return m.toggleFold()
-	case "worktree_remove":
-		return m.handleWorktreeRemove()
 	case "command":
 		if r, ok := m.selected(); !ok || !r.project.HasRepo {
 			return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 		}
 		m.cmdOpen = true
+		m.cmdInput.SetWidth(pickerInputWidth(m.width))
 		return m, m.cmdInput.Focus()
 	case "log":
 		// The normal routing also closes the panel (the key belongs to the log section), which is why the panel is checked before reaching here.
@@ -617,22 +680,21 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 
 // Recording "I pressed enter to fold" says nothing about which commands ran, so pure view actions (filter, search, fold, the log panel, quit) leave no entry.
 var commandActions = map[string]bool{
-	"fetch": true, "fetch_all": true, "pull": true, "push": true,
+	"fetch": true, "fetch_all": true, "pull": true,
 	"sync":    true,
 	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
-	"command": true, "worktree_remove": true, "visual": true, "pr": true,
-	"branch": true,
+	"command": true, "visual": true, "pr": true,
 }
 
 func launchesCommand(action string) bool { return commandActions[action] }
 
 // Pressing `p` on a group header is not a command anybody would want audited, so actions needing a row leave no intent without one.
 var rowActions = map[string]bool{
-	"fetch": true, "pull": true, "push": true, "lazygit": true,
+	"fetch": true, "pull": true, "lazygit": true,
 	"sync":   true,
-	"editor": true, "recollect": true, "command": true, "worktree_remove": true,
+	"editor": true, "recollect": true, "command": true,
 	"visual": true, "pr": true,
-	"branch": true,
+	"switch": true, "worktree": true, "config": true,
 }
 
 // Outcomes that belong in a toast instead of the card's last-action block: sync prints git's rebase/apply/drop lines, which the transient toast summarizes while `l` keeps the whole audit.
@@ -673,7 +735,7 @@ func (m Model) handleWorktreeRemove() (tea.Model, tea.Cmd) {
 			Class:  cmdlog.ClassAction,
 			Repo:   filepath.Base(armed.wtPath),
 			Dir:    armed.wtPath,
-			Key:    m.cfg.KeyFor("worktree_remove"),
+			Key:    "d",
 			Action: "worktree_remove",
 		})
 		return m, m.removeWorktreeCmd(armed.parent, armed.wtPath, armed.name, armed.force, m.removeGen)
@@ -724,7 +786,7 @@ func (m Model) removePrompt() string {
 	if m.armed == nil {
 		return ""
 	}
-	key := m.cfg.KeyFor("worktree_remove")
+	key := "d"
 	if m.armed.force {
 		return fmt.Sprintf("remove worktree %s? has changes — %s to force, esc to cancel", m.armed.name, key)
 	}
@@ -742,6 +804,7 @@ func (m Model) View() tea.View {
 	if m.picker != nil {
 		base = overlayCentered(base, m.pickerOverlay(m.width, m.height), m.width, m.height)
 	}
+	base = overlayCentered(base, m.commandOverlay(), m.width, m.height)
 	content := overlayToasts(base, m.toasts.blocksFor(m.width), m.width, m.height, m.toastReserve())
 	// The render overlay goes LAST, on top of the toasts too: it is what is happening NOW, and a completion toast of another repo must not hide it.
 	content = overlayCentered(content, m.visualOverlayLines(), m.width, m.height)

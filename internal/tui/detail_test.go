@@ -350,7 +350,7 @@ func TestCardTailStaysAtTheBottom(t *testing.T) {
 	if len(lines) > rows {
 		t.Fatalf("the detail box paints %d lines, want at most %d:\n%s", len(lines), rows, out)
 	}
-	if last := lines[len(lines)-1]; last != "  two" {
+	if last := lines[len(lines)-1]; last != "$ ls exit 0" {
 		t.Errorf("the tail lost its last line at the bottom: %q\n%s", last, out)
 	}
 }
@@ -813,15 +813,26 @@ func TestCardTheOutputOfTheCommandRespectsTheBudget(t *testing.T) {
 	}
 
 	withHeight := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
-	if !strings.Contains(withHeight, "five") {
-		t.Errorf("with room the command output does not appear:\n%s", withHeight)
+	if strings.Contains(withHeight, "five") {
+		t.Errorf("the command output still leaked into the card:\n%s", withHeight)
+	}
+	if !strings.Contains(withHeight, "$ ls exit 0") {
+		t.Errorf("the card lost the command verdict:\n%s", withHeight)
 	}
 
+	m.cmdResultOpen = &cmdResult{
+		command: "ls",
+		output:  "one\ntwo\nthree\nfour\nfive\n",
+		exit:    "0",
+	}
 	m.width = 60
-	short := stripANSI(m.renderDetail(r, 40, m.width, m.layout().cardSplit))
+	short := stripANSI(strings.Join(m.commandOverlay(), "\n"))
+	if !strings.Contains(short, "five") {
+		t.Errorf("the overlay does not show the command output:\n%s", short)
+	}
 	for _, line := range strings.Split(short, "\n") {
 		if w := len([]rune(line)); w > m.width {
-			t.Errorf("the card measures %d with a %d terminal: %q", w, m.width, line)
+			t.Errorf("the overlay measures %d with a %d terminal: %q", w, m.width, line)
 		}
 	}
 }

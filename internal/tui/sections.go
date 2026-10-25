@@ -90,6 +90,8 @@ func (m Model) promptLine() string {
 		return m.visualPrompt()
 	case m.branchArmed != nil:
 		return m.branchArmedPrompt()
+	case m.configArmed != nil:
+		return fmt.Sprintf("configs %s: s sync branch · n name · esc cancel", m.nameOf(m.configArmed.path))
 	case m.pr != nil:
 		return m.prPrompt()
 	case m.logOpen:
@@ -153,7 +155,7 @@ func (m Model) activityIndicator() string {
 func (m Model) runningActions() []string {
 	paths := make([]string, 0, len(m.running))
 	for path, kind := range m.running {
-		if isRebaseKind(kind) || kind == "push" || kind == "worktree_remove" {
+		if isRebaseKind(kind) || kind == "worktree_switch" || kind == "worktree_remove" {
 			paths = append(paths, path)
 		}
 	}

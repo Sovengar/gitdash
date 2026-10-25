@@ -333,7 +333,7 @@ func TestGuardNotRepo(t *testing.T) {
 	m.search = "no-repo" // cursor on the project with no repo
 	m.cursor = 0
 
-	for _, key := range []string{"p", "P", "f"} {
+	for _, key := range []string{"p", "f"} {
 		_, cmd := press(m, key)
 		if cmd == nil {
 			t.Errorf("key %s without a guard over no-repo", key)
@@ -345,21 +345,6 @@ func TestGuardNotRepo(t *testing.T) {
 				t.Errorf("key %s notified %v", key, msg)
 			}
 		}
-	}
-}
-
-func TestBlockRunningAction(t *testing.T) {
-	projects, states := fixtureProjects()
-	m := newTestModel(t, projects, states)
-	m.search = "old-clean"
-	m.running["/tmp/old-clean"] = "pull"
-
-	_, cmd := press(m, "P")
-	if cmd == nil {
-		t.Fatal("push without a blocking cmd")
-	}
-	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "already running") {
-		t.Errorf("notification = %v", cmd())
 	}
 }
 

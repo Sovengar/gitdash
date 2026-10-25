@@ -164,16 +164,27 @@ func hasMarker(dir, marker string) bool {
 // SetMarkerSyncBranch rewrites only the top-level sync_branch and leaves the rest of the bytes alone:
 // a TOML round-trip would drop the comments and the [ai] prompt the marker carries.
 func SetMarkerSyncBranch(dir, marker, branch string) error {
+	return setMarkerTopLevel(dir, marker, "sync_branch", branch)
+}
+
+// SetMarkerName writes the display-name override; an empty name removes the key, so the folder name wins again.
+func SetMarkerName(dir, marker, name string) error {
+	return setMarkerTopLevel(dir, marker, "name", name)
+}
+
+func setMarkerTopLevel(dir, marker, key, value string) error {
 	path := filepath.Join(dir, marker)
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.WriteFile(path, []byte(editSyncBranch(string(raw), branch)), 0o644)
+	if value == "" {
+		return os.WriteFile(path, []byte(removeTopLevel(string(raw), key)), 0o644)
+	}
+	return os.WriteFile(path, []byte(editTopLevel(string(raw), key, key+" = "+tomlQuote(value))), 0o644)
 }
 
-func editSyncBranch(content, branch string) string {
-	newLine := "sync_branch = " + tomlQuote(branch)
+func editTopLevel(content, key, newLine string) string {
 	body := strings.TrimSuffix(content, "\n")
 	var lines []string
 	if body != "" {
@@ -186,7 +197,7 @@ func editSyncBranch(content, branch string) string {
 			insertAt = i
 			break
 		}
-		if isSyncBranchKey(t) {
+		if isTopLevelKey(t, key) {
 			lines[i] = newLine
 			return strings.Join(lines, "\n") + "\n"
 		}
@@ -201,9 +212,23 @@ func editSyncBranch(content, branch string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+func removeTopLevel(content, key string) string {
+	body := strings.TrimSuffix(content, "\n")
+	if body == "" {
+		return ""
+	}
+	var kept []string
+	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "[") || !isTopLevelKey(strings.TrimSpace(l), key) {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n") + "\n"
+}
+
 // A prefix check would also match a sync_branch_extra key, so the key must be followed by `=`.
-func isSyncBranchKey(line string) bool {
-	rest, ok := strings.CutPrefix(line, "sync_branch")
+func isTopLevelKey(line, key string) bool {
+	rest, ok := strings.CutPrefix(line, key)
 	if !ok {
 		return false
 	}

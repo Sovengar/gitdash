@@ -778,7 +778,7 @@ func TestPROverlayFloatsInsteadOfReplacing(t *testing.T) {
 	}
 }
 
-// The collapsed card (width < 63) keeps the ! prompt at its end even when the content overflows.
+// The collapsed card keeps its content while the ! input floats over it as an overlay.
 func TestBangInputVisibleInCollapsedCard(t *testing.T) {
 	m := previewModel(t)
 	m.width, m.height = 62, 30
@@ -796,9 +796,9 @@ func TestBangInputVisibleInCollapsedCard(t *testing.T) {
 	if !m.cmdOpen {
 		t.Fatal("! did not open the input")
 	}
-	panel := panelLines(t, sectionContent(t, stripANSI(m.View().Content), "api · vsocial/backend"))
-	if last := lastNonEmpty(panel); !strings.HasPrefix(last, "! ") {
-		t.Errorf("the collapsed card's last line is %q, want the input's prompt\n%v", last, panel)
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "╭ command") || !strings.Contains(out, "enter run · esc cancel") {
+		t.Errorf("the command input is not painted over the collapsed card:\n%s", out)
 	}
 }
 

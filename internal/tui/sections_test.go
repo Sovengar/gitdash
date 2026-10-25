@@ -506,9 +506,10 @@ func TestRemoveWorktreePromptVisibleInShortTerminal(t *testing.T) {
 		t.Fatal("precondition: with nothing armed there should be no prompt")
 	}
 
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? D to confirm") {
+	if !strings.Contains(sectionContent(t, out, "keybinds"), "remove worktree wt-a? d to confirm") {
 		t.Errorf("the prompt is not visible on a short terminal:\n%s", out)
 	}
 }
@@ -601,7 +602,7 @@ func TestIndicatorActivityCountsTheActions(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.running = map[string]string{
 			"/tmp/dirty-api":     "pull",
-			"/tmp/old-clean":     "push",
+			"/tmp/old-clean":     "worktree_switch",
 			"/tmp/worktree-host": "worktree_remove",
 		}
 		got := m.activityIndicator()
@@ -611,8 +612,7 @@ func TestIndicatorActivityCountsTheActions(t *testing.T) {
 	})
 
 	t.Run("each kind counts", func(t *testing.T) {
-		// push and worktree_remove are not pulls but are still actions that launch git: if they slipped out of the indicator the user would see a quiet row while the push is in flight.
-		for _, kind := range []string{"pull", "pull_rebase", "pull_ff", "pull_merge", "push", "worktree_remove"} {
+		for _, kind := range []string{"pull", "pull_rebase", "pull_ff", "pull_merge", "worktree_switch", "worktree_remove"} {
 			m := newTestModel(t, projects, states)
 			m.running = map[string]string{"/tmp/dirty-api": kind}
 			if got := m.runningActions(); len(got) != 1 {
@@ -637,12 +637,12 @@ func TestIndicatorActivityCountsTheActions(t *testing.T) {
 	t.Run("ordered by path", func(t *testing.T) {
 		m := newTestModel(t, projects, states)
 		m.running = map[string]string{
-			"/tmp/worktree-host": "push",
+			"/tmp/worktree-host": "worktree_switch",
 			"/tmp/dirty-api":     "pull",
-			"/tmp/old-clean":     "push",
+			"/tmp/old-clean":     "worktree_switch",
 		}
 		got := m.runningActions()
-		want := []string{"pull dirty-api…", "push old-clean…", "push worktree-host…"}
+		want := []string{"pull dirty-api…", "worktree_switch old-clean…", "worktree_switch worktree-host…"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("runningActions = %v, want %v (ordered by path)", got, want)
 		}
@@ -825,11 +825,12 @@ func TestEscCancelsTheDeletedAndOtherKeysNot(t *testing.T) {
 	m, _ = press(m, "enter") // expands the worktrees
 
 	m, _ = press(m, "down") // sub-row
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil {
-		t.Fatal("D did not arm the deletion")
+		t.Fatal("w d did not arm the deletion")
 	}
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 	if len(m.removeTokens) == 0 {
 		t.Fatal("the confirmation left no token in flight")
 	}
@@ -854,11 +855,12 @@ func TestTokenOfDeletedExitsOfACounterMonotonic(t *testing.T) {
 	m, _ = press(m, "down") // worktree sub-row
 
 	before := m.removeGen
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
 	if m.armed == nil {
-		t.Fatal("D did not arm the deletion")
+		t.Fatal("w d did not arm the deletion")
 	}
-	m, _ = press(m, "D")
+	m, _ = press(m, "d")
 	if m.removeGen <= before {
 		t.Errorf("removeGen = %d, want > %d (monotonic counter)", m.removeGen, before)
 	}

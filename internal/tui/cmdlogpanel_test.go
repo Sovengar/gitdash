@@ -796,8 +796,9 @@ func TestDeletedWorktreeRecordsTheArgvResolved(t *testing.T) {
 
 	m, _ = press(m, "enter") // enter is the fold/expand key
 	m, _ = press(m, "down")
-	m, _ = press(m, "D")
-	m, _ = press(m, "D")
+	m, _ = press(m, "w")
+	m, _ = press(m, "d")
+	m, _ = press(m, "d")
 
 	want := "git " + strings.Join(gitstatus.RemoveWorktreeArgv(wtDir, false), " ")
 	waitEvent(t, &m, func(ev event) bool {

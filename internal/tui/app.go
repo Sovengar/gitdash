@@ -69,9 +69,9 @@ type worktreeRemovedMsg struct {
 
 // action and argv travel so the command log can record what was launched: a handoff captures no output, so the argv is all that is left.
 type execDoneMsg struct {
-	path, action string
-	argv         []string
-	err          error
+	path, dir, action string
+	argv              []string
+	err               error
 }
 
 // visualDoneMsg is what the background render sends back: the argv that ran (for the log), the kept image and the opener's failure travels apart from the render's, because a rendered image with no viewer is a warning and not an error.
@@ -138,9 +138,9 @@ type armedPull struct {
 	path string
 }
 
-// Same contract as armedPull: the variant keys (c/s) are resolved against the row captured when `b` armed.
+// Same contract as armedPull: worktree variants resolve against the row captured when `w` armed.
 type armedBranch struct {
-	path string
+	path, refreshPath string
 }
 
 // Single source of the `b` variants, so the prompt and the dispatch cannot desync.
@@ -151,8 +151,7 @@ type branchOption struct {
 }
 
 var branchOptions = []branchOption{
-	{"c", pickerModeCurrent, "checkout"},
-	{"s", pickerModeSync, "sync ref"},
+	{"c", pickerModeWorktree, "create worktree"},
 }
 
 func branchOptionForKey(key string) (branchOption, bool) {
@@ -267,7 +266,8 @@ type Model struct {
 	visualArmed *armedVisual
 	visualBusy  *visualFlight
 	branchArmed *armedBranch
-	// picker is the branch list opened by bc/bs; nil is closed, like the log panel and the PR form it is a view mode.
+	configArmed *armedBranch
+	// picker is the branch list opened by switch, worktree create, or config sync; nil is closed, like the log panel and the PR form it is a view mode.
 	picker *branchPicker
 	// removeTokens maps parent repo path → current attempt token (the in-flight guard is per parent, so the token is too); a result whose token is no longer current is discarded.
 	removeGen    int
@@ -286,8 +286,14 @@ type Model struct {
 	pr        *prDraft
 	prPending *prSubmission
 
-	cmdOpen  bool
-	cmdInput textinput.Model
+	cmdOpen       bool
+	cmdInput      textinput.Model
+	cmdResultOpen *cmdResult
+
+	// The rename overlay is its own state: `c n` writes the marker, so it must be a modal and not an armed key.
+	nameOpen  bool
+	namePath  string
+	nameInput textinput.Model
 
 	lastCmd map[string]cmdResult
 }
@@ -330,6 +336,10 @@ func New(cfg config.Config) Model {
 	ci.Placeholder = " npm test · git status… (empty enter = interactive shell)"
 	ci.Prompt = "! "
 	m.cmdInput = ci
+	ni := textinput.New()
+	ni.Placeholder = "empty = the folder name"
+	ni.Prompt = "name "
+	m.nameInput = ni
 	m.searchInput = in
 	m.scanning = true
 
@@ -616,13 +626,13 @@ func (m *Model) removeWorktreeCmd(parent, wtPath, name string, withForce bool, t
 }
 
 // The list is read off the Update goroutine and published as an event; the picker opens immediately in a loading state instead of blocking the frame.
-func (m *Model) openBranchPicker(path, mode, variant string) tea.Cmd {
+func (m *Model) openBranchPicker(path, refreshPath, mode, variant string) tea.Cmd {
 	in := textinput.New()
 	in.Prompt = ""
 	in.Placeholder = "filter…"
 	in.SetWidth(pickerInputWidth(m.width))
 	m.picker = &branchPicker{
-		path: path, mode: mode, variant: variant, loading: true,
+		path: path, refreshPath: refreshPath, mode: mode, variant: variant, loading: true,
 		current: m.states[path].Status.Branch, filter: in,
 	}
 	appCtx := m.ctx
@@ -660,7 +670,31 @@ type handoffFunc func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 
 // A method and not a closure inside tea.ExecProcess for two reasons: that closure only runs when the process ends and no test can lend the terminal to observe it (the program is suspended meanwhile), and the command log depends on the action and argv being right, since a "editor" where "lazygit" was meant is invisible in the code.
 func (m *Model) handoffDone(action, path string, argv []string, err error) tea.Msg {
-	return execDoneMsg{path: path, action: action, argv: argv, err: err}
+	return execDoneMsg{path: path, dir: path, action: action, argv: argv, err: err}
+}
+
+// wt owns the path template and hooks, so gitdash only selects the branch and lends it the terminal.
+func (m *Model) openWorktreeCmd(path, refreshPath, branch string, create bool) tea.Cmd {
+	if _, err := exec.LookPath("wt"); err != nil {
+		return m.toastCmd(toastWarning, "wt not installed")
+	}
+	if refreshPath == "" {
+		refreshPath = path
+	}
+	if prev, busy := m.running[refreshPath]; busy {
+		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(refreshPath)))
+	}
+	m.running[refreshPath] = "worktree_switch"
+	argv := []string{"wt", "-C", path, "switch"}
+	if create {
+		argv = append(argv, "--create", "--base=@")
+	}
+	argv = append(argv, branch, "--no-cd")
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = path
+	return m.handoff(cmd, func(err error) tea.Msg {
+		return execDoneMsg{path: refreshPath, dir: path, action: "worktree_switch", argv: argv, err: err}
+	})
 }
 
 func (m *Model) openEditorCmd(path string) tea.Cmd {
@@ -943,6 +977,31 @@ func (m *Model) logIntent(key, action string) {
 		entry.Dir = r.project.Path
 	}
 	cmdlog.RecordIntent(entry)
+}
+
+// The override as the marker holds it: empty when the project still uses its folder name, which is what the rename input prefills.
+func (m Model) nameOverride(path string) string {
+	for _, p := range m.projects {
+		if p.Path == path && p.Name != filepath.Base(path) {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// The marker is already written; this only keeps the in-memory project (and every row keyed by it) in step without a rescan.
+func (m *Model) renameProject(path, name string) {
+	for i := range m.projects {
+		if m.projects[i].Path != path {
+			continue
+		}
+		if name == "" {
+			m.projects[i].Name = filepath.Base(path)
+			return
+		}
+		m.projects[i].Name = name
+		return
+	}
 }
 
 func (m *Model) nameOf(path string) string {

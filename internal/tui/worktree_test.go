@@ -412,7 +412,6 @@ func TestWorktreeActionsPathS3324(t *testing.T) {
 		{[]string{"p", "p"}, "pull"},
 		{[]string{"p", "r"}, "pull_rebase"},
 		{[]string{"p", "m"}, "pull_merge"},
-		{[]string{"P"}, "push"},
 		{[]string{"R"}, "collect"},
 	} {
 		m := newTestModel(t, []discovery.Project{p}, st)
@@ -745,13 +744,13 @@ func TestWorktreeKeybindingS3712(t *testing.T) {
 	}
 
 	m2 := newTestModel(t, []discovery.Project{p}, st)
-	m2.cfg.Keybindings["fold"] = "w"
-	m2, _ = press(m2, "w")
+	m2.cfg.Keybindings["fold"] = "z"
+	m2, _ = press(m2, "z")
 	if !m2.expanded[p.Path] {
-		t.Fatal("w did not expand after the rebind")
+		t.Fatal("z did not expand after the rebind")
 	}
 	m3 := newTestModel(t, []discovery.Project{p}, st)
-	m3.cfg.Keybindings["fold"] = "w"
+	m3.cfg.Keybindings["fold"] = "z"
 	m3, _ = press(m3, "enter")
 	if m3.expanded[p.Path] {
 		t.Error("enter still folds after the rebind")

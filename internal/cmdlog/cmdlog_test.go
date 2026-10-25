@@ -84,7 +84,7 @@ func TestSetRecorderIsRestorable(t *testing.T) {
 	rec := New(4)
 	SetRecorder(rec)
 	t.Cleanup(func() { SetRecorder(nil) })
-	RecordExec(Entry{Action: "push", Argv: []string{"git", "push"}})
+	RecordExec(Entry{Action: "worktree_switch", Argv: []string{"wt", "switch", "feature"}})
 	if got := LastSeq(); got != 1 {
 		t.Fatalf("LastSeq() = %d, want 1", got)
 	}

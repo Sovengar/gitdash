@@ -12,10 +12,11 @@ import (
 	"gitdash/internal/gitstatus"
 )
 
-// Variant modes of the `b` selector: `c` checks the branch out, `s` writes it as the repo's sync ref.
+// Picker modes: switch a branch, create a worktree, or set the sync ref.
 const (
-	pickerModeCurrent = "current"
-	pickerModeSync    = "sync"
+	pickerModeCurrent  = "current"
+	pickerModeWorktree = "worktree"
+	pickerModeSync     = "sync"
 )
 
 // The overlay box: width clamps, and the chrome is borders + filter line + hint line.
@@ -29,14 +30,15 @@ const (
 // A modal OVERLAY, not a view mode: the table and stats stay visible behind it and the box floats
 // centered. The variant key opens it and `enter`/`esc` close it.
 type branchPicker struct {
-	path     string
-	mode     string
-	variant  string
-	branches []gitstatus.Branch
-	current  string
-	loading  bool
-	err      string
-	cursor   int
+	path        string
+	refreshPath string
+	mode        string
+	variant     string
+	branches    []gitstatus.Branch
+	current     string
+	loading     bool
+	err         string
+	cursor      int
 	// filter narrows the list as you type; j/k only stay navigation while it is empty, since once
 	// there is text every letter belongs to the input.
 	filter textinput.Model
@@ -51,7 +53,7 @@ func (m Model) branchArmedPrompt() string {
 	for _, o := range branchOptions {
 		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
 	}
-	return fmt.Sprintf("branch %s: %s · esc cancel", m.nameOf(m.branchArmed.path), strings.Join(variants, " · "))
+	return fmt.Sprintf("worktree %s: %s · d remove · esc cancel", m.nameOf(m.branchArmed.path), strings.Join(variants, " · "))
 }
 
 // The modal is not a terminal handoff: keys are read here, the text goes to the filter, and only
@@ -102,20 +104,39 @@ func (m Model) selectPickerBranch() (tea.Model, tea.Cmd) {
 	}
 	list := p.filtered()
 	if len(list) == 0 {
-		return m, nil
+		name := strings.TrimSpace(p.filter.Value())
+		if name == "" || p.mode == pickerModeSync {
+			return m, nil
+		}
+		m.recordPickerIntent(p, map[string]string{pickerModeCurrent: "switch_create", pickerModeWorktree: "worktree_create"}[p.mode])
+		m.picker = nil
+		if p.mode == pickerModeWorktree {
+			return m, m.openWorktreeCmd(p.path, p.refreshPath, name, true)
+		}
+		return m, m.startActionArgs(p.path, "switch_create", [][]string{{"switch", "-c", name}})
 	}
 	b := list[p.cursor]
 
 	if p.mode == pickerModeCurrent {
 		// The intent is the confirming key, not the one that armed the selector (same rule as the worktree removal).
-		m.recordPickerIntent(p, "checkout")
+		m.recordPickerIntent(p, "switch")
 		target := checkoutTarget(b)
 		if target == p.current {
 			m.picker = nil
 			return m, m.toastCmd(toastInfo, fmt.Sprintf("already on %s", target))
 		}
 		m.picker = nil
-		return m, m.startActionArgs(p.path, "checkout", [][]string{{"checkout", target}})
+		return m, m.startActionArgs(p.path, "switch", [][]string{{"switch", target}})
+	}
+	if p.mode == pickerModeWorktree {
+		target := checkoutTarget(b)
+		if wt, ok := m.worktreeForBranch(p.refreshPath, target); ok {
+			m.picker = nil
+			return m, m.toastCmd(toastInfo, "worktree already exists at "+wt.Path)
+		}
+		m.recordPickerIntent(p, "worktree_create")
+		m.picker = nil
+		return m, m.openWorktreeCmd(p.path, p.refreshPath, target, false)
 	}
 
 	// The marker keeps the ref AS PICKED: a remote entry must stay `origin/X`, since the sync
@@ -136,9 +157,29 @@ func (m *Model) recordPickerIntent(p *branchPicker, action string) {
 		Class:  cmdlog.ClassAction,
 		Repo:   m.nameOf(p.path),
 		Dir:    p.path,
-		Key:    m.cfg.KeyFor("branch") + p.variant,
+		Key:    m.pickerKey(p),
 		Action: action,
 	})
+}
+
+func (m Model) pickerKey(p *branchPicker) string {
+	switch p.mode {
+	case pickerModeCurrent:
+		return m.cfg.KeyFor("switch")
+	case pickerModeWorktree:
+		return m.cfg.KeyFor("worktree") + "c"
+	default:
+		return m.cfg.KeyFor("config") + "s"
+	}
+}
+
+func (m Model) worktreeForBranch(parent, branch string) (gitstatus.Worktree, bool) {
+	for _, wt := range m.states[parent].Worktrees {
+		if wt.Branch == branch {
+			return wt, true
+		}
+	}
+	return gitstatus.Worktree{}, false
 }
 
 // The recollect resolves the ref from the project list, so the in-memory entry has to carry the just-written branch or the UI would keep comparing against the old one.
@@ -206,7 +247,11 @@ func (m Model) pickerOverlay(width, height int) []string {
 			content = append(content, m.branchRows(list, rowsAvail)...)
 		}
 	}
-	content = append(content, styleHint.Render("  ↑/↓ move · type filter · enter select · esc cancel"))
+	if len(p.filtered()) == 0 && strings.TrimSpace(p.filter.Value()) != "" && p.mode != pickerModeSync {
+		content = append(content, styleHint.Render("  Enter to create branch"))
+	} else {
+		content = append(content, styleHint.Render("  ↑/↓ move · type filter · enter select · esc cancel"))
+	}
 
 	box := m.section(title, strings.Join(content, "\n"), boxWidth)
 	return strings.Split(box, "\n")

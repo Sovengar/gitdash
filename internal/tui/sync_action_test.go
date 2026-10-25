@@ -86,7 +86,7 @@ func TestSyncRunsFetchThenPullOnTheResolvedBranch(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, sawStatus := collectAction(t, m)
 
 	if acc.err != "" {
@@ -129,7 +129,7 @@ func TestSyncUsesTheMarkerBranchOverTheGlobal(t *testing.T) {
 	m.cfg.SyncBranch = "release" // must lose against the declared one
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, _ := collectAction(t, m)
 
 	if want := "git fetch origin && git pull --rebase --autostash origin main"; acc.cmd != want {
@@ -148,7 +148,7 @@ func TestSyncHonoursTheConfiguredBase(t *testing.T) {
 	m.cfg.Commands["sync"] = "pull --rebase" // no autostash, the user's choice
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, _ := collectAction(t, m)
 
 	if want := "git fetch origin && git pull --rebase origin main"; acc.cmd != want {
@@ -161,7 +161,7 @@ func TestSyncWithoutRepoWarns(t *testing.T) {
 		map[string]gitstatus.Snapshot{"/tmp/sync-no-repo": {}})
 	m = cursorOn(t, m, "/tmp/sync-no-repo")
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if len(m.running) != 0 {
 		t.Errorf("sync launched on a row without a repo: %v", m.running)
 	}
@@ -183,7 +183,7 @@ func TestSyncWithoutSyncBranchWarns(t *testing.T) {
 	m.cfg.SyncBranch = "" // no marker override either
 	m = cursorOn(t, m, p.Path)
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if len(m.running) != 0 {
 		t.Errorf("sync launched with no sync branch: %v", m.running)
 	}
@@ -202,7 +202,7 @@ func TestSyncRefusesOnTheSyncBranch(t *testing.T) {
 		map[string]gitstatus.Snapshot{p.Path: snapOnBranch("main")})
 	m = cursorOn(t, m, p.Path)
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if len(m.running) != 0 {
 		t.Errorf("sync ran on the sync branch: %v", m.running)
 	}
@@ -230,7 +230,7 @@ func TestSyncRefusesAnOptionLikeSyncBranch(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
 	m = cursorOn(t, m, dir)
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if len(m.running) != 0 {
 		t.Errorf("sync launched with an option-like ref: %v", m.running)
 	}
@@ -252,7 +252,7 @@ func TestSyncEmptyCommandWarns(t *testing.T) {
 	m.cfg.Commands["sync"] = "   " // Fields collapses it to no command
 	m = cursorOn(t, m, p.Path)
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if len(m.running) != 0 {
 		t.Errorf("sync launched with an empty command: %v", m.running)
 	}
@@ -271,7 +271,7 @@ func TestSyncHonoursTheRunningLock(t *testing.T) {
 	m = cursorOn(t, m, p.Path)
 	m.running[p.Path] = "fetch"
 
-	_, cmd := press(m, "s")
+	_, cmd := press(m, "S")
 	if m.running[p.Path] != "fetch" {
 		t.Errorf("the lock was overwritten: %q", m.running[p.Path])
 	}
@@ -290,7 +290,7 @@ func TestSyncFetchFailureStopsBeforeThePull(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("main")})
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc := collectActionMsg(t, m)
 	if acc.err == "" {
 		t.Fatal("a fetch with no origin did not fail (the fixture has no remote)")
@@ -314,13 +314,13 @@ func TestSyncLeavesAnIntent(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	intent := syncIntent()
 	if intent == nil {
 		t.Fatal("s did not leave a sync intent in the command log")
 	}
-	if intent.Key != "s" {
-		t.Errorf("intent key = %q, want s", intent.Key)
+	if intent.Key != "S" {
+		t.Errorf("intent key = %q, want S", intent.Key)
 	}
 	collectAction(t, m) // drain the execs so the goroutine does not outlive the test
 }
@@ -437,7 +437,7 @@ func TestSyncUnknownBranchDoesNotRefuse(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("")})
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, _ := collectAction(t, m)
 
 	if acc.err != "" {
@@ -460,7 +460,7 @@ func TestSyncBranchMissingOnOriginReportsGitReason(t *testing.T) {
 		map[string]gitstatus.Snapshot{dir: snapOnBranch("feature")})
 	m = cursorOn(t, m, dir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc := collectActionMsg(t, m)
 
 	if !strings.Contains(acc.err, "couldn't find remote ref") {
@@ -514,7 +514,7 @@ func TestSyncRunsWithTheLogPanelOpen(t *testing.T) {
 	m = cursorOn(t, m, dir)
 	m.logOpen = true
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, _ := collectAction(t, m)
 
 	if acc.err != "" {
@@ -544,7 +544,7 @@ func TestSyncWorktreeSubrowUsesTheGlobalDefault(t *testing.T) {
 	m, _ = press(m, "enter")
 	m = cursorOn(t, m, wtDir)
 
-	m, _ = press(m, "s")
+	m, _ = press(m, "S")
 	acc, _ := collectAction(t, m)
 
 	if acc.err != "" {
