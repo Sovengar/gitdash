@@ -38,8 +38,6 @@ func asOrDash(s string) string {
 	return s
 }
 
-const cmdInputLines = 2
-
 // The `!` input is ALWAYS painted on the box's last line, even if the card filled the box (writing blind is worse than not seeing the rest), so what overflows is cut from the top and a short body is padded; without input there is no footer, the keys are already in keybinds.
 func (m *Model) cardTail(body string, rows int) string {
 	return body
