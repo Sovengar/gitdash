@@ -80,8 +80,8 @@ func TestRemoveWorktreeArmOnFirstPress(t *testing.T) {
 	m, p := removeWtModel(t, "/tmp/parent-repo", wt("/tmp/wt-a", "a"))
 	before := m.cursor
 
-	m, cmd := press(m, "w")
-	m, cmd = press(m, "d")
+	m, _ = press(m, "w")
+	m, cmd := press(m, "d")
 
 	if m.armed == nil {
 		t.Fatal("w d did not arm the confirmation")
@@ -141,8 +141,8 @@ func TestRemoveWorktreeOnRepoRowInfo(t *testing.T) {
 	p, st := repoWithWorktrees("multi", "/tmp/multi", wt("/tmp/wt-a", "a"))
 	m := newTestModel(t, []discovery.Project{p}, st)
 
-	m, cmd := press(m, "w")
-	m, cmd = press(m, "d")
+	m, _ = press(m, "w")
+	m, cmd := press(m, "d")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
@@ -412,8 +412,8 @@ func TestRemoveWorktreeNotArmedOnMissingParent(t *testing.T) {
 		t.Fatalf("precondition: parent = %q, want empty", e.parent)
 	}
 
-	m, cmd := press(m, "w")
-	m, cmd = press(m, "d")
+	m, _ = press(m, "w")
+	m, cmd := press(m, "d")
 	m = applyNotify(m, cmd)
 
 	if m.armed != nil {
