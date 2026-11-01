@@ -755,6 +755,69 @@ func TestKeybindsRespectsTheBudgetOfHints(t *testing.T) {
 	}
 }
 
+func TestKeybindsPaintKeysWithTheAccent(t *testing.T) {
+	projects, states := fixtureProjects()
+	m := newTestModel(t, projects, states)
+	hints := m.cfg.HintBarLines()
+	out := m.keybindsSection(len(hints))
+	plain := sectionContent(t, stripANSI(out), "keybinds")
+
+	for _, line := range hints {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(plain, line) {
+			t.Errorf("plain hint %q missing:\n%s", line, plain)
+		}
+		if strings.Contains(out, styleHint.Render(line)) {
+			t.Errorf("the whole hint %q kept the description colour:\n%s", line, out)
+		}
+		for _, segment := range strings.Split(line, " · ") {
+			key, desc, ok := strings.Cut(segment, " ")
+			if !ok {
+				t.Fatalf("the hint %q has no description: %q", line, segment)
+			}
+			want := styleCursor.Render(key) + " " + styleHint.Render(desc)
+			if !strings.Contains(out, want) {
+				t.Errorf("the key of %q is not accented with its description dimmed:\n%s", segment, out)
+			}
+		}
+	}
+	if !strings.Contains(out, styleHint.Render(" · ")) {
+		t.Errorf("the separators lost the hint colour:\n%s", out)
+	}
+}
+
+func TestRenderHintLineWithoutDescriptionUsesTheHintColour(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "single segment with no description",
+			line: "?",
+			want: styleHint.Render("?"),
+		},
+		{
+			name: "undescribed segments around a described one",
+			line: "x · j move · ?",
+			want: styleHint.Render("x") + styleHint.Render(" · ") +
+				styleCursor.Render("j") + " " + styleHint.Render("move") +
+				styleHint.Render(" · ") + styleHint.Render("?"),
+		},
+		{
+			name: "empty line",
+			line: "",
+			want: styleHint.Render(""),
+		},
+	} {
+		if got := renderHintLine(tc.line); got != tc.want {
+			t.Errorf("%s: renderHintLine(%q) = %q, want %q", tc.name, tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestCursorMarksAOnlyRow(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
