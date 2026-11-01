@@ -367,16 +367,35 @@ func (m Model) emptyTableHint() string {
 // The prompt replaces the hints instead of stacking on them: both answer "what do I do now", and the hints come back intact once the keystroke is resolved.
 func (m Model) keybindsSection(hintLines int) string {
 	lines := m.cfg.HintBarLines()
-	if prompt := m.promptLine(); prompt != "" {
+	prompt := m.promptLine()
+	if prompt != "" {
 		lines = []string{styleWarn.Render(prompt)}
 	}
 	// The budget wins: hints that do not fit are cut (cutting the ones that just fit == doing nothing) and a negative budget leaves the box empty instead of panicking on the slice.
 	lines = lines[:max(0, min(hintLines, len(lines)))]
 	rendered := make([]string, 0, len(lines))
 	for _, l := range lines {
-		rendered = append(rendered, styleHint.Render(l))
+		if prompt != "" {
+			rendered = append(rendered, styleHint.Render(l))
+			continue
+		}
+		rendered = append(rendered, renderHintLine(l))
 	}
 	return m.section("keybinds", strings.Join(rendered, "\n"), m.width)
+}
+
+func renderHintLine(line string) string {
+	segments := strings.Split(line, " · ")
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		key, desc, ok := strings.Cut(segment, " ")
+		if !ok {
+			parts = append(parts, styleHint.Render(segment))
+			continue
+		}
+		parts = append(parts, styleCursor.Render(key)+" "+styleHint.Render(desc))
+	}
+	return strings.Join(parts, styleHint.Render(" · "))
 }
 
 func detailTitle(r row) string {
