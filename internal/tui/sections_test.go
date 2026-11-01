@@ -788,6 +788,36 @@ func TestKeybindsPaintKeysWithTheAccent(t *testing.T) {
 	}
 }
 
+func TestRenderHintLineWithoutDescriptionUsesTheHintColour(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "single segment with no description",
+			line: "?",
+			want: styleHint.Render("?"),
+		},
+		{
+			name: "undescribed segments around a described one",
+			line: "x · j move · ?",
+			want: styleHint.Render("x") + styleHint.Render(" · ") +
+				styleCursor.Render("j") + " " + styleHint.Render("move") +
+				styleHint.Render(" · ") + styleHint.Render("?"),
+		},
+		{
+			name: "empty line",
+			line: "",
+			want: styleHint.Render(""),
+		},
+	} {
+		if got := renderHintLine(tc.line); got != tc.want {
+			t.Errorf("%s: renderHintLine(%q) = %q, want %q", tc.name, tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestCursorMarksAOnlyRow(t *testing.T) {
 	projects, states := fixtureProjects()
 	m := newTestModel(t, projects, states)
