@@ -64,6 +64,10 @@ timeout     = "30s"   # timeout per fetch
 
 [ai.pull]
 command = "jcode -run {prompt}"   # executable behind the selector's AI pull variant
+# or, without writing any agent flag yourself:
+# harness = "pi"
+# model   = "free"
+# effort  = "high"
 ```
 
 The `s` key syncs the current branch with the repo's *sync branch*: it runs
@@ -84,6 +88,18 @@ config** (the marker travels with the repo and is not trustworthy): the
 single argument** of the process, never interpolated into an `sh -c`, so spaces,
 quotes or `$` are not interpreted. Optional context placeholders: `{prompt}`,
 `{branch}`, `{upstream}`, `{state}`, `{ahead}`, `{behind}`, `{sync}`.
+
+Two ways to name the agent, never both:
+
+| Route | Config | argv |
+|---|---|---|
+| template | `command` | your shell template, expanded by gitdash |
+| harness | `harness` + optional `model`/`effort` | built by [`agentbridge`](https://github.com/Sovengar/agentbridge) |
+
+The harness route runs the **headless** form (`pi -p`, `opencode run`,
+`hermes chat -q`, `jcode run`) with the context variables expanded into the
+prompt, and keeps stdout for the card. Adding an agent is a `harness` value, not
+a new flag in gitdash. With neither route set the action warns and does nothing.
 
 ## The panel below the table
 
