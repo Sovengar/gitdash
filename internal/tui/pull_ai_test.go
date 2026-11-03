@@ -65,7 +65,7 @@ func TestPullAINotLaunchesWithoutCommand(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("without a command it should notify")
 	}
-	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "command not configured") {
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "not configured") {
 		t.Errorf("notification = %v", cmd())
 	}
 }

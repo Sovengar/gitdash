@@ -17,6 +17,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/sovengar/ai"
 
 	"gitdash/internal/cache"
 	"gitdash/internal/cmdlog"
@@ -817,7 +818,27 @@ func (m *Model) worktreeFor(path string) (gitstatus.Worktree, bool) {
 }
 
 func (m *Model) pullAIArgv(path, prompt string) []string {
-	return config.BuildAIArgv(m.cfg.AICommand("pull"), prompt, m.aiVars(path))
+	vars := m.aiVars(path)
+	if template := m.cfg.AICommand("pull"); strings.TrimSpace(template) != "" {
+		return config.BuildAIArgv(template, prompt, vars)
+	}
+	agent := m.cfg.AIAgentFor("pull")
+	if agent.Harness == "" {
+		return nil
+	}
+	// No template: the shared ai module owns the argv. gitdash runs the agent
+	// in the background and captures its output, so the headless form is used.
+	argv, err := ai.HeadlessArgs(ai.Request{
+		Agent:  ai.Agent{Name: agent.Harness, Binary: agent.Harness},
+		Model:  agent.Model,
+		Effort: agent.Effort,
+		Prompt: config.ExpandAIVars(prompt, prompt, vars),
+		Cwd:    path,
+	})
+	if err != nil {
+		return nil
+	}
+	return argv
 }
 
 func (m *Model) startPullAICmd(path string) tea.Cmd {
@@ -831,10 +852,13 @@ func (m *Model) startPullAICmd(path string) tea.Cmd {
 	if strings.TrimSpace(prompt) == "" {
 		return m.toastCmd(toastInfo, "no AI pull prompt (.gitdash.toml [ai.pull].prompt)")
 	}
-	if strings.TrimSpace(m.cfg.AICommand("pull")) == "" {
-		return m.toastCmd(toastInfo, "ai.pull command not configured (~/.config/gitdash/config.toml)")
+	if strings.TrimSpace(m.cfg.AICommand("pull")) == "" && m.cfg.AIAgentFor("pull").Harness == "" {
+		return m.toastCmd(toastInfo, "ai.pull command or harness not configured (~/.config/gitdash/config.toml)")
 	}
 	argv := m.pullAIArgv(path, prompt)
+	if len(argv) == 0 {
+		return m.toastCmd(toastWarning, "ai command: no argv (unsupported harness?)")
+	}
 	if argv[0] == "" {
 		// First field resolved to empty (e.g. "{branch}" with no branch): LookPath would answer " not installed", which explains nothing.
 		return m.toastCmd(toastWarning, "ai command: empty executable")
@@ -872,7 +896,7 @@ func visualMediaDir() (string, error) {
 
 func visualArgv(sub, upstream, mediaDir string) []string {
 	// --output-only-path is what makes a capture enough: git-sim prints the image path as the only stdout line (a --quiet alongside it would void the path, so it is never passed, and --animate is never asked for either: the image is what opens, not the video git-sim also writes).
-	argv := []string{"git-sim", "--output-only-path", "--media-dir", mediaDir, sub}
+	argv := []string{"git-sim", "--output-only-path", "--img-format", "html", "--open-in", "local", "--media-dir", mediaDir, sub}
 	if o, ok := visualOptionForSub(sub); ok && o.needsUpstream && upstream != "" {
 		argv = append(argv, upstream)
 	}
@@ -891,6 +915,9 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	argv := visualArgv(sub, upstream, mediaDir)
 	if !sim.Available(argv[0]) {
 		return m.toastCmd(toastWarning, "git-sim not installed")
+	}
+	if sub == "rebase" && !sim.SupportsRebase() {
+		return m.toastCmd(toastWarning, "rebase preview needs git-sim 0.4.0 or newer")
 	}
 	m.running[path] = "visual"
 	m.visualBusy = &visualFlight{path: path, sub: sub}
@@ -915,9 +942,16 @@ func (m *Model) startVisualCmd(path, upstream, sub string) tea.Cmd {
 	return nil
 }
 
-// The image is opened by the desktop and never painted in the terminal (a manim frame in half-blocks loses the labels git-sim draws on it): Start without Wait, because the viewer outlives this call and its lifetime is the user's, not ours.
-func openImageViewer(image string) error {
-	cmd := exec.Command("xdg-open", image)
+// The HTML page opens in terminal-browser beside the dashboard; without it, the desktop browser is the honest fallback. Start without Wait: the browser outlives this call and its lifetime is the user's, not ours.
+func openImageViewer(page string) error {
+	if _, err := exec.LookPath("terminal-browser"); err == nil {
+		cmd := exec.Command("terminal-browser", "open", page, "--split", "right")
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		return cmd.Process.Release()
+	}
+	cmd := exec.Command("xdg-open", page)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

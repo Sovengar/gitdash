@@ -42,12 +42,17 @@ type Config struct {
 	Commands           Commands
 	// The executable comes from the global config only, never from the committed marker (untrusted input), and without a template the AI action cannot launch.
 	AICommands map[string]string
+	// AIAgents is the harness/model/effort route: the argv comes from the shared ai module instead of a command template.
+	AIAgents map[string]AIAgent
 	// Public hosts come from DefaultForges, so what needs declaring are the self-managed instances (or disabling unused ones with enabled = false).
 	Forges map[string]ForgeConfig
 }
 
 type aiActionConfig struct {
 	Command string `toml:"command"`
+	Harness string `toml:"harness"`
+	Model   string `toml:"model"`
+	Effort  string `toml:"effort"`
 }
 
 // Pointers tell "absent" (keep what is declared) from "zero": enabled = false has to be able to switch a provider off.
@@ -160,6 +165,9 @@ func LoadFrom(path string) (Config, string) {
 		if v.Command != "" {
 			cfg.AICommands[k] = v.Command
 		}
+		if v.Harness != "" {
+			cfg.AIAgents[k] = AIAgent{Harness: v.Harness, Model: v.Model, Effort: v.Effort}
+		}
 	}
 	// An unsupported provider warns instead of being accepted silently, otherwise its hosts resolve to a forge with no door and every PR fails with a cause that does not point at the config.
 	var unknownForges []string
@@ -240,8 +248,9 @@ func Defaults() Config {
 		FetchTimeout:     30 * time.Second,
 		Keybindings:      DefaultKeybindings(),
 		Commands:         DefaultCommands(),
-		// No default AI binary: the feature is opt-in, so without `command` the AI action can only warn.
+		// No default AI binary: the feature is opt-in, so without `command` or `harness` the AI action can only warn.
 		AICommands: map[string]string{},
+		AIAgents:   map[string]AIAgent{},
 		Forges:     DefaultForges(),
 	}
 }
