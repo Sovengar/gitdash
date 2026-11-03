@@ -176,3 +176,60 @@ func TestErrorUnwraps(t *testing.T) {
 		t.Errorf("Unwrap = %v, want the wrapped error (execExit reads the exit code through it)", got)
 	}
 }
+
+func TestVersionReadsTheSemverFromTheVersionFlag(t *testing.T) {
+	writeStub(t, "git-sim", "#!/bin/sh\necho 'git-sim version 0.4.0'\n")
+	got, err := Version()
+	if err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+	if got != "0.4.0" {
+		t.Errorf("Version = %q, want 0.4.0", got)
+	}
+}
+
+func TestVersionRejectsOutputWithoutASemver(t *testing.T) {
+	for name, out := range map[string]string{
+		"empty":       "",
+		"prose":       "git-sim version unknown",
+		"two parts":   "git-sim version 0.4",
+		"non-numeric": "git-sim version 0.x.0",
+		"extra part":  "git-sim version 0.4.0.1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeStub(t, "git-sim", "#!/bin/sh\nprintf '%s\\n' '"+out+"'\n")
+			if _, err := Version(); err == nil {
+				t.Fatalf("Version accepted %q", out)
+			}
+		})
+	}
+}
+
+func TestVersionFailsWhenTheBinaryFails(t *testing.T) {
+	writeStub(t, "git-sim", "#!/bin/sh\nexit 2\n")
+	if _, err := Version(); err == nil {
+		t.Fatal("Version accepted a failing binary")
+	}
+}
+
+func TestSupportsRebaseGatesOnTheVersion(t *testing.T) {
+	cases := map[string]bool{
+		"0.3.5": false,
+		"0.4.0": true,
+		"0.4.1": true,
+		"1.0.0": true,
+	}
+	for version, want := range cases {
+		writeStub(t, "git-sim", "#!/bin/sh\necho 'git-sim version "+version+"'\n")
+		if got := SupportsRebase(); got != want {
+			t.Errorf("%s: SupportsRebase = %v, want %v", version, got, want)
+		}
+	}
+}
+
+func TestSupportsRebaseIsFalseWithoutAVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if SupportsRebase() {
+		t.Error("SupportsRebase = true without a binary")
+	}
+}

@@ -8,11 +8,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const DefaultBin = "git-sim"
+
+// rebaseSince is the first release whose rebase renderer replays commits instead of indexing a short SHA list.
+const rebaseSince = "0.4.0"
 
 // A function, not a const: Go does not instrument constant expressions, so a package const would leave its ARITHMETIC_BASE mutant permanently NOT COVERED.
 func DefaultTimeout() time.Duration { return 60 * time.Second }
@@ -30,6 +34,60 @@ func New() *Runner { return &Runner{Timeout: DefaultTimeout()} }
 func Available(bin string) bool {
 	_, err := exec.LookPath(bin)
 	return err == nil
+}
+
+// SupportsRebase gates the variant on the version: 0.3.5 crashes with an IndexError on divergent rebases.
+func SupportsRebase() bool {
+	version, err := Version()
+	return err == nil && atLeast(version, rebaseSince)
+}
+
+// Version reads the semver from `git-sim --version`, which prints "git-sim version X.Y.Z".
+func Version() (string, error) {
+	out, err := exec.Command(DefaultBin, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	for _, field := range strings.Fields(string(out)) {
+		if isVersion(field) {
+			return field, nil
+		}
+	}
+	return "", fmt.Errorf("sim: cannot read the git-sim version from %q", strings.TrimSpace(string(out)))
+}
+
+func isVersion(field string) bool {
+	parts := strings.Split(strings.TrimPrefix(field, "v"), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func atLeast(have, want string) bool {
+	h, w := versionParts(have), versionParts(want)
+	for i := range h {
+		if h[i] != w[i] {
+			return h[i] > w[i]
+		}
+	}
+	return true
+}
+
+func versionParts(v string) [3]int {
+	var out [3]int
+	for i, part := range strings.Split(strings.TrimPrefix(v, "v"), ".") {
+		if i >= len(out) {
+			break
+		}
+		out[i], _ = strconv.Atoi(part)
+	}
+	return out
 }
 
 type Error struct {

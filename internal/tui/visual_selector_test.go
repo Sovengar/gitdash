@@ -19,7 +19,7 @@ func withVisualEnv(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
 	exe := filepath.Join(bin, "git-sim")
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"git-sim version 0.4.0\"; fi\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// The fake comes first so it beats the machine's real git-sim, and the original PATH is kept because the fixtures need `git`.
@@ -151,9 +151,9 @@ func TestVisualArgvVariants(t *testing.T) {
 		upstream string
 		want     []string
 	}{
-		{"pull", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "pull"}},
-		{"merge", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "merge", "origin/main"}},
-		{"rebase", "origin/main", []string{"git-sim", "--output-only-path", "--media-dir", dir, "rebase", "origin/main"}},
+		{"pull", "origin/main", []string{"git-sim", "--output-only-path", "--img-format", "html", "--open-in", "local", "--media-dir", dir, "pull"}},
+		{"merge", "origin/main", []string{"git-sim", "--output-only-path", "--img-format", "html", "--open-in", "local", "--media-dir", dir, "merge", "origin/main"}},
+		{"rebase", "origin/main", []string{"git-sim", "--output-only-path", "--img-format", "html", "--open-in", "local", "--media-dir", dir, "rebase", "origin/main"}},
 	}
 	for _, c := range cases {
 		got := visualArgv(c.sub, c.upstream, dir)
@@ -471,7 +471,7 @@ func TestVisualNotBlocksForRebaseInCourse(t *testing.T) {
 func TestVisualArgvSubUnknownNotInventsRef(t *testing.T) {
 	dir := "/cache/gitdash/git-sim"
 	got := visualArgv("squash", "origin/main", dir)
-	want := []string{"git-sim", "--output-only-path", "--media-dir", dir, "squash"}
+	want := []string{"git-sim", "--output-only-path", "--img-format", "html", "--open-in", "local", "--media-dir", dir, "squash"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("visualArgv(%q) = %#v, want %#v", "squash", got, want)
 	}
@@ -563,8 +563,9 @@ func writeVisualStubs(t *testing.T) string {
 	openLog := filepath.Join(t.TempDir(), "opened.log")
 	t.Setenv("OPEN_LOG", openLog)
 	for name, script := range map[string]string{
-		"git-sim":  "#!/bin/sh\necho \"$GS_IMAGE\"\n",
-		"xdg-open": "#!/bin/sh\necho \"$1\" >> \"$OPEN_LOG\"\n",
+		"git-sim":          "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"git-sim version 0.4.0\"; exit 0; fi\necho \"$GS_IMAGE\"\n",
+		"terminal-browser": "#!/bin/sh\necho \"$2\" >> \"$OPEN_LOG\"\n",
+		"xdg-open":         "#!/bin/sh\necho \"$1\" >> \"$OPEN_LOG\"\n",
 	} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -594,7 +595,7 @@ func waitForOpen(t *testing.T, openLog, want string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	data, _ := os.ReadFile(openLog)
-	t.Fatalf("xdg-open = %q, want it to receive %q", data, want)
+	t.Fatalf("opener = %q, want it to receive %q", data, want)
 }
 
 // The whole chain with real processes: the render is captured, the image is kept out of git-sim's subtree, xdg-open receives it, and the TUI never suspends (the command the key press returns is nil).

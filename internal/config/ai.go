@@ -3,7 +3,7 @@ package config
 import "strings"
 
 // AIAgent routes an AI action to a known harness. The argv comes from the
-// shared github.com/sovengar/ai capability table, so gitdash holds no flags per
+// shared github.com/sovengar/agentbridge capability table, so gitdash holds no flags per
 // agent.
 type AIAgent struct {
 	Harness string

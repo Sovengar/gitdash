@@ -102,12 +102,12 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 
 ## Visual preview
 
-- **git-sim integration** — `v` arms a selector; next key picks `p` (pull), `m` (merge), or `r` (rebase).
+- **git-sim integration** — `v` arms a selector; next key picks `p` (pull), `m` (merge), or `r` (rebase). Rebase requires git-sim 0.4.0 or newer (0.3.5 crashes on divergent rebases) and warns otherwise.
 - **Background render** — no terminal handoff: git-sim runs captured with `--output-only-path` (60s timeout), the outcome (git-sim's own verdict on failure) reports as a toast.
 - **Loading overlay** — while the render runs, a centered box (spinner + variant) paints over the dashboard; `esc` closes the overlay only — the render keeps going and still reports; it clears when the render answers.
-- **Image as an image** — the finished image opens with `xdg-open` (git-sim's own auto-open stays off); with no viewer available the toast carries the kept path instead.
+- **HTML in terminal-browser** — the render asks git-sim for `--img-format html --open-in local` (the hosted viewer blocks a captured render) and opens the page with `terminal-browser open <path> --split right` (detached); without terminal-browser it falls back to `xdg-open`. git-sim's own auto-open stays off; with no opener the toast carries the kept path.
 - **No-op guard** — merge/rebase variants are blocked when `behind == 0` (git-sim would abort); the warning names the fetch key.
-- **Media dir** — `--media-dir` is mandatory (git-sim writes `git-sim_media/` into the repo otherwise); the image is copied out of git-sim's per-repo subtree (deleted with its mp4/texts) and the cache keeps the last 20 renders.
+- **Media dir** — `--media-dir` is mandatory (git-sim writes `git-sim_media/` into the repo otherwise); the page is copied out of git-sim's per-repo subtree (deleted with its texts/videos) and the cache keeps the last 20 renders.
 
 ## Fetch
 

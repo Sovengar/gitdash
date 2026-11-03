@@ -558,12 +558,19 @@ evident:
 - **git-sim's own auto-open is forced off** (`sim.env` sets
   `git_sim_auto_open=false` and drops any user `git_sim_*`): its desktop-viewer
   call can hang a captured process forever without a display, and the viewer is
-  ours — `openImageViewer` starts `xdg-open` detached (Start + Release, never
-  Wait: the viewer's lifetime is the user's). A rendered image with no viewer is
-  a WARNING carrying the kept path, not an error.
+  ours — `openImageViewer` starts `terminal-browser open <page> --split right`
+  detached (Start + Release, never Wait: the browser's lifetime is the user's),
+  falling back to `xdg-open` when terminal-browser is absent. A rendered page
+  with no opener is a WARNING carrying the kept path, not an error.
+- **`--img-format html` is pinned**: git-sim 0.4.0 defaults to an interactive
+  HTML page, and the argv states it so 0.3.5 (jpg default) and 0.4.0 agree.
 - **`--no-animate` is NOT passed**: verified against the installed 0.3.5, it
   changes nothing (the mp4 is rendered either way, same duration), and the argv
   is user-visible in the log, so it must say what actually matters.
+- **Rebase is version-gated** (`sim.SupportsRebase`): 0.3.5's renderer crashes
+  with an `IndexError` on divergent rebases; 0.4.0 replays the commits. An
+  unreadable version keeps the variant blocked with a toast saying what to
+  upgrade.
 - **`sim.Keep` moves the image out and deletes git-sim's per-repo subtree.** The
   layout is `<media>/git-sim_media/<repo basename>/{images,texts,videos}` with
   timestamped image names; a render also leaves an animated 1080p mp4 and a
