@@ -343,10 +343,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// An armed removal has priority over everything (including the esc that closes the detail and the search/command inputs); any other key disarms and continues on its normal course.
 	if m.armed != nil {
-		switch {
-		case key == removalKeyDetach || key == removalKeyBranch:
+		switch key {
+		case removalKeyDetach, removalKeyBranch:
 			return m.handleWorktreeRemove(key)
-		case key == "esc":
+		case "esc":
 			m.armed = nil
 			return m, nil
 		default:
