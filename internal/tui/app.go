@@ -17,7 +17,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/sovengar/ai"
+	"github.com/sovengar/agentbridge"
 
 	"gitdash/internal/cache"
 	"gitdash/internal/cmdlog"
@@ -828,8 +828,8 @@ func (m *Model) pullAIArgv(path, prompt string) []string {
 	}
 	// No template: the shared ai module owns the argv. gitdash runs the agent
 	// in the background and captures its output, so the headless form is used.
-	argv, err := ai.HeadlessArgs(ai.Request{
-		Agent:  ai.Agent{Name: agent.Harness, Binary: agent.Harness},
+	argv, err := agentbridge.HeadlessArgs(agentbridge.Request{
+		Agent:  agentbridge.Agent{Name: agent.Harness, Binary: agent.Harness},
 		Model:  agent.Model,
 		Effort: agent.Effort,
 		Prompt: config.ExpandAIVars(prompt, prompt, vars),
@@ -850,10 +850,10 @@ func (m *Model) startPullAICmd(path string) tea.Cmd {
 		return m.toastCmd(toastWarning, "marker error — fix .gitdash.toml first")
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return m.toastCmd(toastInfo, "no AI pull prompt (.gitdash.toml [ai.pull].prompt)")
+		return m.toastCmd(toastInfo, "no AI pull prompt (.gitdash.toml [agentbridge.pull].prompt)")
 	}
 	if strings.TrimSpace(m.cfg.AICommand("pull")) == "" && m.cfg.AIAgentFor("pull").Harness == "" {
-		return m.toastCmd(toastInfo, "ai.pull command or harness not configured (~/.config/gitdash/config.toml)")
+		return m.toastCmd(toastInfo, "agentbridge.pull command or harness not configured (~/.config/gitdash/config.toml)")
 	}
 	argv := m.pullAIArgv(path, prompt)
 	if len(argv) == 0 {
