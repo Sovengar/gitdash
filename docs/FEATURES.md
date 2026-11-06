@@ -19,7 +19,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | [Visual preview](#visual-preview) | git-sim pull/merge/rebase simulation | `v` then `p`/`m`/`r` |
 | [Fetch](#fetch) | Fetch one repo or all (batched, concurrent) | `f` / `F` |
 | [Rescan & recollect](#rescan--recollect) | Re-walk the roots or re-read the cursor repo's git state | `r` / `R` |
-| [Editor & lazygit](#editor--lazygit) | Open `$EDITOR` or `lazygit` in the repo | `e` / `g` |
+| [Editor & launchers](#editor--launchers) | Open `$EDITOR`, `lazygit`, `lazyjj` or `but tui` in the repo | `e` / `g` then `g`/`j`/`b` |
 | [Command input](#command-input) | Run `$SHELL -c` in the repo; empty = interactive shell | `!` |
 | [Command log](#command-log) | Session timeline of intents and execs | `l`, `a` |
 | [Detail card](#detail-card) | Detail box (fields, worktrees, tails) + peer files box below the table | automatic |
@@ -119,9 +119,14 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Rescan** — `r` re-walks the roots for markers (refused with a toast while a scan is already running).
 - **Recollect** — `R` re-reads the git state of the cursor's repo without a full scan.
 
-## Editor & lazygit
+## Editor & launchers
 
-- `e` opens `$EDITOR` (configurable) in the repo directory; `g` opens `lazygit` (warns if not installed). Both are terminal handoffs.
+- **Editor** — `e` opens `$EDITOR` (configurable) in the repo directory; a terminal handoff.
+- **Launch prefix** — `g` does not launch anything: it arms the group and the next key picks the tool, like the pull selector. The prompt in the keybinds section reads `launch <repo>: g lazygit · j lazyjj · b gitbutler · esc cancel`; `esc` (or any other key) cancels, and the repo is captured when `g` arms, so the second key cannot act on a different row.
+- `g` `g` — `lazygit` in the repo (terminal handoff; warns if not installed).
+- `g` `j` — `lazyjj` in the repo (terminal handoff; warns if `lazyjj` is not installed, and refuses with `no jj repo — nothing to do` when `<path>/.jj` does not exist).
+- `g` `b` — `but tui` (GitButler CLI) in the repo (terminal handoff; warns if `but` is not installed).
+- All three are recorded in the command log as `key <action>` intents plus the `exec` of the handoff, and the busy guard refuses a repo that already has a launcher running. The sub-keys are remappable (`keybindings.lazyjj`, `keybindings.gitbutler`); the bar advertises only the prefix (`g git tool ▸`).
 
 ## Command input
 

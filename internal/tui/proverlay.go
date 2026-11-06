@@ -223,6 +223,7 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 	m.armed = nil
 	m.pullArmed = nil
 	m.visualArmed = nil
+	m.launchArmed = nil
 	m.branchArmed = nil
 	m.picker = nil
 	m.prFit()

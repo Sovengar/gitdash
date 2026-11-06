@@ -81,7 +81,7 @@ func TestPreviewInSubRowOfWorktree(t *testing.T) {
 	if !strings.Contains(panel, "(detached)") {
 		t.Errorf("the panel does not show the worktree branch:\n%s", panel)
 	}
-	for _, dup := range []string{"g lazygit", "! cmd"} {
+	for _, dup := range []string{"g git tool", "! cmd"} {
 		if strings.Contains(panel, dup) {
 			t.Errorf("the panel repeats %q, which is already in keybinds:\n%s", dup, panel)
 		}

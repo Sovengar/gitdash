@@ -86,6 +86,8 @@ func (m Model) promptLine() string {
 		return m.removePrompt()
 	case m.pullArmed != nil:
 		return m.pullPrompt()
+	case m.launchArmed != nil:
+		return m.launchPrompt()
 	case m.visualArmed != nil:
 		return m.visualPrompt()
 	case m.branchArmed != nil:

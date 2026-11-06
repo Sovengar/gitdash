@@ -207,7 +207,10 @@ func DefaultKeybindings() Keybindings {
 		"config":    "c",
 		"pull":      "p",
 		"editor":    "e",
-		"lazygit":   "g",
+		"git_tool":  "g",
+		// lazyjj and gitbutler are the sub-keys of the git tool prefix, remappable like any action.
+		"lazyjj":    "j",
+		"gitbutler": "b",
 		"rescan":    "r",
 		"recollect": "R",
 		// enter is the only fold key: it folds the worktrees under the cursor and the group blocks, since the repo card has its own section and nothing needs a detail view.
@@ -307,7 +310,9 @@ var hintLabels = map[string]string{
 	"fetch_all": "fetch all",
 	"sync":      "sync branch",
 	"pull":      "pull ▸",
-	"lazygit":   "lazygit",
+	"git_tool":  "git tool ▸",
+	"lazyjj":    "lazyjj",
+	"gitbutler": "gitbutler",
 	"editor":    "edit",
 	"rescan":    "rescan",
 	"recollect": "recollect",
@@ -325,9 +330,15 @@ var hintLabels = map[string]string{
 // Lives outside HintBarLines so a test can require a label per action: an unlabelled one would render as a bare key ("p "), indistinguishable from a render bug.
 var hintActions = []string{
 	"dirty", "search", "fetch", "fetch_all", "sync", "switch", "worktree", "config", "pull",
-	"lazygit", "editor", "rescan", "recollect",
+	"git_tool", "lazyjj", "gitbutler", "editor", "rescan", "recollect",
 	"fold", "command", "log", "quit", "visual",
 	"pr",
+}
+
+// A sub-key only works after its prefix key, so the bar names the whole group once and never paints the sub-key as a key of its own.
+var hintSubkeys = map[string]bool{
+	"lazyjj":    true,
+	"gitbutler": true,
 }
 
 func (c Config) HintBarLines() []string {
@@ -337,7 +348,7 @@ func (c Config) HintBarLines() []string {
 
 	for _, action := range hintActions {
 		key, ok := c.Keybindings[action]
-		if !ok {
+		if !ok || hintSubkeys[action] {
 			continue
 		}
 		hint := key + " " + hintLabels[action]

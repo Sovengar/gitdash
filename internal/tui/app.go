@@ -154,6 +154,33 @@ type armedBranch struct {
 	path, refreshPath string
 }
 
+// Captures the path when the launch prefix armed: the launcher resolves on that row, not on whatever sits under the cursor by then.
+type armedLaunch struct {
+	path string
+}
+
+// Single source of the launch sub-keys: the prompt and the dispatch read the same table, and the key comes from the config so a rebind reaches both.
+type launchOption struct {
+	action string
+	label  string
+	open   func(*Model, string) tea.Cmd
+}
+
+var launchOptions = []launchOption{
+	{"git_tool", "lazygit", (*Model).openLazygitCmd},
+	{"lazyjj", "lazyjj", (*Model).openLazyjjCmd},
+	{"gitbutler", "gitbutler", (*Model).openGitbutlerCmd},
+}
+
+func launchOptionForKey(cfg config.Config, key string) (launchOption, bool) {
+	for _, o := range launchOptions {
+		if cfg.KeyFor(o.action) == key {
+			return o, true
+		}
+	}
+	return launchOption{}, false
+}
+
 // Single source of the `b` variants, so the prompt and the dispatch cannot desync.
 type branchOption struct {
 	key   string
@@ -289,6 +316,7 @@ type Model struct {
 	armed       *armedRemoval
 	pullArmed   *armedPull
 	visualArmed *armedVisual
+	launchArmed *armedLaunch
 	visualBusy  *visualFlight
 	branchArmed *armedBranch
 	configArmed *armedBranch
@@ -760,18 +788,34 @@ func (m *Model) openEditorCmd(path string) tea.Cmd {
 }
 
 func (m *Model) openLazygitCmd(path string) tea.Cmd {
-	if _, err := exec.LookPath("lazygit"); err != nil {
-		return m.toastCmd(toastWarning, "lazygit not installed")
+	return m.openHandoffCmd("lazygit", path, []string{"lazygit"})
+}
+
+func (m *Model) openLazyjjCmd(path string) tea.Cmd {
+	// jj and git share a directory, so the marker of a jj repo is the .jj folder; without it lazyjj would open on nothing.
+	if _, err := os.Stat(filepath.Join(path, ".jj")); err != nil {
+		return m.toastCmd(toastWarning, "no jj repo — nothing to do")
+	}
+	return m.openHandoffCmd("lazyjj", path, []string{"lazyjj"})
+}
+
+func (m *Model) openGitbutlerCmd(path string) tea.Cmd {
+	return m.openHandoffCmd("gitbutler", path, []string{"but", "tui"})
+}
+
+// The launchers differ only in argv and in the guards they add around it; the binary check comes BEFORE the busy guard, or a machine without the tool would be told something else is already running there.
+func (m *Model) openHandoffCmd(action, path string, argv []string) tea.Cmd {
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		return m.toastCmd(toastWarning, argv[0]+" not installed")
 	}
 	if prev, busy := m.running[path]; busy {
 		return m.toastCmd(toastWarning, fmt.Sprintf("%s already running in %s", prev, m.nameOf(path)))
 	}
-	m.running[path] = "lazygit"
-	argv := []string{"lazygit"}
-	cmd := exec.Command("lazygit")
+	m.running[path] = action
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = path
 	return m.handoff(cmd, func(err error) tea.Msg {
-		return m.handoffDone("lazygit", path, argv, err)
+		return m.handoffDone(action, path, argv, err)
 	})
 }
 

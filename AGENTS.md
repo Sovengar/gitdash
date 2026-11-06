@@ -304,6 +304,32 @@ never measures more than its content. With a warning armed, `computeLayout`
 degrades **stats before keybinds** (`keepKeybinds`): if the warning's box were to
 fall, the app would be waiting for a key without saying which ones.
 
+## Design gotcha: the launch prefix (`g`)
+
+`g` used to launch `lazygit`; it now arms `launchArmed` like `p` arms the pull
+selector, and the **next** key picks the tool (`g lazygit`, `j lazyjj`,
+`b but tui`). Decisions that are not evident:
+
+- **`launchOptions` (app.go) is the single source**: prompt and dispatch both
+  read it, and each option carries its own `open` method, so a new launcher is
+  one entry and no `switch` with an unreachable arm (which the 100% diff gate
+  would rightly refuse).
+- **The sub-keys come from the config** (`keybindings.git_tool` is the prefix,
+  `lazyjj`/`gitbutler` the sub-keys), unlike the literal keys of
+  `branchOptions`/`visualOptions`: these two are real actions with their own
+  config entry, so a rebind has to reach both the prompt and the dispatch.
+- **The hint bar advertises only the prefix** (`g git tool ▸`):
+  `hintSubkeys` keeps `j lazyjj`/`b gitbutler` out of the flat rows, because
+  those keys do nothing until `g` armed. The keys themselves are validated there
+  (a label per action) since that list is the only inventory.
+- **The repo guard sits at arming**, as in `case "pull"`: one toast covers all
+  three launchers, and no arm can survive on a row without a repo.
+- **The three launchers share `openHandoffCmd`** (LookPath → busy guard →
+  handoff), so `lazygit not installed` / `lazyjj not installed` /
+  `but not installed` cannot drift apart; `lazyjj` adds a `.jj` check because
+  git and jj share the directory and lazyjj on a plain git repo opens on nothing.
+  GitButler gets no marker check on purpose: `but tui` works on a git repo.
+
 ## Design gotcha: the preview panel
 
 Below the table there is the bottom band for the repo under the cursor (prdash
@@ -357,7 +383,7 @@ evident:
 - **The path is a field, not a loose line**: `path` goes in the same key/value
   column as `branch`/`upstream`/`state`/`sync`/`activity`, and its value is dimmed
   (it is context, not state).
-- **The card does not repeat the row's keys**: `g lazygit · ! cmd` are already in
+- **The card does not repeat the row's keys**: `g git tool · ! cmd` are already in
   the keybinds section, so the card has no footer. Duplicating them cost a line of
   useful height and two sources that could diverge on a rebind.
 - **The `!` input goes on the detail box's last line and is always visible**
@@ -722,10 +748,10 @@ block. Decisions that are not evident:
 
 - **Every git exec goes through `runGit`/`runGitCombined`** (`gitstatus`), which
   measure and record. If you add a new git verb outside them, it does not appear
-  in the log. The 6 `exec.Command`s of `tui/app.go` (editor, lazygit, `pull_ai`,
-  xdg-open, `!`, shell) are outside: they are recorded by hand, in `execDoneMsg`
-  (handoffs, on return) and in `openCmdCmd` (the `!`, which does measure
-  duration). Handoffs go with `Dur = 0`: measuring them would require storing the
+  in the log. The `exec.Command`s of `tui/app.go` (editor, the `g` launchers
+  through one `openHandoffCmd`, `pull_ai`, xdg-open, `!`, shell) are outside:
+  they are recorded by hand, in `execDoneMsg` (handoffs, on return) and in
+  `openCmdCmd` (the `!`, which does measure duration). Handoffs go with `Dur = 0`: measuring them would require storing the
   start in the model. git-sim is outside app.go too: it leaves through
   `internal/sim` (`Runner.Render`), and the visual exec is recorded by hand from
   `visualDoneMsg` (measured, like the `!`). `gh`/`glab` are not git: they leave through

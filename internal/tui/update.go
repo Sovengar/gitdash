@@ -381,6 +381,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// The launch prefix arms like the pull selector: the sub-keys are real actions (lazygit itself) and navigation (j), so they have to be consumed before the normal routing.
+	if m.launchArmed != nil {
+		armed := *m.launchArmed
+		m.launchArmed = nil
+		if o, ok := launchOptionForKey(m.cfg, key); ok {
+			cmdlog.RecordIntent(cmdlog.Entry{
+				Class:  cmdlog.ClassAction,
+				Repo:   m.nameOf(armed.path),
+				Dir:    armed.path,
+				Key:    key,
+				Action: o.action,
+			})
+			return m, o.open(&m, armed.path)
+		}
+	}
+
 	if m.visualArmed != nil {
 		armed := *m.visualArmed
 		m.visualArmed = nil
@@ -646,12 +662,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.openEditorCmd(r.project.Path)
 		}
-	case "lazygit":
+	case "git_tool":
+		// It only arms: the second key picks the launcher, and the repo guard here covers all three (none of them has anything to open without a repo).
 		if r, ok := m.selected(); ok {
 			if !r.project.HasRepo {
 				return m, m.toastCmd(toastInfo, "no git repo — nothing to do")
 			}
-			return m, m.openLazygitCmd(r.project.Path)
+			m.launchArmed = &armedLaunch{path: r.project.Path}
+			return m, nil
 		}
 	case "rescan":
 		if m.scanning {
@@ -703,8 +721,9 @@ func (m Model) toggleFold() (tea.Model, tea.Cmd) {
 // Recording "I pressed enter to fold" says nothing about which commands ran, so pure view actions (filter, search, fold, the log panel, quit) leave no entry.
 var commandActions = map[string]bool{
 	"fetch": true, "fetch_all": true, "pull": true,
-	"sync":    true,
-	"lazygit": true, "editor": true, "rescan": true, "recollect": true,
+	"sync":     true,
+	"git_tool": true, "lazyjj": true, "gitbutler": true,
+	"editor": true, "rescan": true, "recollect": true,
 	"command": true, "visual": true, "pr": true,
 }
 
@@ -712,7 +731,8 @@ func launchesCommand(action string) bool { return commandActions[action] }
 
 // Pressing `p` on a group header is not a command anybody would want audited, so actions needing a row leave no intent without one.
 var rowActions = map[string]bool{
-	"fetch": true, "pull": true, "lazygit": true,
+	"fetch": true, "pull": true, "git_tool": true,
+	"lazyjj": true, "gitbutler": true,
 	"sync":   true,
 	"editor": true, "recollect": true, "command": true,
 	"visual": true, "pr": true,
@@ -809,6 +829,18 @@ func (m Model) visualPrompt() string {
 		variants = append(variants, fmt.Sprintf("%s %s", o.key, o.label))
 	}
 	return fmt.Sprintf("visual %s: %s · esc cancel", m.nameOf(m.visualArmed.path), strings.Join(variants, " · "))
+}
+
+// Variants come from launchOptions and their keys from the config, so a rebind cannot leave the prompt advertising a key that no longer dispatches.
+func (m Model) launchPrompt() string {
+	if m.launchArmed == nil {
+		return ""
+	}
+	variants := make([]string, 0, len(launchOptions))
+	for _, o := range launchOptions {
+		variants = append(variants, fmt.Sprintf("%s %s", m.cfg.KeyFor(o.action), o.label))
+	}
+	return fmt.Sprintf("launch %s: %s · esc cancel", m.nameOf(m.launchArmed.path), strings.Join(variants, " · "))
 }
 
 func (m Model) removePrompt() string {

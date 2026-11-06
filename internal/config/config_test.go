@@ -606,3 +606,76 @@ func TestDefaultKeybindingsSync(t *testing.T) {
 		t.Errorf("sync hint missing: %v", cfg.HintBarLines())
 	}
 }
+
+// The three launchers share the `g` prefix: the bar advertises the prefix once and never paints a sub-key as a key of its own, or the hint would lie about how to reach lazyjj.
+func TestDefaultKeybindingsLaunchGroup(t *testing.T) {
+	cfg := Defaults()
+	for action, want := range map[string]string{"git_tool": "g", "lazyjj": "j", "gitbutler": "b"} {
+		if got := cfg.KeyFor(action); got != want {
+			t.Errorf("default %s = %q, want %q", action, got, want)
+		}
+	}
+	hints := strings.Join(cfg.HintBarLines(), "\n")
+	if !strings.Contains(hints, "g git tool ▸") {
+		t.Errorf("launch hint missing: %v", cfg.HintBarLines())
+	}
+	for _, lie := range []string{"j lazyjj", "b gitbutler"} {
+		if strings.Contains(hints, lie) {
+			t.Errorf("the hint advertises %q, which only works after the prefix: %v", lie, cfg.HintBarLines())
+		}
+	}
+
+	path := write(t, `
+[keybindings]
+git_tool  = "L"
+lazyjj    = "J"
+gitbutler = "B"
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	for action, want := range map[string]string{"git_tool": "L", "lazyjj": "J", "gitbutler": "B"} {
+		if got := cfg.KeyFor(action); got != want {
+			t.Errorf("rebound %s = %q, want %q", action, got, want)
+		}
+	}
+	hints = strings.Join(cfg.HintBarLines(), "\n")
+	if !strings.Contains(hints, "L git tool ▸") {
+		t.Errorf("rebound launch hint missing: %v", cfg.HintBarLines())
+	}
+	if strings.Contains(hints, "g git tool") {
+		t.Errorf("the hint still has the old prefix key: %v", cfg.HintBarLines())
+	}
+}
+
+// The harness route is a separate field from the command template: declaring only
+// `harness` has to reach AIAgents, or the AI action would resolve to no argv at all.
+func TestLoadFromAIHarnessRoute(t *testing.T) {
+	path := write(t, `
+[ai.pull]
+harness = "claude"
+model = "opus"
+effort = "high"
+
+[ai.visual]
+command = "echo hi"
+`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	got := cfg.AIAgentFor("pull")
+	if got.Harness != "claude" || got.Model != "opus" || got.Effort != "high" {
+		t.Errorf("AIAgentFor(pull) = %+v, want claude/opus/high", got)
+	}
+	if cfg.AICommand("pull") != "" {
+		t.Errorf("AICommand(pull) = %q, want empty (no command declared)", cfg.AICommand("pull"))
+	}
+	if cfg.AICommand("visual") != "echo hi" {
+		t.Errorf("AICommand(visual) = %q, want the declared command", cfg.AICommand("visual"))
+	}
+	if agent := cfg.AIAgentFor("visual"); agent.Harness != "" {
+		t.Errorf("AIAgentFor(visual) = %+v, want no harness", agent)
+	}
+}

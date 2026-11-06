@@ -140,6 +140,7 @@ func TestGLazygit(t *testing.T) {
 	m := newTestModel(t, []discovery.Project{p},
 		map[string]gitstatus.Snapshot{p.Path: snapClean()})
 
+	m, _ = press(m, "g") // arms the launch prefix
 	m, cmd := press(m, "g")
 	if m.running[p.Path] != "lazygit" {
 		t.Fatalf("running = %q, want \"lazygit\"", m.running[p.Path])
@@ -151,6 +152,7 @@ func TestGLazygit(t *testing.T) {
 	without := proj("bare", "/tmp/gitdash-test/bare", false)
 	m2 := newTestModel(t, []discovery.Project{without},
 		map[string]gitstatus.Snapshot{without.Path: snapClean()})
+	m2, _ = press(m2, "g")
 	m2, cmd2 := press(m2, "g")
 	if _, busy := m2.running[without.Path]; busy {
 		t.Fatal("g launched lazygit in a repo without git")

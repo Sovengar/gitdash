@@ -160,6 +160,32 @@ the actions are remappable in the `[keybindings]` table of
 `~/.config/gitdash/config.toml`. The inventory of what each action does and how
 it is triggered is in [`docs/FEATURES.md`](docs/FEATURES.md).
 
+## Launching a git tool: the `g` prefix
+
+`g` does not launch: it arms a prefix and the **next** key picks the tool, the
+same shape as the pull selector.
+
+| Key | Tool | Requirement |
+|---|---|---|
+| `g` `g` | `lazygit` | `lazygit` on `PATH` |
+| `g` `j` | `lazyjj` | `lazyjj` on `PATH` and a `.jj` folder in the repo |
+| `g` `b` | `but tui` (GitButler CLI) | `but` on `PATH` |
+
+All three are terminal handoffs that run in the cursor's repo (a worktree subrow
+uses its own path), and each one is recorded in the command log (`key g git_tool`
+… plus the `exec`). The sub-keys are remappable:
+
+```toml
+[keybindings]
+git_tool  = "g"   # the prefix key
+lazyjj    = "j"
+gitbutler = "b"
+```
+
+Any other key cancels the prefix and runs its normal action (`esc` just
+cancels). Without the binary, or with `g` `j` in a repo that is not a jj repo,
+gitdash only warns and launches nothing.
+
 ## Pull: the policy lives in your gitconfig
 
 `p` does not run a pull: it opens a selector and the **next** key picks the
@@ -224,7 +250,7 @@ Results the panel tells apart: `rebase`, `rebase+autostash`, `merge`,
 
 The log lives **in memory and per session only** (500 entries): it writes no
 file. An intent with no `exec` behind it means the action was rejected later (the
-repo already had one running, `lazygit` is not installed, or the AI pull lacked a
+repo already had one running, `lazygit`/`lazyjj`/`but` is not installed, or the AI pull lacked a
 prompt, command or binary); the reason is in the toast of that same moment.
 
 The **AI pull** (`p` `a`) also leaves its two lines: the `key a` intent and the
@@ -237,8 +263,8 @@ is where you audit what the AI was asked for.
   indicator and are **expanded/folded with `enter`** on their row. Expanded,
   every worktree of `git worktree list` appears as a **navigable and operable
   subrow** (including the ones with no marker and the ones outside the roots):
-  the cursor can sit on it and *all* repo actions (fetch, pull, lazygit,
-  editor, recollect and `!`) run against that worktree's path, just like the
+  the cursor can sit on it and *all* repo actions (fetch, pull, the `g`
+  launchers, editor, recollect and `!`) run against that worktree's path, just like the
   card. The subrow shows its branch (or `(detached)`) and leaves the per-worktree
   state cells empty (no dirty/ahead/behind/sync is invented). The expanded/folded
   state persists across sessions (the same `collapsed.json` as the group folding,

@@ -484,6 +484,7 @@ func TestWorktreeHandoffPath(t *testing.T) {
 	mg := newTestModel(t, []discovery.Project{p}, st)
 	mg, _ = press(mg, "enter")
 	mg, _ = press(mg, "down")
+	mg, _ = press(mg, "g") // arms the launch prefix
 	mg, _ = press(mg, "g")
 	if mg.running["/tmp/wt-a"] != "lazygit" {
 		t.Errorf("lazygit running = %q", mg.running["/tmp/wt-a"])
