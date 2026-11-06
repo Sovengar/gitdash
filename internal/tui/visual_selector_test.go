@@ -710,3 +710,33 @@ func TestVisualWithoutOpenerWarnsWithTheImagePath(t *testing.T) {
 		t.Errorf("toast = %q, want the kept image's path (%q) to open it by hand", got, dm.image)
 	}
 }
+
+// git-sim older than 0.4.0 crashes on a divergent rebase, so the variant is
+// refused before the render starts and nothing is marked as running.
+func TestVisualRebaseRefusedOnOldGitSim(t *testing.T) {
+	bin := t.TempDir()
+	exe := filepath.Join(bin, "git-sim")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"git-sim version 0.3.5\"; fi\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	m := newPullModel(t)
+	m = cursorOn(t, m, "/tmp/behind-web")
+	m, _ = press(m, "v")
+	m, cmd := press(m, "r")
+
+	if _, busy := m.running["/tmp/behind-web"]; busy {
+		t.Errorf("the rebase render started on an old git-sim: running = %q", m.running["/tmp/behind-web"])
+	}
+	if m.visualBusy != nil {
+		t.Error("the overlay is painted for a render that was refused")
+	}
+	if cmd == nil {
+		t.Fatal("a refused variant should notify")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "0.4.0") {
+		t.Errorf("notification = %v, want the git-sim version warning", cmd())
+	}
+}

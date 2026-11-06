@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"gitdash/internal/cmdlog"
+	"gitdash/internal/config"
 	"gitdash/internal/discovery"
 	"gitdash/internal/gitstatus"
 	"gitdash/internal/testutil"
@@ -343,5 +344,61 @@ func TestPullAIWarnsOfMarkerBroken(t *testing.T) {
 	}
 	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "marker error") {
 		t.Errorf("notification = %v, want the broken-marker warning", cmd())
+	}
+}
+
+// Without a template the argv comes from the harness route; with neither there is
+// nothing to run, and the caller has to see an empty argv instead of a guess.
+func TestPullAIArgvWithoutTemplateNorHarness(t *testing.T) {
+	dir := t.TempDir()
+	m := newAIModel(t, dir, "fix the rebase", "")
+
+	if argv := m.pullAIArgv(dir, "fix the rebase"); argv != nil {
+		t.Errorf("pullAIArgv = %#v, want nil", argv)
+	}
+}
+
+func TestPullAIArgvFromTheHarness(t *testing.T) {
+	dir := t.TempDir()
+	m := newAIModel(t, dir, "fix {branch} now", "")
+	m.cfg.AIAgents = map[string]config.AIAgent{"pull": {Harness: "pi", Model: "opus", Effort: "high"}}
+
+	argv := m.pullAIArgv(dir, "fix {branch} now")
+	if len(argv) == 0 {
+		t.Fatal("pullAIArgv is empty with a harness declared")
+	}
+	if argv[0] != "pi" {
+		t.Errorf("argv[0] = %q, want pi (the harness binary)", argv[0])
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{"opus", "high"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not carry the %q route: %v", want, argv)
+		}
+	}
+	// The prompt is resolved with the row's vars, not passed raw.
+	if strings.Contains(joined, "{branch}") {
+		t.Errorf("the prompt placeholders reached the argv unexpanded: %v", argv)
+	}
+}
+
+// A harness the shared capability table does not know cannot produce an argv, so
+// the action warns instead of running something else.
+func TestPullAIUnknownHarnessNotifies(t *testing.T) {
+	dir := t.TempDir()
+	m := newAIModel(t, dir, "fix the rebase", "")
+	m.cfg.AIAgents = map[string]config.AIAgent{"pull": {Harness: "definitely-not-an-agent"}}
+
+	m, _ = press(m, "p")
+	m, cmd := press(m, "a")
+
+	if _, busy := m.running[dir]; busy {
+		t.Errorf("a launched the handoff with an unknown harness: running = %q", m.running[dir])
+	}
+	if cmd == nil {
+		t.Fatal("with no argv it should notify")
+	}
+	if nm, ok := cmd().(notifyMsg); !ok || !strings.Contains(nm.text, "no argv") {
+		t.Errorf("notification = %v, want the no-argv warning", cmd())
 	}
 }

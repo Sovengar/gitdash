@@ -233,3 +233,18 @@ func TestSupportsRebaseIsFalseWithoutAVersion(t *testing.T) {
 		t.Error("SupportsRebase = true without a binary")
 	}
 }
+
+// versionParts owns the truncation and the zero fill: a longer version keeps its
+// three leading numbers, and a shorter one pads instead of leaving garbage.
+func TestVersionPartsTruncatesAndPads(t *testing.T) {
+	for version, want := range map[string][3]int{
+		"v0.4":      {0, 4, 0},
+		"1.2.3":     {1, 2, 3},
+		"1.2.3.4":   {1, 2, 3},
+		"v10.20.30": {10, 20, 30},
+	} {
+		if got := versionParts(version); got != want {
+			t.Errorf("versionParts(%q) = %v, want %v", version, got, want)
+		}
+	}
+}
