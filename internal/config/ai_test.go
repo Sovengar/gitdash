@@ -65,3 +65,30 @@ func TestBuildAIArgvTemplateEmpty(t *testing.T) {
 		t.Errorf("argv = %#v, want empty", argv)
 	}
 }
+
+// The prompt is one value and never rescanned: the placeholders inside it must
+// survive as text, or a prompt that mentions {branch} would be rewritten.
+func TestExpandAIVars(t *testing.T) {
+	vars := map[string]string{"branch": "main", "behind": "2"}
+	got := ExpandAIVars("fix {branch}, {behind} behind: {prompt}", "do {branch} now", vars)
+	want := "fix main, 2 behind: do {branch} now"
+	if got != want {
+		t.Errorf("ExpandAIVars = %q, want %q", got, want)
+	}
+}
+
+func TestExpandAIVarsWithoutVars(t *testing.T) {
+	if got := ExpandAIVars("say {prompt}", "hi", nil); got != "say hi" {
+		t.Errorf("ExpandAIVars = %q, want %q", got, "say hi")
+	}
+}
+
+// An empty template yields no argv at all, so the caller can tell "nothing
+// configured" from a command whose first field happens to be empty.
+func TestBuildAIArgvEmptyTemplate(t *testing.T) {
+	for _, template := range []string{"", "   ", "\t\n"} {
+		if argv := BuildAIArgv(template, "prompt", nil); argv != nil {
+			t.Errorf("BuildAIArgv(%q) = %#v, want nil", template, argv)
+		}
+	}
+}
