@@ -1,0 +1,6 @@
+# Local toolchain pinned to what go.mod and CI use (`go-version-file: go.mod`).
+# Why it is not "latest": with go1.27 the stdlib export data version breaks
+# golangci-lint v2.13.2 (pinned in the Makefile), and the coverage block of
+# `func main()` starts one line lower, which fails TestMainInSubprocess.
+[tools]
+go = "1.26.3"
