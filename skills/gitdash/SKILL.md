@@ -46,6 +46,10 @@ The first `g` only arms the prefix (a prompt in the keybinds line, `esc` cancels
 
 `w d` and `w D` are plain git (`git worktree remove` + `git branch -d/-D`), so they work without `wt`. The same key twice confirms; another key only re-arms. Arming checks the worktree with `git status --porcelain`, so a dirty worktree asks first (`d to delete anyway, esc to cancel`) and the confirmation runs with `--force`; an unmerged branch asks the same way before `-D`. `D` on a detached worktree only warns.
 
+## Discovery
+
+`roots` in `~/.config/gitdash/config.toml` are walked for `.gitdash.toml`. `repos` lists extra paths explicitly, so a repo outside the roots or without a marker still appears; the marker stays optional and wins for name, groups, and sync branch. A path found twice is listed once, and an unreadable entry only warns.
+
 ## Batch Rule
 
 Use a preview or status command before a batched mutation. Report every repository separately; never infer that one successful repository proves the others are safe.

@@ -52,6 +52,7 @@ prompt = "fix the rebase that was left half-done"   # text your AI command recei
 ```toml
 marker      = ".gitdash.toml"
 roots       = ["~/dev"]
+repos       = []          # explicit repo paths; the marker is optional there
 exclude     = ["node_modules", "target", "vendor", "dist", "build", "out",
                "coverage", ".venv", "__pycache__", ".gradle", ".terraform"]
 editor      = "vi"        # $EDITOR when it is set
@@ -297,7 +298,13 @@ is where you audit what the AI was asked for.
 It walks the `roots` with unlimited depth (pruning hidden dirs and `exclude`),
 looking for the marker. The marker's folder IS the repo: `.git` directory =
 normal repo, `.git` file = worktree (tagged `[wt]`), no `.git` = visible as
-`no repo`. The derived states: `clean`, `dirty`, `ahead`, `behind`, `diverged`,
+`no repo`.
+
+`repos` in the global config lists extra repos explicitly, so a repo outside the
+roots (or without a marker) still appears. A listed repo without a marker is
+still a repo; when the marker exists it keeps providing the name, groups and
+sync branch. A repo found by both the walk and `repos` is listed once. An
+unreadable entry warns and never aborts the scan. The derived states: `clean`, `dirty`, `ahead`, `behind`, `diverged`,
 `no-upstream`, `detached`, `no repo`, `error` — ordered attention-first.
 
 ## Development

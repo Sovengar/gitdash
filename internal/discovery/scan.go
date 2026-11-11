@@ -31,6 +31,7 @@ type Project struct {
 func Scan(cfg config.Config) ([]Project, error) {
 	var projects []Project
 	var errs []string
+	seen := make(map[string]bool)
 
 	for _, root := range cfg.Roots {
 		abs, err := filepath.Abs(root)
@@ -43,7 +44,31 @@ func Scan(cfg config.Config) ([]Project, error) {
 			errs = append(errs, fmt.Sprintf("unreadable root: %s", root))
 			continue
 		}
-		projects = append(projects, scanRoot(abs, cfg)...)
+		for _, p := range scanRoot(abs, cfg) {
+			if !seen[p.Path] {
+				seen[p.Path] = true
+				projects = append(projects, p)
+			}
+		}
+	}
+
+	// Explicit repos are listed by the user, so a missing one is a notice and never a silent skip; a repo already found by the walk keeps its marker metadata and is not listed twice.
+	for _, repo := range cfg.Repos {
+		if strings.TrimSpace(repo) == "" {
+			continue
+		}
+		// Abs only fails when the working directory is gone; an empty result lands in the unreadable notice below.
+		abs, _ := filepath.Abs(repo)
+		info, err := os.Stat(abs)
+		if err != nil || !info.IsDir() {
+			errs = append(errs, fmt.Sprintf("unreadable repo: %s", repo))
+			continue
+		}
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		projects = append(projects, inspect(abs, cfg.Marker))
 	}
 
 	// slices.SortFunc instead of sort.Slice: the three-way comparator is idiomatic and hides no path comparison inside a closure.
@@ -90,7 +115,10 @@ func inspect(dir, marker string) Project {
 
 	metadata, err := parseMarker(filepath.Join(dir, marker))
 	if err != nil {
-		p.MarkerErr = err.Error()
+		// A listed repo may carry no marker; a missing one is not malformed, an unreadable or broken one still warns.
+		if !errors.Is(err, fs.ErrNotExist) {
+			p.MarkerErr = err.Error()
+		}
 	} else {
 		if metadata.Name != "" {
 			p.Name = metadata.Name

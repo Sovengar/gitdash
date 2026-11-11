@@ -9,7 +9,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 | Feature | What it does | Trigger |
 |---|---|---|
 | [Dashboard & table](#dashboard--table) | Attention-first repo table with branch, dirty, ahead/behind, sync | TUI |
-| [Discovery & marker file](#discovery--marker-file) | Walk roots for `.gitdash.toml`; the folder is the repo | `roots`, `marker` config |
+| [Discovery & marker file](#discovery--marker-file) | Walk roots for `.gitdash.toml`; explicit `repos` need no marker | `roots`, `repos`, `marker` config |
 | [Groups & worktrees](#groups--worktrees) | Two-level foldable groups; worktrees as navigable subrows | `enter`, marker `primary_group`/`secondary_group` |
 | [Pull selector](#pull-selector) | Armed prefix key; next key picks the policy variant | `p` then `p`/`r`/`f`/`m`/`a` |
 | [Switch branch](#switch-branch) | Switch to an existing branch or create one from the branch picker | `s` |
@@ -45,6 +45,7 @@ Concise feature inventory of gitdash. Details live in `../README.md` and `adr/`.
 - **Fields** — `name`, `primary_group`, `secondary_group`, `sync_branch`, `[ai.pull].prompt`.
 - **Classification** — `.git` dir = normal repo; `.git` file = worktree (tagged `[wt]`); no `.git` = `no repo`.
 - **Roots** — walked with unlimited depth; hidden dirs and `exclude` pruned (default excludes include `testdata`).
+- **Explicit repos** — `repos` in the global config adds paths outside the roots or without a marker; the marker stays optional and, when present, still supplies name/groups/sync branch. A path found by both is listed once; an unreadable one warns without aborting the scan.
 
 ## Groups & worktrees
 

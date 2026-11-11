@@ -28,8 +28,10 @@ type Keybindings map[string]string
 type Commands map[string]string
 
 type Config struct {
-	Marker     string
-	Roots      []string
+	Marker string
+	Roots  []string
+	// Repos lists explicit repo paths, scanned in addition to the marker walk; the marker is optional there.
+	Repos      []string
 	Exclude    []string
 	Editor     string
 	SyncBranch string
@@ -72,6 +74,7 @@ type fetchConfig struct {
 type fileConfig struct {
 	Marker      *string                   `toml:"marker"`
 	Roots       []string                  `toml:"roots"`
+	Repos       []string                  `toml:"repos"`
 	Exclude     []string                  `toml:"exclude"`
 	Editor      *string                   `toml:"editor"`
 	SyncBranch  *string                   `toml:"sync_branch"`
@@ -114,6 +117,9 @@ func LoadFrom(path string) (Config, string) {
 	}
 	if fc.Roots != nil {
 		cfg.Roots = expandAll(fc.Roots)
+	}
+	if fc.Repos != nil {
+		cfg.Repos = expandAll(fc.Repos)
 	}
 	if fc.Exclude != nil {
 		cfg.Exclude = fc.Exclude

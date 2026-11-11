@@ -483,3 +483,113 @@ func TestParseMarkerUnreadablePropagatesTheError(t *testing.T) {
 		t.Errorf("Name = %q, want the directory's name (the marker gave none)", p.Name)
 	}
 }
+
+func cfgRepos(repos ...string) config.Config {
+	cfg := config.Defaults()
+	cfg.Roots = nil
+	cfg.Repos = repos
+	return cfg
+}
+
+// A listed repo needs no marker: the user already named it, so the folder is the repo and the marker is only extra metadata.
+func TestScanExplicitRepoWithoutMarker(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "api")
+	testutil.Init(t, repo)
+
+	projects, err := Scan(cfgRepos(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("projects = %+v, want the listed repo", projects)
+	}
+	p := projects[0]
+	if p.Path != repo || p.Name != "api" || !p.HasRepo || p.MarkerErr != "" {
+		t.Errorf("p = %+v, want a clean repo with no marker warning", p)
+	}
+}
+
+func TestScanExplicitRepoReadsMarker(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "api")
+	testutil.Init(t, repo)
+	testutil.Marker(t, repo, "backend", "work", "sub", false)
+
+	projects, err := Scan(cfgRepos(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Name != "backend" || projects[0].PrimaryGroup != "work" || projects[0].SecondaryGroup != "sub" {
+		t.Errorf("projects = %+v, want the marker metadata", projects)
+	}
+}
+
+func TestScanExplicitRepoBrokenMarkerWarns(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "api")
+	testutil.Init(t, repo)
+	testutil.Marker(t, repo, "", "", "", true)
+
+	projects, err := Scan(cfgRepos(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].MarkerErr == "" {
+		t.Errorf("projects = %+v, want a marker warning", projects)
+	}
+}
+
+// The walk already found it, so the explicit entry must not list it twice; the walk's metadata wins.
+func TestScanExplicitRepoDeduplicatesWalk(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "api")
+	testutil.Init(t, repo)
+	testutil.Marker(t, repo, "from-marker", "", "", false)
+
+	cfg := cfgRoots(root)
+	cfg.Repos = []string{repo}
+	projects, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Name != "from-marker" {
+		t.Errorf("projects = %+v, want one entry with the marker name", projects)
+	}
+}
+
+// A repo inside a root but without a marker is invisible to the walk: listing it explicitly is the point of the key.
+func TestScanExplicitRepoInsideRootWithoutMarker(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "api")
+	testutil.Init(t, repo)
+
+	cfg := cfgRoots(root)
+	cfg.Repos = []string{repo}
+	projects, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Path != repo {
+		t.Errorf("projects = %+v, want the listed repo", projects)
+	}
+}
+
+func TestScanExplicitRepoUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	ok := filepath.Join(dir, "ok")
+	testutil.Init(t, ok)
+	file := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := cfgRepos(filepath.Join(dir, "ghost"), file, "  ", ok)
+	projects, err := Scan(cfg)
+	if len(projects) != 1 || projects[0].Path != ok {
+		t.Errorf("projects = %+v, want only the readable repo", projects)
+	}
+	if err == nil {
+		t.Fatal("Scan = nil error, want a notice about the unreadable repos")
+	}
+	if n := strings.Count(err.Error(), "unreadable repo"); n != 2 {
+		t.Errorf("the error mentions %d unreadable repos, want 2: %q", n, err)
+	}
+}

@@ -58,6 +58,31 @@ func TestPartialOverride(t *testing.T) {
 	}
 }
 
+// A listed repo expands ~ like a root: both are hand-written user paths for the same walk.
+func TestReposExpanded(t *testing.T) {
+	path := write(t, `repos = ["~/dev/api", "/tmp/other", ""]`)
+	cfg, warn := LoadFrom(path)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if len(cfg.Repos) != 3 {
+		t.Fatalf("repos = %v, want 3 entries", cfg.Repos)
+	}
+	if filepath.Base(cfg.Repos[0]) != "api" || strings.HasPrefix(cfg.Repos[0], "~") {
+		t.Errorf("repos[0] = %q, want the expanded home path", cfg.Repos[0])
+	}
+	if cfg.Repos[1] != "/tmp/other" {
+		t.Errorf("repos[1] = %q", cfg.Repos[1])
+	}
+}
+
+func TestReposAbsentStaysEmpty(t *testing.T) {
+	cfg, _ := LoadFrom(write(t, `roots = ["/tmp"]`))
+	if len(cfg.Repos) != 0 {
+		t.Errorf("repos = %v, want none when the key is absent", cfg.Repos)
+	}
+}
+
 func TestMalformed(t *testing.T) {
 	path := write(t, `roots = [`)
 	cfg, warn := LoadFrom(path)
